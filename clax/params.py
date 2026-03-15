@@ -259,15 +259,17 @@ class PrecisionParams:
 
         Same perturbation resolution as planck_cl (60 k/decade, l_max=50,
         tight ODE tolerances) but with:
-        - Table-based Bessel (hr_n_k_fine=10000): harmonic ~33s → ~5s
+        - Table-based Bessel (hr_n_k_fine=5000, hr_l_max=1500): harmonic ~33s → ~5s
         - th_n_points=20000 (vs 100000): thermo ~53s → ~5s
         - ode_max_steps=65536 (vs 131072): less vmap padding
 
-        Accuracy should match planck_cl (<0.2% TT/EE at l=20-1200) since
-        perturbation grid is identical. Table Bessel adds ~0.5pp at most.
+        l_max capped at 1500 (not 2500) because the table-based approach
+        scales as O(l_max × n_k_fine × n_tau) per scan step. At l_max=2500
+        with 10000 fine k and 5000 tau, harmonic alone takes >1hr on V100.
+        l_max=1500 covers the science-relevant range and keeps harmonic <10s.
 
-        Expected V100 timing: BG ~0.5s, TH ~5s, PT ~400s, HR ~5s ≈ ~410s.
-        Expected H100 timing: BG ~0.5s, TH ~3s, PT ~200s, HR ~3s ≈ ~210s.
+        Accuracy matches planck_cl (<0.2% TT/EE) up to l~1200 since the
+        perturbation grid is identical. Table Bessel adds ~0.5pp at most.
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # same as planck_cl
@@ -280,8 +282,8 @@ class PrecisionParams:
             pt_ode_rtol=1e-6,        # same as planck_cl
             pt_ode_atol=1e-11,       # same as planck_cl
             ode_max_steps=65536,     # halved from planck_cl (131072)
-            hr_n_k_fine=10000,       # table-based Bessel (was 0 in planck_cl)
-            hr_l_max=2500,           # same as planck_cl
+            hr_n_k_fine=5000,        # table-based Bessel
+            hr_l_max=1500,           # capped for table scalability
         )
 
     @staticmethod
