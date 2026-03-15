@@ -268,21 +268,21 @@ class PrecisionParams:
           and j_l'(x) tables with T0+T1+T2 transfer contributions. Avoids
           83 separate JIT compilations. ~2.5s harmonic on V100.
 
-        V100 timing (cached): BG 0.5s, TH 2.4s, PT ~40s, HR 2.5s ≈ 45s total.
+        V100 timing (cached): BG 0.5s, TH 1.5s, PT ~28s, HR 1.6s ≈ 32s total.
         Accuracy: <1.5% TT/EE at l≤500, ~7% at l=1000 (perturbation-limited).
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # keep full k range for l coverage
             pt_k_per_decade=20,      # sparse perturbation k-grid (interp compensates)
             pt_tau_n_points=2000,    # sufficient for source resolution
-            th_n_points=5000,        # RECFAST with fewer steps
-            pt_l_max_g=25,           # smaller hierarchy (86 vs 161 state vars)
-            pt_l_max_pol_g=25,
-            pt_l_max_ur=25,
+            th_n_points=3000,        # RECFAST with fewer steps (was 5000)
+            pt_l_max_g=17,           # CLASS default hierarchy (59 vs 83 state vars at l_max=25)
+            pt_l_max_pol_g=17,
+            pt_l_max_ur=17,
             ncdm_q_size=0,           # disable ncdm hierarchy (massless approx, ~3x faster)
             pt_ode_rtol=1e-3,        # aggressive tolerance (33% speedup, <0.1% C_l impact)
             pt_ode_atol=1e-8,
-            ode_max_steps=32768,     # less vmap padding
+            ode_max_steps=1024,      # actual steps ~460, 2x headroom (was 32768)
             hr_n_k_fine=5000,        # fine k-grid for accurate Bessel integrals
             hr_l_max=1500,           # reduced max multipole
         )
