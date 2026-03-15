@@ -279,6 +279,7 @@ class PrecisionParams:
             pt_l_max_g=25,           # smaller hierarchy (86 vs 161 state vars)
             pt_l_max_pol_g=25,
             pt_l_max_ur=25,
+            ncdm_q_size=0,           # disable ncdm hierarchy (massless approx, ~3x faster)
             pt_ode_rtol=1e-3,        # aggressive tolerance (33% speedup, <0.1% C_l impact)
             pt_ode_atol=1e-8,
             ode_max_steps=32768,     # less vmap padding

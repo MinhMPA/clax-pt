@@ -1243,7 +1243,10 @@ def perturbations_solve(
     l_max_ur = prec.pt_l_max_ur
 
     # ncdm quadrature (momentum bins, weights, mass, dlnf0/dlnq)
-    n_q_ncdm = prec.ncdm_q_size if params.N_ncdm > 0 and params.m_ncdm > 0 else 0
+    # N_ncdm is static (int, not JAX-traced), safe for Python branching.
+    # m_ncdm is traced, so we don't branch on it — N_ncdm=0 is sufficient
+    # to disable the ncdm hierarchy.
+    n_q_ncdm = prec.ncdm_q_size if params.N_ncdm > 0 else 0
     l_max_ncdm = prec.pt_l_max_ncdm
 
     idx = _build_indices(l_max_g, l_max_pol, l_max_ur, n_q_ncdm, l_max_ncdm)

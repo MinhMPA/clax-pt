@@ -308,7 +308,8 @@ def _pretabulate_ncdm(
     T_ncdm_K = params.T_ncdm_over_T_cmb * params.T_cmb
     # Convert T_ncdm to eV: k_B * T [K] / eV
     T_ncdm_eV = const.k_B_SI * T_ncdm_K / const.eV_SI
-    M = params.m_ncdm / params.N_ncdm / T_ncdm_eV  # mass per species in units of T_ncdm
+    N_ncdm_safe = max(params.N_ncdm, 1)  # avoid division by zero when N_ncdm=0
+    M = params.m_ncdm / N_ncdm_safe / T_ncdm_eV  # mass per species in units of T_ncdm
 
     # Normalization factor to convert dimensionless integral to CLASS density units.
     #

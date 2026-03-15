@@ -95,7 +95,7 @@ def compute_pk(
     th = thermodynamics_solve(params, prec, bg)
 
     l_max = prec.pt_l_max_g
-    n_q_ncdm = prec.ncdm_q_size if params.N_ncdm > 0 and params.m_ncdm > 0 else 0
+    n_q_ncdm = prec.ncdm_q_size if params.N_ncdm > 0 else 0
     l_max_ncdm = prec.pt_l_max_ncdm
     idx = _build_indices(l_max, prec.pt_l_max_pol_g, prec.pt_l_max_ur,
                          n_q_ncdm, l_max_ncdm)
