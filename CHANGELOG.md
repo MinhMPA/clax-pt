@@ -1,6 +1,6 @@
 # clax Development Progress
 
-## Status: Speed-optimized fit_cl preset (43s V100) + full accuracy pipeline
+## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
@@ -62,33 +62,51 @@ free-streaming range, accumulating a large effect.
 5. lax.scan over 83 sparse l-values for memory efficiency
 
 **fit_cl preset** (params.py): Targeting <2% C_l for HMC/fitting:
-- 20 k/decade, l_max_g=25, 2000 tau points, 5000 thermo points
+- 20 k/decade, l_max_g=17 (CLASS default), 2000 tau points, 3000 thermo points
 - ncdm_q_size=0 (massless ncdm approximation, ~3x faster perturbations)
 - rtol=1e-3 (33% perturbation speedup, <0.1% C_l impact)
-- ode_max_steps=32768, hr_n_k_fine=5000, hr_l_max=1500
+- ode_max_steps=1024 (actual steps ~460, was 32768 → 4x faster JIT compile)
+- hr_n_k_fine=5000, hr_l_max=1500
 
 **V100 timing** (cached, fit_cl preset):
 | Stage | Time |
 |-------|------|
 | Background | 0.5s |
-| Thermodynamics | 2.8s |
-| Perturbations | 37.5s |
-| Harmonic | 2.6s |
-| **Total** | **43.4s** |
+| Thermodynamics | 1.5s |
+| Perturbations | 30s |
+| Harmonic | 2.4s |
+| **Total** | **~34s** |
 
-(Was ~487s on H100 with planck_cl preset before optimization. **11x speedup.**)
+(Was ~487s on H100 with planck_cl preset before optimization. **14x speedup.**)
+JIT compile: ~80s first call (was 300+s with max_steps=32768).
 
 **Accuracy** (fit_cl, vs CLASS RECFAST, fiducial LCDM):
 
 | l | TT err% | EE err% | TE err% |
 |---|---------|---------|---------|
-| 20 | -1.1 | -1.5 | -1.1 |
-| 100 | -0.7 | -0.3 | +0.2 |
-| 500 | -0.8 | -0.8 | +0.6 |
-| 1000 | -6.8 | -1.6 | +10 |
+| 20 | -1.3 | -1.5 | -1.5 |
+| 100 | -0.7 | -0.3 | +0.1 |
+| 500 | -1.0 | -0.8 | +0.7 |
+| 1000 | -7.1 | -1.8 | +10 |
 
 TT/EE <1.5% at l≤500 (within fit_cl target). l=1000 error is perturbation-limited
-(20 k/decade, l_max_g=25). l=1000 TE error from zero-crossing near there.
+(20 k/decade). l=1000 TE error from zero-crossing near there.
+
+**Optimization attempts and findings** (Phase 2-4 from SPEED_PROMPT.txt):
+- **Phase 2 (fused SaveAt fn)**: FAILED. 2.2x slower because SaveAt(fn=...) runs
+  extraction sequentially inside ODE loop, losing GPU vmap parallelism. Extraction
+  is only 3% of perturbation time (0.9s/30.9s), so fusing provides no benefit.
+- **Phase 3 (float32)**: NOT FEASIBLE with jax_enable_x64=True. Python float
+  literals promote all computations back to float64. Would require rewriting every
+  constant in perturbation RHS as jnp.float32 or disabling x64 globally.
+- **Phase 4 (reduced n_k_fine)**: No benefit. Harmonic already 2.4s; n_k_fine=3000
+  degrades accuracy at l>500 without saving time.
+- **DirectAdjoint**: 1.7x slower than RecursiveCheckpointAdjoint for forward pass.
+- **Explicit solvers (Tsit5, Dopri5, Dopri8)**: System too stiff, exceed max_steps.
+- **Kvaerno3**: Also exceeds max_steps at 2048.
+- **Bottom line**: Perturbation ODE is the floor at ~30s on V100 (100 k-modes ×
+  ~460 Kvaerno5 steps × 59-dim state). Not reducible without fewer k-modes
+  (accuracy cost) or float32 (infeasible with x64).
 
 ### Feb 15, 2026: Multi-cosmology validation + chunked vmap
 

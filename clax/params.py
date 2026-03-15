@@ -268,8 +268,9 @@ class PrecisionParams:
           and j_l'(x) tables with T0+T1+T2 transfer contributions. Avoids
           83 separate JIT compilations. ~2.5s harmonic on V100.
 
-        V100 timing (cached): BG 0.5s, TH 1.5s, PT ~28s, HR 1.6s ≈ 32s total.
+        V100 timing (cached): BG 0.5s, TH 1.5s, PT ~30s, HR 1.7s ≈ 34s total.
         Accuracy: <1.5% TT/EE at l≤500, ~7% at l=1000 (perturbation-limited).
+        Perturbation ODE is the floor (~30s for 100 k-modes × Kvaerno5 × 59 vars).
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # keep full k range for l coverage
