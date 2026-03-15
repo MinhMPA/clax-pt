@@ -1,6 +1,6 @@
 # clax Development Progress
 
-## Status: Speed-optimized fit_cl preset (55s V100) + full accuracy pipeline
+## Status: Speed-optimized fit_cl preset (43s V100) + full accuracy pipeline
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
@@ -63,6 +63,7 @@ free-streaming range, accumulating a large effect.
 
 **fit_cl preset** (params.py): Targeting <2% C_l for HMC/fitting:
 - 20 k/decade, l_max_g=25, 2000 tau points, 5000 thermo points
+- ncdm_q_size=0 (massless ncdm approximation, ~3x faster perturbations)
 - rtol=1e-3 (33% perturbation speedup, <0.1% C_l impact)
 - ode_max_steps=32768, hr_n_k_fine=5000, hr_l_max=1500
 
@@ -70,23 +71,23 @@ free-streaming range, accumulating a large effect.
 | Stage | Time |
 |-------|------|
 | Background | 0.5s |
-| Thermodynamics | 2.4s |
-| Perturbations | ~50s |
-| Harmonic | 2.5s |
-| **Total** | **~55s** |
+| Thermodynamics | 2.8s |
+| Perturbations | 37.5s |
+| Harmonic | 2.6s |
+| **Total** | **43.4s** |
 
-(Was ~487s on H100 with planck_cl preset before optimization.)
+(Was ~487s on H100 with planck_cl preset before optimization. **11x speedup.**)
 
 **Accuracy** (fit_cl, vs CLASS RECFAST, fiducial LCDM):
 
 | l | TT err% | EE err% | TE err% |
 |---|---------|---------|---------|
-| 20 | -1.1 | -1.6 | -1.2 |
-| 100 | -0.7 | -0.4 | +0.2 |
-| 500 | -1.0 | -0.7 | +0.5 |
-| 1000 | -7.1 | -1.8 | +12 |
+| 20 | -1.1 | -1.5 | -1.1 |
+| 100 | -0.7 | -0.3 | +0.2 |
+| 500 | -0.8 | -0.8 | +0.6 |
+| 1000 | -6.8 | -1.6 | +10 |
 
-TT/EE <1.5% at l<=500 (within fit_cl target). l=1000 error is perturbation-limited
+TT/EE <1.5% at l≤500 (within fit_cl target). l=1000 error is perturbation-limited
 (20 k/decade, l_max_g=25). l=1000 TE error from zero-crossing near there.
 
 ### Feb 15, 2026: Multi-cosmology validation + chunked vmap
