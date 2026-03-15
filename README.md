@@ -14,7 +14,7 @@ The goal is a differentiable alternative to [CLASS](https://github.com/lesgourg/
 
 ## Status
 
-Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. JIT-compiled: 487s cached on H100-80GB. 95+ tests passing. See [CHANGELOG.md](CHANGELOG.md) for details.
+Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. **34s on V100** with `fit_cl` preset (HMC-ready); 487s with `planck_cl` for science-grade accuracy. 95+ tests passing. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ## Accuracy comparison against CLASS v3.3.4
 
@@ -79,15 +79,16 @@ Validated at 10 LCDM parameter variations (omega_b, omega_cdm, h, n_s, tau_reio 
 | Perturbation ODE (Phi, Psi) | 0.01-0.25% | Gauge-corrected at recombination |
 | AD gradients (dP(k)/d(params)) | 0.03% | vs finite differences |
 
-### Performance (H100-80GB, planck_cl preset)
+### Performance
 
-| Step | 1st call (compile) | Cached |
-|------|-------------------|--------|
-| background | 8s | **1s** |
-| thermodynamics | 66s | **53s** |
-| perturbations | 810s | **401s** |
-| harmonic | 68s | **33s** |
-| **TOTAL** | **952s** | **487s** |
+Two presets for different use cases:
+
+| Preset | Background | Thermo | Perturbations | Harmonic | **Total** | GPU |
+|--------|-----------|--------|--------------|----------|-----------|-----|
+| **fit_cl** | 0.5s | 1.5s | 30s | 2.4s | **34s** | V100 |
+| planck_cl | 1s | 53s | 401s | 33s | 487s | H100 |
+
+`fit_cl` uses 20 k/decade, l_max=17, table-based Bessel (all l at once), rtol=1e-3, max_steps=1024. Suitable for HMC/fitting at <1.5% TT/EE accuracy (l<=500). `planck_cl` gives sub-0.2% science-grade accuracy. All times are JIT-cached (second call onwards).
 
 ## Quick start
 
@@ -182,12 +183,13 @@ CosmoParams --> background --> thermodynamics --> perturbations --> primordial
 
 `PrecisionParams` provides four presets controlling the accuracy/speed tradeoff:
 
-| Preset        | k/decade | l_max | k_max  | Use case                 |
-|---------------|----------|-------|--------|--------------------------|
-| `fast_cl()`   | 15       | 25    | 0.15   | Quick iteration, testing |
-| `medium_cl()` | 20       | 50    | 0.3    | Moderate accuracy        |
-| `planck_cl()` | 60       | 50    | 1.0    | Planck-quality C_l       |
-| `science_cl()`| 200      | 50    | 0.35   | Sub-percent C_l          |
+| Preset        | k/decade | l_max | k_max  | Time   | Use case                 |
+|---------------|----------|-------|--------|--------|--------------------------|
+| **`fit_cl()`**| 20       | 17    | 1.0    | **34s**| HMC / fitting (<1.5%)    |
+| `fast_cl()`   | 15       | 25    | 0.15   | ~60s   | Quick iteration, testing |
+| `medium_cl()` | 20       | 50    | 0.3    | ~120s  | Moderate accuracy        |
+| `planck_cl()` | 60       | 50    | 1.0    | ~487s  | Planck-quality (<0.2%)   |
+| `science_cl()`| 200      | 50    | 0.35   | ~600s  | Sub-percent C_l          |
 
 For science-grade results, use `compute_cl_tt_interp` / `compute_cl_ee_interp` which interpolate source functions to a fine k-grid (10000 points) before computing the transfer integral. This is robust regardless of the perturbation k-density.
 
@@ -208,7 +210,7 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 
 ## Known limitations
 
-- **Speed for HMC**: 487s (cached) for planck_cl preset on H100. Perturbation ODE is the bottleneck (~400s for 300 k-modes with adaptive Kvaerno5 solver). Target for HMC is 30-60s — needs fewer k-modes, reduced tau grid, or fixed-step solver.
+- **Speed**: `fit_cl` preset runs in 34s on V100 (HMC-ready). Perturbation ODE is the floor at ~30s for 100 k-modes. Further speedup requires fewer k-modes or float32 (currently infeasible with `jax_enable_x64=True`). `planck_cl` at 487s for science-grade work.
 - **TT l=400-800**: +0.10-0.18% residual from SW+Doppler source amplitude (~0.06% excess at k~0.03). Comparable to CAMB-CLASS inter-code variation (~0.07%).
 - **TT l>1200**: Degrades due to k-integration under-resolution (Bessel oscillation period constant in k, but log-uniform grid spacing grows). Hybrid linear/log k-grid would fix this.
 - **EE l=20-30**: ~0.2% from RECFAST visibility function bias. HyRec recombination would improve to sub-0.1%.
