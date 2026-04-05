@@ -1,4 +1,15 @@
-"""Test thermodynamics module against CLASS reference data."""
+"""Tests thermodynamics-layer forward behavior.
+
+Contract:
+- Thermodynamics quantities and recombination-era functions match the documented CLASS-derived references.
+
+Scope:
+- Covers ``z_star``, ``z_rec``, ionization history, and visibility behavior.
+- Excludes background, perturbation, and gradient contracts owned elsewhere.
+
+Notes:
+- These tests use CLASS-generated reference data and intentionally forward-only assertions.
+"""
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -8,7 +19,7 @@ import numpy as np
 import pytest
 
 from clax.background import background_solve
-from clax.thermodynamics import thermodynamics_solve, xe_of_z
+from clax.thermodynamics import thermodynamics_solve
 from clax.params import CosmoParams, PrecisionParams
 
 
@@ -20,24 +31,28 @@ PREC = PrecisionParams(
 
 @pytest.fixture(scope="module")
 def bg():
+    """Compute the fiducial background state once for this module."""
     return background_solve(CosmoParams(), PREC)
 
 
 @pytest.fixture(scope="module")
 def th(bg):
+    """Compute the fiducial thermodynamics state once for this module."""
     return thermodynamics_solve(CosmoParams(), PREC, bg)
 
 
 class TestThermoScalars:
+    """Tests thermodynamics scalar quantities."""
+
     def test_z_star(self, th, lcdm_derived):
-        """z_star (max visibility) should match CLASS to < 1%."""
+        """``z_star`` matches CLASS; expects <1% relative error."""
         ref = lcdm_derived['z_star']
         val = float(th.z_star)
         rel_err = abs(val - ref) / ref
         assert rel_err < 0.01, f"z_star: {val:.1f} vs CLASS {ref:.1f}, err={rel_err:.2%}"
 
     def test_z_rec(self, th, lcdm_derived):
-        """z_rec (optical depth = 1) should match CLASS to < 2%."""
+        """``z_rec`` matches CLASS; expects <2% relative error."""
         ref = lcdm_derived['z_rec']
         val = float(th.z_rec)
         rel_err = abs(val - ref) / ref
@@ -45,17 +60,15 @@ class TestThermoScalars:
 
 
 class TestIonizationFraction:
+    """Tests ionization-fraction behavior."""
+
     def test_xe_high_z(self, th):
-        """At z=3000, x_e should be close to fully ionized (~1.08)."""
+        """``x_e(z=3000)`` is near full ionization; expects a value near 1.08."""
         xe = float(th.xe_of_loga.evaluate(jnp.log(jnp.array(1.0/3001.0))))
         assert abs(xe - 1.08) < 0.05, f"xe(z=3000) = {xe:.4f}, expected ~1.08"
 
     def test_xe_recombination(self, th, lcdm_thermo_ref):
-        """x_e during recombination (z=800-1500) should match CLASS to < 30%.
-
-        The MB95 simplified recombination model is less accurate than full RECFAST,
-        so we use a looser tolerance here.
-        """
+        """``x_e`` during recombination matches CLASS; expects <30% relative error at the probe redshifts."""
         ref_z = lcdm_thermo_ref['z']
         ref_xe = lcdm_thermo_ref['x_e']
 
@@ -74,13 +87,14 @@ class TestIonizationFraction:
                 )
 
     def test_xe_reionization(self, th):
-        """At z=0, x_e should be fully reionized (~1.16)."""
+        """``x_e(z=0)`` is fully reionized; expects a value near 1.16."""
         xe = float(th.xe_of_loga.evaluate(jnp.array(0.0)))
         assert abs(xe - 1.16) < 0.02, f"xe(z=0) = {xe:.4f}, expected ~1.16"
 
 
 class TestVisibility:
+    """Tests visibility-function behavior."""
+
     def test_visibility_peaks_at_recombination(self, th):
-        """Visibility function should peak near z~1090."""
-        # z_star should be within 2% of 1090
+        """The visibility function peaks near recombination; expects ``z_star`` close to 1090."""
         assert abs(float(th.z_star) - 1090) < 30, f"z_star = {float(th.z_star):.1f}"
