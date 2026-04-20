@@ -25,6 +25,7 @@ from clax.perturbations import MatterPerturbationResult, PerturbationResult, Ten
 from clax.primordial import primordial_scalar_pk, primordial_tensor_pk  # noqa: F401
 from clax.harmonic import compute_cl_bb, compute_cl_tt, compute_cl_ee, compute_cl_te, compute_cls_all, compute_cls_all_fast  # noqa: F401
 from clax.transfer import compute_pk_from_perturbations, compute_linear_matter_pk_from_perturbations  # noqa: F401
+from clax.lensing import compute_cl_pp, compute_cl_pp_nonlinear, lens_cls  # noqa: F401
 
 import functools
 from dataclasses import dataclass, replace as dataclass_replace

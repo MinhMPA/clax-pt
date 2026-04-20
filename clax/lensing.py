@@ -662,6 +662,177 @@ def compute_cl_pp_source_limber(
     return jnp.concatenate([jnp.zeros(2), cl_2_to_lmax])
 
 
+
+# ---------------------------------------------------------------------------
+# Nonlinear correction helpers
+# ---------------------------------------------------------------------------
+
+def compute_nl_correction_halofit(
+    params: CosmoParams,
+    bg: BackgroundResult,
+    pt: PerturbationResult,
+    z_ref: float = 0.0,
+) -> Float[Array, "Nk"]:
+    """Compute P_NL/P_lin ratio using Halofit on the perturbation k-grid.
+
+    Args:
+        params: cosmological parameters
+        bg: background results (Omega fractions)
+        pt: perturbation results (k_grid, delta_m)
+        z_ref: redshift at which to evaluate the ratio
+
+    Returns:
+        P_NL(k)/P_lin(k) at z_ref, shape (Nk,), on pt.k_grid
+    """
+    from clax.nonlinear import compute_pk_nonlinear
+    from clax.transfer import compute_linear_matter_pk_from_perturbations
+
+    k_grid = pt.k_grid  # Mpc^-1
+    pk_lin = compute_linear_matter_pk_from_perturbations(
+        pt, bg, params, k_grid, z=z_ref)
+
+    Omega_m_0 = bg.Omega_b + bg.Omega_cdm + bg.Omega_ncdm
+    fnu = bg.Omega_ncdm / jnp.maximum(Omega_m_0, 1e-30)
+
+    pk_nl = compute_pk_nonlinear(
+        k_grid, pk_lin,
+        Omega_m_0=Omega_m_0,
+        Omega_lambda_0=bg.Omega_lambda + bg.Omega_de,
+        Omega_r_0=bg.Omega_g + bg.Omega_ur,
+        w0=params.w0,
+        wa=params.wa,
+        fnu=fnu,
+        h=params.h,
+        z=z_ref,
+    )
+
+    return jnp.where(pk_lin > 0, pk_nl / pk_lin, 1.0)
+
+
+def compute_nl_correction_ept(
+    params: CosmoParams,
+    bg: BackgroundResult,
+    pt: PerturbationResult,
+    z_ref: float = 0.0,
+    ept_prec=None,
+    cs0: float = 0.0,
+) -> Float[Array, "Nk"]:
+    """Compute P_NL/P_lin ratio using EPT 1-loop on the perturbation k-grid.
+
+    Runs ``compute_ept_from_clax`` on the EPT k-grid, computes
+    ``pk_mm_real / pk_lin``, and interpolates the ratio to ``pt.k_grid``.
+
+    Args:
+        params: cosmological parameters
+        bg: background results
+        pt: perturbation results
+        z_ref: redshift for the 1-loop computation
+        ept_prec: EPTPrecisionParams (default settings if None)
+        cs0: EFT counterterm sound speed in (Mpc/h)^2
+
+    Returns:
+        P_NL(k)/P_lin(k) at z_ref, shape (Nk,), on pt.k_grid
+    """
+    from clax.ept import (
+        compute_ept_from_clax, pk_mm_real, ept_kgrid,
+        EPTPrecisionParams,
+    )
+    from clax.interpolation import CubicSpline
+    from clax.transfer import compute_linear_matter_pk_from_perturbations
+
+    if ept_prec is None:
+        ept_prec = EPTPrecisionParams()
+
+    # compute_ept_from_clax currently uses delta_m at the last tau step
+    # (z≈0) regardless of the z argument, so nonzero z_ref would produce
+    # a mixed-redshift ratio.  Reject until the bridge is z-aware.
+    if z_ref != 0.0:
+        raise NotImplementedError(
+            "EPT nonlinear correction currently only supports z_ref=0.0 "
+            "(compute_ept_from_clax uses delta_m at z≈0 internally)")
+
+    h = float(params.h)
+
+    # EPT computation on its own k-grid
+    ept = compute_ept_from_clax(params, bg, pt, z=z_ref, prec=ept_prec)
+    pk_nl_h = pk_mm_real(ept, cs0=cs0)  # (Mpc/h)^3 on EPT k-grid
+
+    # EPT k-grid in Mpc^-1
+    k_h = ept_kgrid(ept_prec)            # h/Mpc
+    k_ept_mpc = jnp.array(k_h) * h       # Mpc^-1
+
+    # Restrict to the k-range actually solved in perturbations to avoid
+    # out-of-range errors from compute_linear_matter_pk_from_perturbations.
+    k_pt_min = float(pt.k_grid[0])
+    k_pt_max = float(pt.k_grid[-1])
+    in_range = (k_ept_mpc >= k_pt_min) & (k_ept_mpc <= k_pt_max)
+    k_eval = k_ept_mpc[in_range]
+    pk_nl_eval = pk_nl_h[in_range]
+
+    pk_lin_mpc = compute_linear_matter_pk_from_perturbations(
+        pt, bg, params, k_eval, z=z_ref)
+    pk_lin_h = pk_lin_mpc * h ** 3        # (Mpc/h)^3
+
+    # Ratio on the overlapping portion of the EPT k-grid
+    ratio_eval = jnp.where(pk_lin_h > 0, pk_nl_eval / pk_lin_h, 1.0)
+
+    # Interpolate ratio to perturbation k-grid via cubic spline in log-k
+    log_k_eval = jnp.log(k_eval)
+    log_k_pt = jnp.log(pt.k_grid)
+    spline = CubicSpline(log_k_eval, ratio_eval)
+    ratio_pt = spline.evaluate(log_k_pt)
+
+    # Outside evaluated range, default to 1.0 (linear)
+    k_min_eval = float(k_eval[0])
+    k_max_eval = float(k_eval[-1])
+    ratio_pt = jnp.where(
+        (pt.k_grid >= k_min_eval) & (pt.k_grid <= k_max_eval),
+        ratio_pt, 1.0)
+
+    return ratio_pt
+
+
+def compute_cl_pp_nonlinear(
+    pt: PerturbationResult,
+    params: CosmoParams,
+    bg: BackgroundResult,
+    l_values: Float[Array, "Nl"],
+    method: str = "halofit",
+    z_ref: float = 0.0,
+    cs0: float = 0.0,
+    ept_prec=None,
+) -> Float[Array, "Nl"]:
+    """Compute C_l^pp with nonlinear corrections.
+
+    Convenience wrapper that computes the nl_correction ratio using the
+    chosen method and passes it to ``compute_cl_pp``.
+
+    Args:
+        pt: perturbation results
+        params: cosmological parameters
+        bg: background results
+        l_values: multipoles
+        method: ``"halofit"`` or ``"ept"``
+        z_ref: reference redshift for nonlinear computation
+        cs0: EFT counterterm (only used for method="ept")
+        ept_prec: EPTPrecisionParams (only used for method="ept")
+
+    Returns:
+        C_l^phiphi at each l in l_values
+    """
+    if method == "halofit":
+        nl_pk_ratio = compute_nl_correction_halofit(params, bg, pt, z_ref)
+    elif method == "ept":
+        nl_pk_ratio = compute_nl_correction_ept(
+            params, bg, pt, z_ref, ept_prec, cs0)
+    else:
+        raise ValueError(f"Unknown nonlinear method: {method!r}")
+
+    return compute_cl_pp(pt, params, bg, l_values,
+                         nl_pk_ratio=nl_pk_ratio, z_ref=z_ref)
+
+
+
 # =============================================================================
 # Wigner d-matrix recurrence coefficients (Kostelec & Rockmore 2003)
 # cf. CLASS lensing.c:1256-1964
