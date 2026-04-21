@@ -89,6 +89,8 @@ def compute_cl_pp_fast(
     params: CosmoParams,
     bg: BackgroundResult,
     l_max: int,
+    nl_pk_ratio: Float[Array, "Nk"] | None = None,
+    z_ref: float = 0.0,
 ) -> Float[Array, "Nl"]:
     """Compute C_l^phiphi for l=0..l_max via a single lax.scan over l.
 
@@ -100,11 +102,17 @@ def compute_cl_pp_fast(
     This replaces the Python for-loop + per-point ``spherical_jl`` in
     ``compute_cl_pp`` with a single compiled ``lax.scan``.
 
+    Note: uses upward Bessel recurrence which is inaccurate at l >= 300
+    (spurious values in the classically forbidden region 0.7l < x < l).
+    For accurate high-l results, use ``compute_cl_pp_vmap`` instead.
+
     Args:
         pt: perturbation results (source functions, k/tau grids)
         params: cosmological parameters
         bg: background results
         l_max: maximum multipole (returns C_l for l=0..l_max)
+        nl_pk_ratio: P_NL(k)/P_lin(k) ratio on pt.k_grid, or None
+        z_ref: reference redshift for NL growth-factor rescaling
 
     Returns:
         C_l^phiphi array of shape (l_max+1,), indexed by l (l=0,1 are zero)
@@ -122,7 +130,18 @@ def compute_cl_pp_fast(
     dlnk = jnp.diff(log_k)
     P_R = primordial_scalar_pk(k_grid, params)
 
-    S_dtau = pt.source_lens * dtau_mid[None, :]  # (Nk, Ntau)
+    # Pre-apply NL correction to source if requested
+    if nl_pk_ratio is not None:
+        loga_grid = bg.loga_of_tau.evaluate(tau_grid)
+        D_of_tau = bg.D_of_loga.evaluate(loga_grid)
+        loga_ref = jnp.log(1.0 / (1.0 + z_ref))
+        D_ref = bg.D_of_loga.evaluate(jnp.atleast_1d(loga_ref))[0]
+        D_ratio_sq = (D_of_tau / D_ref) ** 2
+        nl_corr = jnp.sqrt(jnp.maximum(
+            1.0 + (nl_pk_ratio[:, None] - 1.0) * D_ratio_sq[None, :], 0.0))
+        S_dtau = pt.source_lens * nl_corr * dtau_mid[None, :]
+    else:
+        S_dtau = pt.source_lens * dtau_mid[None, :]  # (Nk, Ntau)
 
     # x = k * chi for all (k, tau) pairs
     x_grid = k_grid[:, None] * chi_grid[None, :]  # (Nk, Ntau)
