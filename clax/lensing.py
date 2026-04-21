@@ -163,6 +163,8 @@ def compute_cl_pp_vmap(
     params: CosmoParams,
     bg: BackgroundResult,
     l_max: int,
+    nl_pk_ratio: Float[Array, "Nk"] | None = None,
+    z_ref: float = 0.0,
     n_x: int = 50000,
     x_max: float = 15000.0,
 ) -> Float[Array, "Nl"]:
@@ -182,6 +184,8 @@ def compute_cl_pp_vmap(
         params: cosmological parameters
         bg: background results
         l_max: maximum multipole (returns C_l for l=0..l_max)
+        nl_pk_ratio: P_NL(k)/P_lin(k) ratio on pt.k_grid, or None
+        z_ref: reference redshift for NL growth-factor rescaling
         n_x: Bessel table x-grid points (default 50000)
         x_max: maximum x in table (default 15000)
 
@@ -203,7 +207,18 @@ def compute_cl_pp_vmap(
     dlnk = jnp.diff(log_k)
     P_R = primordial_scalar_pk(k_grid, params)
 
-    S_dtau = pt.source_lens * dtau_mid[None, :]  # (Nk, Ntau)
+    # Pre-apply NL correction to source if requested
+    if nl_pk_ratio is not None:
+        loga_grid = bg.loga_of_tau.evaluate(tau_grid)
+        D_of_tau = bg.D_of_loga.evaluate(loga_grid)
+        loga_ref = jnp.log(1.0 / (1.0 + z_ref))
+        D_ref = bg.D_of_loga.evaluate(jnp.atleast_1d(loga_ref))[0]
+        D_ratio_sq = (D_of_tau / D_ref) ** 2
+        nl_corr = jnp.sqrt(jnp.maximum(
+            1.0 + (nl_pk_ratio[:, None] - 1.0) * D_ratio_sq[None, :], 0.0))
+        S_dtau = pt.source_lens * nl_corr * dtau_mid[None, :]
+    else:
+        S_dtau = pt.source_lens * dtau_mid[None, :]  # (Nk, Ntau)
 
     # 1. Build Bessel table (j_l AND j_l') on sparse l-grid
     x_max_auto = float(jnp.max(k_grid) * tau_0 * 1.05)
