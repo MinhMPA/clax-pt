@@ -274,6 +274,136 @@ def compute_cl_pp_vmap(
     return jnp.concatenate([jnp.zeros(2), cl_all])
 
 
+
+def compute_cl_pp_limber(
+    pt: PerturbationResult,
+    params: CosmoParams,
+    bg: BackgroundResult,
+    th,
+    l_max: int,
+    n_chi: int = 500,
+) -> Float[Array, "Nl"]:
+    """Compute C_l^phiphi via the Limber approximation and Poisson equation.
+
+    Uses the ABCMB approach (Zhou, Giovanetti & Liu, arXiv:2602.15104, Eq.B.24-B.25):
+
+        P_psi(k, z) = 9/(8 pi^2) * Omega_m(z)^2 * (aH)^4 * P(k,z) / k
+
+        C_l^pp = 8 pi^2 / (l+0.5)^3 * integral d(ln a) * chi/aH * W^2 * P_psi
+
+    where W(chi) = (chi_* - chi) / (chi_* chi) is the geometric lensing kernel,
+    ``aH`` is the conformal Hubble rate, and the Limber substitution
+    k = (l+0.5)/chi is applied.
+
+    Accurate to ~3% at l >= 10 (Limber error). No Bessel functions needed.
+
+    The existing ``compute_cl_pp`` uses an incorrect lensing source
+    (``exp(-kappa) * 2*phi`` instead of the Weyl potential with geometric
+    kernel).  This function provides the correct C_l^pp and should be
+    preferred for all applications.
+
+    Args:
+        pt: perturbation results (for P(k,z) evaluation via delta_m)
+        params: cosmological parameters
+        bg: background results
+        th: thermodynamics results (for z_rec / tau_rec)
+        l_max: maximum multipole
+        n_chi: number of integration points (default 500)
+
+    Returns:
+        C_l^phiphi array of shape (l_max+1,), indexed by l (l=0,1 are zero)
+    """
+    from clax.interpolation import CubicSpline as CS
+
+    tau_0 = bg.conformal_age
+    loga_rec = jnp.log(1.0 / (1.0 + th.z_rec))
+    tau_rec = bg.tau_of_loga.evaluate(loga_rec)
+    chi_star = tau_0 - tau_rec
+
+    Omega_m_0 = bg.Omega_b + bg.Omega_cdm + bg.Omega_ncdm
+    H0 = bg.H0  # 1/Mpc
+
+    # Integration grid in ln(a) from recombination to today
+    lna_rec = float(loga_rec)
+    lna_grid = jnp.linspace(lna_rec, 0.0, n_chi)
+    a_grid = jnp.exp(lna_grid)
+    z_grid = 1.0 / a_grid - 1.0
+
+    # Background quantities
+    tau_grid_int = bg.tau_of_loga.evaluate(lna_grid)
+    chi_grid = tau_0 - tau_grid_int
+    H_grid = bg.H_of_loga.evaluate(lna_grid)  # cosmic H(z) in 1/Mpc
+    aH_grid = a_grid * H_grid                  # conformal Hubble
+
+    # Omega_m(z) = Omega_m * (1+z)^3 / (H/H0)^2
+    Om_z_grid = Omega_m_0 * (1.0 + z_grid)**3 / (H_grid / H0)**2
+
+    # Lensing window W(chi) = (chi_* - chi) / (chi_* * chi)
+    chi_safe = jnp.where(chi_grid > 1.0, chi_grid, 1.0)
+    W_grid = jnp.where(chi_grid > 1.0,
+                        (chi_star - chi_grid) / (chi_star * chi_safe), 0.0)
+
+    # l-independent background factor:
+    # bg_part = chi / aH * W^2 * 9/(8pi^2) * Om_z^2 * aH^4
+    bg_part = (chi_grid / aH_grid * W_grid**2
+               * 9.0 / (8.0 * jnp.pi**2) * Om_z_grid**2 * aH_grid**4)
+
+    # Perturbation grid for delta_m interpolation
+    log_k_pt = jnp.log(pt.k_grid)
+    k_min = float(pt.k_grid[0])
+    k_max = float(pt.k_grid[-1])
+    delta_m_table = pt.delta_m  # (Nk_pt, Ntau_pt)
+    tau_pt = pt.tau_grid
+
+    l_arr = jnp.arange(2, l_max + 1, dtype=jnp.float64)
+    n_l = l_max - 1
+    dlna = jnp.diff(lna_grid)
+
+    # Build integrand for all l: loop over chi, vectorize over l
+    integrand_all = jnp.zeros((n_l, n_chi))
+
+    for i_chi in range(n_chi):
+        chi_val = float(chi_grid[i_chi])
+        if chi_val < 1.0:
+            continue
+        bg_val = float(bg_part[i_chi])
+        if abs(bg_val) < 1e-50:
+            continue
+
+        # k_limber for all l at this chi
+        k_all_l = (l_arr + 0.5) / chi_val
+        valid = (k_all_l >= k_min) & (k_all_l <= k_max)
+
+        # Interpolate delta_m(k, tau) at nearest tau
+        tau_val = float(tau_grid_int[i_chi])
+        i_tau = int(jnp.argmin(jnp.abs(tau_pt - tau_val)))
+        dm_at_tau = delta_m_table[:, i_tau]
+
+        dm_spline = CS(log_k_pt, dm_at_tau)
+        log_k_eval = jnp.log(jnp.clip(k_all_l, k_min, k_max))
+        dm_interp = dm_spline.evaluate(log_k_eval)
+
+        P_R = primordial_scalar_pk(jnp.clip(k_all_l, k_min, k_max), params)
+        pk_vals = 2.0 * jnp.pi**2 / k_all_l**3 * P_R * dm_interp**2
+
+        # Contribution: bg_part * pk / k
+        contrib = bg_val * pk_vals / k_all_l
+        contrib = jnp.where(valid, contrib, 0.0)
+        integrand_all = integrand_all.at[:, i_chi].set(contrib)
+
+    # Integrate over d(ln a) for each l
+    cl_arr = jnp.zeros(n_l)
+    for i_l in range(n_l):
+        l_fl = l_arr[i_l]
+        coeff = 8.0 * jnp.pi**2 / (l_fl + 0.5)**3
+        integ = integrand_all[i_l, :]
+        cl_arr = cl_arr.at[i_l].set(
+            coeff * jnp.sum(0.5 * (integ[:-1] + integ[1:]) * dlna))
+
+    return jnp.concatenate([jnp.zeros(2), cl_arr])
+
+
+
 # =============================================================================
 # Wigner d-matrix recurrence coefficients (Kostelec & Rockmore 2003)
 # cf. CLASS lensing.c:1256-1964
