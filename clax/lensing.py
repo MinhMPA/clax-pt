@@ -367,6 +367,7 @@ def compute_cl_pp_limber(
     th,
     l_max: int,
     n_chi: int = 500,
+    nonlinear: bool = False,
 ) -> Float[Array, "Nl"]:
     """Compute C_l^phiphi via the Limber approximation and Poisson equation.
 
@@ -380,12 +381,11 @@ def compute_cl_pp_limber(
     ``aH`` is the conformal Hubble rate, and the Limber substitution
     k = (l+0.5)/chi is applied.
 
-    Accurate to ~3% at l >= 10 (Limber error). No Bessel functions needed.
-
-    The existing ``compute_cl_pp`` uses an incorrect lensing source
-    (``exp(-kappa) * 2*phi`` instead of the Weyl potential with geometric
-    kernel).  This function provides the correct C_l^pp and should be
-    preferred for all applications.
+    When ``nonlinear=True``, P(k,z) is replaced by the Halofit nonlinear
+    P_NL(k,z) at each integration point via ``compute_pk_nonlinear``.
+    Requires ``pt.k_grid`` to extend to k >= 5 Mpc^-1 (matching CLASS's
+    ``nonlinear_min_k_max``).  At high z where sigma(R) < 1, the NL
+    correction is automatically skipped (cf. CLASS fourier.c:1706-1716).
 
     Args:
         pt: perturbation results (for P(k,z) evaluation via delta_m)
@@ -394,6 +394,7 @@ def compute_cl_pp_limber(
         th: thermodynamics results (for z_rec / tau_rec)
         l_max: maximum multipole
         n_chi: number of integration points (default 500)
+        nonlinear: if True, use Halofit P_NL(k,z) instead of P_lin(k,z)
 
     Returns:
         C_l^phiphi array of shape (l_max+1,), indexed by l (l=0,1 are zero)
@@ -444,6 +445,42 @@ def compute_cl_pp_limber(
     n_l = l_max - 1
     dlna = jnp.diff(lna_grid)
 
+    # Precompute NL ratio P_NL/P_lin on the perturbation k-grid at each chi.
+    # Requires k_max >= 5 Mpc^-1 for Halofit sigma(R) convergence
+    # (cf. CLASS precisions.h: nonlinear_min_k_max = 5.0).
+    nl_ratio_spline_at_tau = {}
+    if nonlinear:
+        from clax.nonlinear import compute_pk_nonlinear, _sigma_convergence_check
+        k_max_grid = float(pt.k_grid[-1])
+        if k_max_grid < 4.5:
+            raise ValueError(
+                f"nonlinear=True requires pt_k_max_cl >= 5.0 Mpc^-1 "
+                f"(got k_max={k_max_grid:.2f}). Increase pt_k_max_cl "
+                f"in PrecisionParams for the lensing perturbation solve.")
+        Omega_lambda_0 = bg.Omega_lambda + bg.Omega_de
+        Omega_r_0 = bg.Omega_g + bg.Omega_ur
+        fnu = bg.Omega_ncdm / jnp.maximum(Omega_m_0, 1e-30)
+        ones_ratio = jnp.ones_like(pt.k_grid)
+        for i_chi in range(n_chi):
+            z_val = float(z_grid[i_chi])
+            tau_val = float(tau_grid_int[i_chi])
+            i_tau = int(jnp.argmin(jnp.abs(tau_pt - tau_val)))
+            dm_at_tau = delta_m_table[:, i_tau]
+            P_R_full = primordial_scalar_pk(pt.k_grid, params)
+            pk_lin_full = 2.0 * jnp.pi**2 / pt.k_grid**3 * P_R_full * dm_at_tau**2
+            # Skip Halofit at high z where sigma(R)<1
+            # (cf. CLASS fourier.c:1706-1716: nl_corr_density = 1.0)
+            if not _sigma_convergence_check(log_k_pt, pk_lin_full):
+                nl_ratio_spline_at_tau[i_chi] = CS(log_k_pt, ones_ratio)
+                continue
+            pk_nl_full = compute_pk_nonlinear(
+                pt.k_grid, pk_lin_full,
+                Omega_m_0=Omega_m_0, Omega_lambda_0=Omega_lambda_0,
+                Omega_r_0=Omega_r_0, w0=params.w0, wa=params.wa,
+                fnu=fnu, h=params.h, z=z_val)
+            ratio = jnp.where(pk_lin_full > 0, pk_nl_full / pk_lin_full, 1.0)
+            nl_ratio_spline_at_tau[i_chi] = CS(log_k_pt, ratio)
+
     # Build integrand for all l: loop over chi, vectorize over l
     integrand_all = jnp.zeros((n_l, n_chi))
 
@@ -470,6 +507,13 @@ def compute_cl_pp_limber(
 
         P_R = primordial_scalar_pk(jnp.clip(k_all_l, k_min, k_max), params)
         pk_vals = 2.0 * jnp.pi**2 / k_all_l**3 * P_R * dm_interp**2
+
+        # Apply Halofit nonlinear correction if requested
+        if nonlinear:
+            log_k_limber = jnp.log(jnp.clip(k_all_l, k_min, k_max))
+            nl_ratio_interp = nl_ratio_spline_at_tau[i_chi].evaluate(log_k_limber)
+            nl_ratio_vals = jnp.where(valid, jnp.maximum(nl_ratio_interp, 0.0), 1.0)
+            pk_vals = pk_vals * nl_ratio_vals
 
         # Contribution: bg_part * pk / k
         contrib = bg_val * pk_vals / k_all_l
