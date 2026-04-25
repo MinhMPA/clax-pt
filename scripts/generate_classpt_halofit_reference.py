@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Generate CLASS-PT Halofit reference data for C_l^pp validation.
+"""Generate CLASS Halofit reference data for C_l^pp validation.
 
-Must run in the clax_class-pt_py310forge conda environment:
-    conda run -n clax_class-pt_py310forge python scripts/generate_classpt_halofit_reference.py
+Requires CLASS v3.2.2+ (with the full Limber scheme for accurate C_l^pp
+at l > 1000). Older CLASS versions underestimate C_l^pp by ~20% at
+l = 2500 due to insufficient k_max in the standard q-grid.
+
+    python scripts/generate_classpt_halofit_reference.py
 
 Generates reference_data/classpt_clpp_halofit.npz with:
     ell, pp_lin, pp_halofit, tt_lensed_lin, tt_lensed_halofit
@@ -10,8 +13,9 @@ Generates reference_data/classpt_clpp_halofit.npz with:
 import numpy as np
 from classy import Class
 
+# Matches clax CosmoParams defaults exactly
 common_settings = {
-    'A_s': 2.089e-9,
+    'A_s': 2.1e-9,
     'n_s': 0.9649,
     'tau_reio': 0.052,
     'omega_b': 0.02237,
@@ -21,7 +25,6 @@ common_settings = {
     'N_ur': 2.0328,
     'N_ncdm': 1,
     'm_ncdm': 0.06,
-    'z_pk': 0.61,
 }
 
 l_max = 2500
@@ -31,7 +34,7 @@ print("Computing linear C_l...")
 cosmo_lin = Class()
 cosmo_lin.set(common_settings)
 cosmo_lin.set({
-    'output': 'mPk,lCl,tCl',
+    'output': 'lCl,tCl',
     'lensing': 'Yes',
     'l_switch_limber': 9,
     'non linear': 'none',
@@ -40,12 +43,12 @@ cosmo_lin.compute()
 cl_lin = cosmo_lin.lensed_cl(l_max)
 cosmo_lin.struct_cleanup()
 
-# Halofit NL corrections (mPk forces delta_m computation — required for CLASS-PT)
+# Halofit NL corrections
 print("Computing Halofit C_l...")
 cosmo_hf = Class()
 cosmo_hf.set(common_settings)
 cosmo_hf.set({
-    'output': 'mPk,lCl,tCl',
+    'output': 'lCl,tCl',
     'lensing': 'Yes',
     'l_switch_limber': 9,
     'non linear': 'Halofit',
