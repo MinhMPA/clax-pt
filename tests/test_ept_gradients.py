@@ -74,7 +74,7 @@ def ept_setup():
     k_ept_jax = jnp.array(k_ept)
 
     # Precompute IR decomposition (NumPy, outside JAX trace)
-    pk_nw_np, pk_w_np, sigma2_bao = _ir_resummation_numpy(pk_lin_ept_np, k_ept)
+    pk_nw_np, pk_w_np, sigma2_bao, delta_sigma2_bao = _ir_resummation_numpy(pk_lin_ept_np, k_ept)
     assert np.all(np.isfinite(pk_nw_np)), "pk_nw_np has non-finite values"
     assert np.all(np.isfinite(pk_w_np)), "pk_w_np has non-finite values"
     assert np.isfinite(sigma2_bao), "sigma2_bao is not finite"
@@ -86,7 +86,7 @@ def ept_setup():
         "prec": prec,
         "h": h,
         "fz": fz,
-        "ir_precomputed": (pk_nw_np, pk_w_np, sigma2_bao),
+        "ir_precomputed": (pk_nw_np, pk_w_np, sigma2_bao, delta_sigma2_bao),
     }
 
 

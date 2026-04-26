@@ -1468,10 +1468,10 @@ def compute_ept(
                                 = pk_lin_h × exp(-Σ²k²) + pk_nw × (1 - exp(-Σ²k²))
                   Use this to enable jax.grad() through the IR resummation path:
 
-                      pk_nw_np, pk_w_np, sigma2 = _ir_resummation_numpy(pk_lin_np, k_np)
+                      pk_nw_np, pk_w_np, sigma2, delta_sigma2 = _ir_resummation_numpy(pk_lin_np, k_np)
                       def f(pk_lin):
                           return compute_ept(pk_lin, k_ept, h=h, f=f,
-                                             _ir_precomputed=(pk_nw_np, pk_w_np, sigma2))
+                                             _ir_precomputed=(pk_nw_np, pk_w_np, sigma2, delta_sigma2))
                       grad = jax.grad(f)(pk_lin_ept)  # works!
 
                   Physically correct: the no-wiggle template pk_nw is a property
@@ -1898,10 +1898,12 @@ def pk_gg_l2(
     kh = ept.kh
 
     # Tree: Kaiser formula (b1+fμ²)² projected to L2 via GL quadrature.
-    # With anisotropic Σ_tot(μ), the dd tree term is nonzero (the integral
-    # ∫L2(μ)·p_tree(k,μ) dμ ≠ 0 because p_tree depends on μ through the
-    # damping).  cf. pk_mm_l2 which includes Pk_2_dd.
-    new_l2_tree = ept.Pk_2_vv + b1 * ept.Pk_2_vd + b1 ** 2 * ept.Pk_2_dd
+    # For galaxies the tree ℓ=2 is vv + b1·vd only.  The dd tree component
+    # (Pk_2_dd) is NOT included here: CLASS-PT's pk_mult[26] (the b1² dd
+    # term in pk_gg_l2) is a 1-loop contribution, not tree.  For matter
+    # (pk_mm_l2, b1=1) the dd tree IS included because the bias weighting
+    # is different.  cf. CLASS-PT classy.pyx:1206.
+    new_l2_tree = ept.Pk_2_vv + b1 * ept.Pk_2_vd
 
     P_loop_l2 = (
         ept.Pk_2_vv1

@@ -826,45 +826,6 @@ def compute_nl_correction_ept(
     return ratio_pt
 
 
-def compute_cl_pp_nonlinear(
-    pt: PerturbationResult,
-    params: CosmoParams,
-    bg: BackgroundResult,
-    l_values: Float[Array, "Nl"],
-    method: str = "halofit",
-    z_ref: float = 0.0,
-    cs0: float = 0.0,
-    ept_prec=None,
-) -> Float[Array, "Nl"]:
-    """Compute C_l^pp with nonlinear corrections.
-
-    Convenience wrapper that computes the nl_correction ratio using the
-    chosen method and passes it to ``compute_cl_pp``.
-
-    Args:
-        pt: perturbation results
-        params: cosmological parameters
-        bg: background results
-        l_values: multipoles
-        method: ``"halofit"`` or ``"ept"``
-        z_ref: reference redshift for nonlinear computation
-        cs0: EFT counterterm (only used for method="ept")
-        ept_prec: EPTPrecisionParams (only used for method="ept")
-
-    Returns:
-        C_l^phiphi at each l in l_values
-    """
-    if method == "halofit":
-        nl_pk_ratio = compute_nl_correction_halofit(params, bg, pt, z_ref)
-    elif method == "ept":
-        nl_pk_ratio = compute_nl_correction_ept(
-            params, bg, pt, z_ref, ept_prec, cs0)
-    else:
-        raise ValueError(f"Unknown nonlinear method: {method!r}")
-
-    return compute_cl_pp(pt, params, bg, l_values,
-                         nl_pk_ratio=nl_pk_ratio, z_ref=z_ref)
-
 
 
 # =============================================================================
