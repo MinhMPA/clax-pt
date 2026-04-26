@@ -14,33 +14,12 @@ For the NL/linear ratio with Halofit:
     l>1000:    ratio diverges due to differential Limber weighting of NL corrections
 """
 
-import os
 import pytest
 import numpy as np
 
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-
-from dataclasses import replace as _replace
-
-
-@pytest.fixture(scope="module")
-def pipeline():
-    """Run pipeline with k_max=5 for Halofit support."""
-    from clax import CosmoParams, PrecisionParams
-    from clax.background import background_solve
-    from clax.thermodynamics import thermodynamics_solve
-    from clax.perturbations import perturbations_solve
-
-    prec = _replace(PrecisionParams.fast_cl(),
-                    pt_k_max_cl=5.0,
-                    pt_k_chunk_size=20)
-    params = CosmoParams()
-    bg = background_solve(params, prec)
-    th = thermodynamics_solve(params, prec, bg)
-    pt = perturbations_solve(params, prec, bg, th)
-    return params, bg, th, pt
 
 
 @pytest.fixture(scope="module")
@@ -68,10 +47,10 @@ def class_reference():
 class TestLinearClppAccuracy:
     """Test linear C_l^pp accuracy against CLASS."""
 
-    def test_low_l_accuracy(self, pipeline, class_reference):
+    def test_low_l_accuracy(self, pipeline_fast_cl_k5, class_reference):
         """Linear C_l^pp matches CLASS to <3% for l <= 500."""
         from clax.lensing import compute_cl_pp_limber
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         cl = compute_cl_pp_limber(pt, params, bg, th, l_max=500,
                                   n_chi=500, nonlinear=False)
         cl = np.array(cl)
@@ -85,10 +64,10 @@ class TestLinearClppAccuracy:
                 f"Linear C_l^pp at l={l_val}: {err:.1%} error exceeds 3% "
                 f"(clax={cl[l_val]:.4e}, CLASS={pp_class[l_val]:.4e})")
 
-    def test_high_l_known_limitation(self, pipeline, class_reference):
+    def test_high_l_known_limitation(self, pipeline_fast_cl_k5, class_reference):
         """Document known Limber overestimate at high l (informational)."""
         from clax.lensing import compute_cl_pp_limber
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         cl = compute_cl_pp_limber(pt, params, bg, th, l_max=2500,
                                   n_chi=500, nonlinear=False)
         cl = np.array(cl)
@@ -108,10 +87,10 @@ class TestLinearClppAccuracy:
 class TestNLRatioAccuracy:
     """Test NL/linear ratio accuracy against CLASS-PT reference."""
 
-    def test_halofit_ratio_low_l(self, pipeline):
+    def test_halofit_ratio_low_l(self, pipeline_fast_cl_k5):
         """Halofit NL/linear ratio is physically reasonable at l <= 500."""
         from clax.lensing import compute_cl_pp_limber
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
 
         cl_lin = compute_cl_pp_limber(pt, params, bg, th, l_max=500,
                                       n_chi=500, nonlinear=False)
@@ -129,10 +108,10 @@ class TestNLRatioAccuracy:
                 f"NL/linear ratio at l={l_val}: {ratio:.4f} "
                 f"outside expected range [0.99, 1.20]")
 
-    def test_halofit_ratio_monotonic(self, pipeline):
+    def test_halofit_ratio_monotonic(self, pipeline_fast_cl_k5):
         """Halofit NL/linear ratio increases monotonically with l."""
         from clax.lensing import compute_cl_pp_limber
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
 
         cl_lin = compute_cl_pp_limber(pt, params, bg, th, l_max=500,
                                       n_chi=500, nonlinear=False)
@@ -152,14 +131,14 @@ class TestNLRatioAccuracy:
 class TestPkAccuracy:
     """Test P(k,z) accuracy against CLASS (validates the upstream input)."""
 
-    def test_pk_matches_class(self, pipeline):
+    def test_pk_matches_class(self, pipeline_fast_cl_k5):
         """Dimensionless P(k) Δ²(k,z=0) matches CLASS to <3%."""
         try:
             from classy import Class
         except ImportError:
             pytest.skip("CLASS not available")
 
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         from clax.primordial import primordial_scalar_pk
 
         k_pt = np.array(pt.k_grid)

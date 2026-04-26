@@ -18,24 +18,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from clax import CosmoParams, PrecisionParams
-from clax.background import background_solve
-from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve
 from clax.harmonic import compute_cl_tt, sparse_l_grid
-
-
-PREC = PrecisionParams.fast_cl()
-
-
-@pytest.fixture(scope="module")
-def pipeline():
-    """Run the full pipeline once for all tests in this module."""
-    params = CosmoParams()
-    bg = background_solve(params, PREC)
-    th = thermodynamics_solve(params, PREC, bg)
-    pt = perturbations_solve(params, PREC, bg, th)
-    return params, bg, th, pt
 
 
 # ---------------------------------------------------------------------------
@@ -45,9 +28,9 @@ def pipeline():
 class TestLimberConsistency:
     """Tests Limber and exact-transfer consistency."""
 
-    def test_limber_vs_exact_l200(self, pipeline):
+    def test_limber_vs_exact_l200(self, pipeline_fast_cl):
         """Limber and exact TT paths stay in the same order of magnitude; expects positive finite outputs and ratio within 1e-2 to 1e2."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
 
         # Force exact at l=200 (l_switch=1000 means Limber only kicks in at l~900+)
         cl_exact = compute_cl_tt(pt, params, bg, [200], l_switch=1000, delta_l=50)
@@ -73,9 +56,9 @@ class TestLimberConsistency:
             f"Limber/exact ratio at l=200 = {ratio:.4f}; expected between 1e-2 and 1e2"
         )
 
-    def test_limber_positive(self, pipeline):
+    def test_limber_positive(self, pipeline_fast_cl):
         """Limber TT values are positive; expects positive outputs on the probe grid."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
 
         # l_switch=100 forces Limber at these multipoles
         cl = compute_cl_tt(pt, params, bg, [500, 1000], l_switch=100, delta_l=50)
@@ -119,11 +102,11 @@ class TestSparseLGrid:
 class TestComputeClsAll:
     """Tests ``compute_cls_all`` helper behavior."""
 
-    def test_cls_all_shape(self, pipeline):
+    def test_cls_all_shape(self, pipeline_fast_cl):
         """``compute_cls_all`` returns the documented keys and shapes; expects length ``l_max + 1`` arrays."""
         from clax.harmonic import compute_cls_all
 
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_max = 500
         result = compute_cls_all(pt, params, bg, l_max=l_max)
 
@@ -135,11 +118,11 @@ class TestComputeClsAll:
                 f"result['{key}'] has length {len(arr)}, expected {l_max + 1}"
             )
 
-    def test_cls_all_matches_individual(self, pipeline):
+    def test_cls_all_matches_individual(self, pipeline_fast_cl):
         """``compute_cls_all`` matches the individual TT path; expects <1% relative difference at ``l=100``."""
         from clax.harmonic import compute_cls_all
 
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
 
         # compute_cls_all uses pure exact Bessel (no Limber)
         result = compute_cls_all(pt, params, bg, l_max=500)

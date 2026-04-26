@@ -10,7 +10,6 @@ with Hermite interpolation and is accurate at all l.
 Also benchmarks all three implementations for timing comparison.
 """
 
-import os
 import time
 
 import jax
@@ -21,25 +20,8 @@ import numpy as np
 import pytest
 from scipy.special import spherical_jn
 
-from clax import CosmoParams, PrecisionParams
-from clax.background import background_solve
-from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve
 from clax.lensing import compute_cl_pp, compute_cl_pp_fast, compute_cl_pp_vmap
 from clax.primordial import primordial_scalar_pk
-
-from dataclasses import replace as _dc_replace
-PREC = _dc_replace(PrecisionParams.fast_cl(), pt_k_chunk_size=20)
-
-
-@pytest.fixture(scope="module")
-def pipeline():
-    """Run the pipeline once for all tests."""
-    params = CosmoParams()
-    bg = background_solve(params, PREC)
-    th = thermodynamics_solve(params, PREC, bg)
-    pt = perturbations_solve(params, PREC, bg, th)
-    return params, bg, th, pt
 
 
 def _cl_pp_scipy_reference(pt, params, bg, l_values):
@@ -74,15 +56,15 @@ class TestScipyReference:
     """Validate both implementations against scipy ground truth."""
 
     @pytest.fixture(scope="class")
-    def scipy_ref(self, pipeline):
+    def scipy_ref(self, pipeline_fast_cl):
         """Compute scipy reference at test l-values (expensive, cache per class)."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_values = [2, 5, 10, 50, 100]
         return l_values, _cl_pp_scipy_reference(pt, params, bg, l_values)
 
-    def test_vmap_vs_scipy_low_l(self, pipeline, scipy_ref):
+    def test_vmap_vs_scipy_low_l(self, pipeline_fast_cl, scipy_ref):
         """vmap+Hermite matches scipy at l=2..100 (< 0.1% error)."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_values, cl_ref = scipy_ref
         cl_vmap = compute_cl_pp_vmap(pt, params, bg, l_max=100)
         for i, l in enumerate(l_values):
@@ -90,9 +72,9 @@ class TestScipyReference:
             assert abs(ratio - 1.0) < 1e-3, (
                 f"l={l}: vmap/scipy = {ratio:.6f}, expected ~1.0")
 
-    def test_scan_vs_scipy_low_l(self, pipeline, scipy_ref):
+    def test_scan_vs_scipy_low_l(self, pipeline_fast_cl, scipy_ref):
         """Scan matches scipy at l=2..100 (< 1% — scan is less accurate)."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_values, cl_ref = scipy_ref
         cl_scan = compute_cl_pp_fast(pt, params, bg, l_max=100)
         for i, l in enumerate(l_values):
@@ -104,9 +86,9 @@ class TestScipyReference:
             assert abs(ratio - 1.0) < 0.01, (
                 f"l={l}: scan/scipy = {ratio:.6f}, expected ~1.0")
 
-    def test_original_vs_scan_agreement(self, pipeline):
+    def test_original_vs_scan_agreement(self, pipeline_fast_cl):
         """Original and scan use same recurrence — must agree exactly."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_values = [2, 10, 50, 100, 200]
         cl_orig = compute_cl_pp(pt, params, bg, l_values)
         cl_scan = compute_cl_pp_fast(pt, params, bg, l_max=200)
@@ -119,22 +101,22 @@ class TestScipyReference:
 class TestVmapAccuracy:
     """Detailed accuracy tests for the vmap+Hermite implementation."""
 
-    def test_positivity(self, pipeline):
+    def test_positivity(self, pipeline_fast_cl):
         """C_l^pp must be positive for all l >= 2."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         cl = compute_cl_pp_vmap(pt, params, bg, l_max=500)
         assert jnp.all(cl[2:] > 0), "C_l^pp must be positive for l >= 2"
 
-    def test_monotonic_decrease_low_l(self, pipeline):
+    def test_monotonic_decrease_low_l(self, pipeline_fast_cl):
         """C_l^pp should decrease from l=2 to l~50 (roughly as l^{-4})."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         cl = compute_cl_pp_vmap(pt, params, bg, l_max=50)
         assert float(cl[2]) > float(cl[10]) > float(cl[50]), (
             "C_l^pp should decrease monotonically at low l")
 
-    def test_vmap_vs_scipy_high_l(self, pipeline):
+    def test_vmap_vs_scipy_high_l(self, pipeline_fast_cl):
         """vmap+Hermite matches scipy at l=200, 300, 500 (< 0.1% error)."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_values = [200, 300, 500]
         cl_ref = _cl_pp_scipy_reference(pt, params, bg, l_values)
         cl_vmap = compute_cl_pp_vmap(pt, params, bg, l_max=500)
@@ -147,14 +129,14 @@ class TestVmapAccuracy:
 class TestScanLimitations:
     """Document known accuracy limitations of the scan version."""
 
-    def test_scan_overestimates_high_l(self, pipeline):
+    def test_scan_overestimates_high_l(self, pipeline_fast_cl):
         """Scan overestimates C_l^pp at l >= 300 due to upward recurrence.
 
         The upward Bessel recurrence gives spuriously large j_l for
         x in the transition zone 0.7*l < x < l (classically forbidden
         but not zeroed).  This is a known limitation, NOT a bug.
         """
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         cl_scan = compute_cl_pp_fast(pt, params, bg, l_max=500)
         cl_vmap = compute_cl_pp_vmap(pt, params, bg, l_max=500)
         # Scan should significantly overestimate at l=300 and l=500
@@ -169,9 +151,9 @@ class TestScanLimitations:
 class TestBenchmark:
     """Timing comparison (not assertions, just prints)."""
 
-    def test_timing(self, pipeline):
+    def test_timing(self, pipeline_fast_cl):
         """Print timing for all three implementations."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_max = 500
         l_test = [2, 10, 50, 100, 200]
 

@@ -14,46 +14,28 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from clax import CosmoParams, PrecisionParams
-from clax.background import background_solve
-from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve
 from clax.lensing import (
     compute_cl_pp_limber,
     compute_nl_correction_halofit,
 )
 
-from dataclasses import replace as _dc_replace
-PREC = _dc_replace(PrecisionParams.fast_cl(),
-                    pt_k_max_cl=5.0, pt_k_chunk_size=20)
-
-
-@pytest.fixture(scope="module")
-def pipeline():
-    """Run the full pipeline once for all tests in this module."""
-    params = CosmoParams()
-    bg = background_solve(params, PREC)
-    th = thermodynamics_solve(params, PREC, bg)
-    pt = perturbations_solve(params, PREC, bg, th)
-    return params, bg, th, pt
-
 
 class TestNlCorrectionHalofit:
     """Tests for Halofit nl_correction ratio."""
 
-    def test_shape(self, pipeline):
-        params, bg, _, pt = pipeline
+    def test_shape(self, pipeline_fast_cl_k5):
+        params, _, bg, _, pt = pipeline_fast_cl_k5
         ratio = compute_nl_correction_halofit(params, bg, pt, z_ref=0.0)
         assert ratio.shape == pt.k_grid.shape
 
-    def test_positive(self, pipeline):
-        params, bg, _, pt = pipeline
+    def test_positive(self, pipeline_fast_cl_k5):
+        params, _, bg, _, pt = pipeline_fast_cl_k5
         ratio = compute_nl_correction_halofit(params, bg, pt, z_ref=0.0)
         assert jnp.all(ratio > 0), "Ratio must be positive everywhere"
 
-    def test_linear_at_low_k(self, pipeline):
+    def test_linear_at_low_k(self, pipeline_fast_cl_k5):
         """At very low k (< 0.003 Mpc^-1), P_NL/P_lin should be close to 1."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl_k5
         ratio = compute_nl_correction_halofit(params, bg, pt, z_ref=0.0)
         low_k = pt.k_grid < 0.003
         if jnp.any(low_k):
@@ -62,9 +44,9 @@ class TestNlCorrectionHalofit:
                 f"Low-k ratio should be ~1, got max deviation "
                 f"{float(jnp.max(jnp.abs(low_k_ratios - 1.0))):.4f}")
 
-    def test_enhancement_at_high_k(self, pipeline):
+    def test_enhancement_at_high_k(self, pipeline_fast_cl_k5):
         """At high k, nonlinear P(k) should exceed linear."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl_k5
         ratio = compute_nl_correction_halofit(params, bg, pt, z_ref=0.0)
         high_k = pt.k_grid > 0.3
         if jnp.any(high_k):
@@ -75,9 +57,9 @@ class TestNlCorrectionHalofit:
 class TestClppLimberNonlinear:
     """Tests for compute_cl_pp_limber with nonlinear=True."""
 
-    def test_enhancement_at_high_l(self, pipeline):
+    def test_enhancement_at_high_l(self, pipeline_fast_cl_k5):
         """Nonlinear C_l^pp should exceed linear at high l."""
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         l_max = 500
         cl_lin = np.array(compute_cl_pp_limber(
             pt, params, bg, th, l_max=l_max, nonlinear=False))
@@ -89,15 +71,15 @@ class TestClppLimberNonlinear:
         assert ratio_500 > 1.005, (
             f"l=500 NL/lin ratio should be >1.005, got {ratio_500:.4f}")
 
-    def test_all_positive(self, pipeline):
-        params, bg, th, pt = pipeline
+    def test_all_positive(self, pipeline_fast_cl_k5):
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         cl_nl = np.array(compute_cl_pp_limber(
             pt, params, bg, th, l_max=200, nonlinear=True))
         assert np.all(cl_nl[2:] > 0), "Nonlinear C_l^pp must be positive"
 
-    def test_linear_matches_nonlinear_false(self, pipeline):
+    def test_linear_matches_nonlinear_false(self, pipeline_fast_cl_k5):
         """nonlinear=False should give same result as default."""
-        params, bg, th, pt = pipeline
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         l_max = 100
         cl_default = np.array(compute_cl_pp_limber(
             pt, params, bg, th, l_max=l_max))

@@ -20,26 +20,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from clax import CosmoParams, PrecisionParams
-from clax.background import background_solve
-from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve
 from clax.lensing import compute_cl_pp, lens_cl_tt, lens_cls
 
 REFERENCE_DIR = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
-
-from dataclasses import replace as _dc_replace
-PREC = _dc_replace(PrecisionParams.fast_cl(), pt_k_chunk_size=20)
-
-
-@pytest.fixture(scope="module")
-def pipeline():
-    """Run the full pipeline once for all tests in this module."""
-    params = CosmoParams()
-    bg = background_solve(params, PREC)
-    th = thermodynamics_solve(params, PREC, bg)
-    pt = perturbations_solve(params, PREC, bg, th)
-    return params, bg, th, pt
 
 
 def _load_cls_ref():
@@ -51,9 +34,9 @@ def _load_cls_ref():
 class TestCLpp:
     """Tests lensing-potential spectrum behavior."""
 
-    def test_cl_pp_positive(self, pipeline):
+    def test_cl_pp_positive(self, pipeline_fast_cl):
         """``C_l^pp`` is positive on the probe grid; expects positive values for ``l >= 2``."""
-        params, bg, _, pt = pipeline
+        params, _, bg, _, pt = pipeline_fast_cl
         l_values = [2, 10, 50, 100, 200]
         cl_pp = compute_cl_pp(pt, params, bg, l_values)
         for i, l in enumerate(l_values):

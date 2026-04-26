@@ -14,32 +14,13 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-import clax
-from clax.perturbations import perturbations_solve
 from clax.lensing import compute_cl_pp_limber
-from dataclasses import replace as dc_replace
 
 
 @pytest.fixture(scope="module")
-def pipeline_results():
-    """Run the perturbation solve once for all tests in this module."""
-    params = clax.CosmoParams()  # defaults match reference data exactly
-    prec = dc_replace(clax.PrecisionParams(),
-        pt_k_max_cl=5.0, pt_k_per_decade=15, pt_tau_n_points=1500,
-        pt_l_max_g=10, pt_l_max_pol_g=6, pt_l_max_ur=10,
-        pt_ode_rtol=1e-4, pt_ode_atol=1e-7,
-        ode_max_steps=16384, pt_ode_solver="rodas5", pt_k_chunk_size=20,
-    )
-    bg = clax.background_solve(params, prec)
-    th = clax.thermodynamics_solve(params, prec, bg)
-    pt = perturbations_solve(params, prec, bg, th)
-    return params, prec, bg, th, pt
-
-
-@pytest.fixture(scope="module")
-def cl_pp_results(pipeline_results):
+def cl_pp_results(pipeline_fast_cl_k5):
     """Compute linear and Halofit C_l^pp via Limber."""
-    params, prec, bg, th, pt = pipeline_results
+    params, prec, bg, th, pt = pipeline_fast_cl_k5
     l_max = 2500
 
     cl_pp_lin = np.array(compute_cl_pp_limber(
@@ -135,9 +116,9 @@ class TestClppHalofitRatio:
         assert r500 > r100, f"ratio should increase: r500={r500:.4f} < r100={r100:.4f}"
         assert r1000 > r500, f"ratio should increase: r1000={r1000:.4f} < r500={r500:.4f}"
 
-    def test_kmax_validation(self, pipeline_results):
+    def test_kmax_validation(self, pipeline_fast_cl_k5):
         """nonlinear=True with k_max < 5 should raise ValueError."""
-        params, prec, bg, th, pt = pipeline_results
+        params, _, bg, th, pt = pipeline_fast_cl_k5
         import copy
         pt_narrow = copy.copy(pt)
         mask = pt.k_grid <= 0.35
