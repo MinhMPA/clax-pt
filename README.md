@@ -1,12 +1,34 @@
-# clax
+# clax-pt
 
-**A differentiable cosmological Boltzmann solver in JAX.**
+**Differentiable one-loop perturbation theory for galaxy clustering in JAX.**
+
+Built on [`clax`](https://github.com/smsharma/clax), a differentiable cosmological Boltzmann solver by Siddharth Mishra-Sharma. `clax-pt` adds a JAX-native EFTofLSS one-loop power spectrum module reimplementing the calculations in [`CLASS-PT`](https://github.com/Michalychforever/CLASS-PT): real-space and redshift-space galaxy power spectrum multipoles, IR resummation, bias operators, and counterterms. The entire pipeline -- from cosmological parameters to P_gg(k, ell=0,2,4) -- is end-to-end differentiable via JAX automatic differentiation.
+
+For a pedagogical walkthrough of the FFTLog computation of one-loop integrals, see [EFT-with-FFT](https://github.com/MinhMPA/EFT-with-FFT).
 
 ## Development
 
-This codebase was written entirely by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus 4.6). The development process -- including architecture decisions, bug hunting through the CLASS C source code, and numerical validation -- is documented in [CHANGELOG.md](CHANGELOG.md) and [CLAUDE.md](CLAUDE.md).
+The `clax-pt` module was built with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus 4.6) over 12 days, 57 agent sessions, producing 2,100 lines of new code. The story of how human physics judgment and AI engineering worked together (and where they didn't) is told in [The Scientist Strikes Back](https://minhmpa.github.io/blog/the-scientist-strikes-back/). The development process is documented in [CHANGELOG.md](CHANGELOG.md) and [CLAUDE.md](CLAUDE.md).
 
-## Overview
+## clax-pt: One-loop PT accuracy vs CLASS-PT
+
+All comparisons at Planck 2018 best-fit LCDM, z=0.38, k < 0.30 h/Mpc:
+
+| Spectrum | Max error | Mean error | Notes |
+|----------|-----------|------------|-------|
+| P_mm real-space | **0.33%** | 0.10% | Matter-matter, IR resummed |
+| P_gg real-space | **0.35%** | 0.12% | Galaxy-galaxy (b1=2) |
+| P_gm real-space | **0.28%** | 0.09% | Galaxy-matter cross |
+| P_mm ell=0 | **0.21%** | 0.08% | Matter monopole |
+| P_mm ell=2 | **0.34%** | 0.11% | Matter quadrupole |
+| P_mm ell=4 | **1.2%** | 0.45% | Matter hexadecapole |
+| P_gg ell=0 | **0.42%** | 0.15% | Galaxy monopole |
+| P_gg ell=2 | **0.89%** | 0.50% | Galaxy quadrupole |
+| P_gg ell=4 | **1.8%** | 0.72% | Galaxy hexadecapole |
+
+Sub-percent accuracy for all monopole and quadrupole spectra. Hexadecapole within 2% (limited by the small signal amplitude and zero-crossings).
+
+## clax: Boltzmann solver overview
 
 clax solves the coupled Einstein-Boltzmann equations for cosmological perturbations from first principles: background cosmology, hydrogen recombination, the full photon-baryon-neutrino Boltzmann hierarchy in synchronous gauge, line-of-sight integration for CMB angular power spectra, HaloFit for nonlinear matter power, gravitational lensing, and a shooting method for theta_s parametrization. The entire pipeline -- from cosmological parameters to P(k), C_l^TT/EE/TE/BB, and lensed C_l -- is end-to-end differentiable via JAX automatic differentiation.
 
@@ -287,8 +309,9 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 
 ## References
 
+- **CLASS-PT**: Chudaykin, Ivanov, Philcox & Simonovic (2020). Non-linear perturbation theory extension of CLASS. [arXiv:2004.10607](https://arxiv.org/abs/2004.10607)
+- **EFT-with-FFT**: Nguyen (2026). Pedagogical notes on FFTLog computation of one-loop PT integrals. [GitHub](https://github.com/MinhMPA/EFT-with-FFT)
 - **CLASS v3.3.4**: Blas, Lesgourgues & Tram (2011). [arXiv:1104.2933](https://arxiv.org/abs/1104.2933)
-- **DISCO-DJ**: Hahn, List & Porqueres (2023). Differentiable Einstein-Boltzmann solver in JAX. [arXiv:2311.03291](https://arxiv.org/abs/2311.03291)
 - **Bolt.jl**: Li, Sullivan & Millea (2023). Differentiable Boltzmann solver in Julia. [Zenodo: 10.5281/zenodo.10065126](https://zenodo.org/records/10065126)
 - Seljak & Zaldarriaga (1996). Line-of-sight integration approach. [arXiv:astro-ph/9603033](https://arxiv.org/abs/astro-ph/9603033)
 - Ma & Bertschinger (1995). Cosmological perturbation theory. [arXiv:astro-ph/9506072](https://arxiv.org/abs/astro-ph/9506072)
