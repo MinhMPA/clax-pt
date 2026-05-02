@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 15:57
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 19:37
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -615,6 +615,9 @@ LaTeX Font Info:    Font shape `OML/ptm/m/n' in size <9> not available
 
 
 
+Underfull \vbox (badness 1917) has occurred while \output is active []
+
+
 
 [1{/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{/usr/l
 ocal/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc}
@@ -623,13 +626,13 @@ ocal/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc}
 
 ]
 LaTeX Font Info:    Trying to load font information for TS1+ptm on input line 8
-5.
+6.
 
 (/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/ts1ptm.fd
 File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 )
 LaTeX Font Info:    Trying to load font information for OT1+pcr on input line 8
-5.
+6.
 
 (/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/ot1pcr.fd
 File: ot1pcr.fd 2001/06/04 font definitions for OT1/pcr.
@@ -641,37 +644,32 @@ Package microtype Info: Loading generic protrusion settings for font family
 
 
 
-Overfull \hbox (22.7593pt too wide) detected at line 119
+Overfull \hbox (22.7593pt too wide) detected at line 120
 [] \OMS/cmsy/m/n/10 ! [] ! [] ! [] ! [] ! [] ! [] ! []
- []
-
-
-Underfull \hbox (badness 3989) in paragraph at lines 124--126
-[]\OT1/ptm/m/n/10 (+20) The Einstein--Boltzmann sys-tem is in-te-grated us-ing
- []
-
-
-Underfull \hbox (badness 1484) in paragraph at lines 124--126
-\OT1/ptm/m/n/10 (+20) a DISCO-EB-style fil-tered PID step con-troller us-ing
- []
-
-
-Underfull \hbox (badness 1997) in paragraph at lines 124--126
-\OML/cmm/m/it/10 k$\OT1/ptm/m/n/10 (+20) -dependent weight-ing on six key per-t
-ur-ba-tion vari-
- []
-
-
-Underfull \hbox (badness 1237) in paragraph at lines 124--126
-\OT1/pcr/m/n/10 RecursiveCheckpointAdjoint \OT1/ptm/m/n/10 (+20) for mem-ory ef
--fi-
  []
 
 
 
 [2]
-Overfull \hbox (3.27762pt too wide) in paragraph at lines 181--193
- [][] 
+Underfull \hbox (badness 3989) in paragraph at lines 125--127
+[]\OT1/ptm/m/n/10 (+20) The Einstein--Boltzmann sys-tem is in-te-grated us-ing
+ []
+
+
+Underfull \hbox (badness 1484) in paragraph at lines 125--127
+\OT1/ptm/m/n/10 (+20) a DISCO-EB-style fil-tered PID step con-troller us-ing
+ []
+
+
+Underfull \hbox (badness 1997) in paragraph at lines 125--127
+\OML/cmm/m/it/10 k$\OT1/ptm/m/n/10 (+20) -dependent weight-ing on six key per-t
+ur-ba-tion vari-
+ []
+
+
+Underfull \hbox (badness 1237) in paragraph at lines 125--127
+\OT1/pcr/m/n/10 RecursiveCheckpointAdjoint \OT1/ptm/m/n/10 (+20) for mem-ory ef
+-fi-
  []
 
 
@@ -680,33 +678,38 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 243--244
+Overfull \hbox (3.27762pt too wide) in paragraph at lines 182--194
+ [][] 
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 244--245
 []\OT1/ptm/m/n/10 (+20) Key tech-ni-cal in-gre-di-ents en-abling sta-ble
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 243--244
+Underfull \hbox (badness 10000) in paragraph at lines 244--245
 \OT1/ptm/m/n/10 (+20) AD through the full pipeline in-clude: (1)
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 243--244
+Underfull \hbox (badness 10000) in paragraph at lines 244--245
 \OT1/pcr/m/n/10 RecursiveCheckpointAdjoint \OT1/ptm/m/n/10 (+20) for memory-
  []
 
 
-Underfull \hbox (badness 3219) in paragraph at lines 243--244
+Underfull \hbox (badness 3219) in paragraph at lines 244--245
 \OT1/ptm/m/n/10 (+20) efficient reverse-mode through the stiff per-tur-ba-tion
  []
 
 
-Underfull \hbox (badness 2608) in paragraph at lines 243--244
+Underfull \hbox (badness 2608) in paragraph at lines 244--245
 \OT1/ptm/m/n/10 (+20) ODE; (2) a \OT1/pcr/m/n/10 custom[]vjp \OT1/ptm/m/n/10 (+
 20) on the shoot-ing method
  []
 
 
-Underfull \hbox (badness 2027) in paragraph at lines 243--244
+Underfull \hbox (badness 2027) in paragraph at lines 244--245
 \OT1/ptm/m/n/10 (+20) implicit-function-theorem tan-gents to re-store nonzero
  []
 
@@ -716,9 +719,9 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 [3]
-Underfull \vbox (badness 1270) has occurred while \output is active []
 
 
+Underfull \vbox (badness 1466) has occurred while \output is active []
 
 
 
@@ -727,9 +730,12 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
-(./main.bbl
 
-[5]
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
+
+[5] (./main.bbl
 Underfull \hbox (badness 10000) in paragraph at lines 21--25
 \OT1/ptm/m/n/10 (+20) Tech-ni-cal Re-port, [][]$\OT1/pcr/m/n/10 http : / / anth
 ropic . com /
@@ -738,17 +744,17 @@ ropic . com /
 
 
 
-Underfull \hbox (badness 3746) in paragraph at lines 123--128
+Underfull \hbox (badness 3746) in paragraph at lines 135--140
 []\OT1/ptm/m/n/10 (+20) Sletmoen, H.  Sym-Boltz.jl: A symbolic-numeric,
  []
 
 
-Underfull \hbox (badness 5388) in paragraph at lines 137--141
+Underfull \hbox (badness 5388) in paragraph at lines 149--153
 \OT1/ptm/m/n/10 (+20) Python+JAX pack-age for the cos-mic mi-crowave
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 137--141
+Underfull \hbox (badness 10000) in paragraph at lines 149--153
 \OT1/ptm/m/n/10 (+20) back-ground power spec-trum.  \OT1/ptm/m/it/10 (+20) arXi
 v preprint
  []
@@ -764,11 +770,11 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 17820 strings out of 473190
- 294533 string characters out of 5715801
- 776458 words of memory out of 5000000
- 40428 multiletter control sequences out of 15000+600000
- 608261 words of font info for 326 fonts, out of 8000000 for 9000
+ 17830 strings out of 473190
+ 294702 string characters out of 5715801
+ 775458 words of memory out of 5000000
+ 40434 multiletter control sequences out of 15000+600000
+ 608359 words of font info for 327 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,11n,79p,1001b,631s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb
@@ -790,10 +796,10 @@ mf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fo
 nts/type1/urw/times/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1
 /urw/times/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times
 /utmri8a.pfb>
-Output written on main.pdf (6 pages, 259697 bytes).
+Output written on main.pdf (6 pages, 260951 bytes).
 PDF statistics:
- 262 PDF objects out of 1000 (max. 8388607)
- 213 compressed objects within 3 object streams
- 53 named destinations out of 1000 (max. 500000)
+ 271 PDF objects out of 1000 (max. 8388607)
+ 222 compressed objects within 3 object streams
+ 55 named destinations out of 1000 (max. 500000)
  71681 words of extra memory for PDF output out of 74296 (max. 10000000)
 
