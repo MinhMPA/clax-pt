@@ -1,4 +1,4 @@
-\begin{thebibliography}{27}
+\begin{thebibliography}{25}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -43,12 +43,6 @@ D'Amico, G. et~al.
   field theory of large-scale structure.
 \newblock \emph{JCAP}, 2020\penalty0 (05):\penalty0 005, 2020.
 
-\bibitem[{DESI Collaboration}(2016)]{desi2016}
-{DESI Collaboration}.
-\newblock The {DESI} experiment part {I}: Science, targeting, and survey
-  design.
-\newblock \emph{arXiv preprint arXiv:1611.00036}, 2016.
-
 \bibitem[{DESI Collaboration}(2025{\natexlab{a}})]{desi2025v}
 {DESI Collaboration}.
 \newblock {DESI 2024 V}: Full-shape galaxy clustering from galaxies and
@@ -68,12 +62,6 @@ Di~Marzo, G.
 \newblock M{\'e}thodes de {Rosenbrock} d'ordre 5(4) adapt{\'e}es aux
   syst{\`e}mes diff{\'e}rentiels-alg{\'e}briques, 1993.
 \newblock Diploma Thesis, University of Geneva.
-
-\bibitem[{Euclid Collaboration}(2024)]{euclid2024}
-{Euclid Collaboration}.
-\newblock {Euclid}. {I}. overview of the {Euclid} mission.
-\newblock \emph{A\&A}, 685:\penalty0 A92, 2024.
-\newblock \doi{10.1051/0004-6361/202450810}.
 
 \bibitem[{Euclid Collaboration}(2026)]{euclid2026}
 {Euclid Collaboration}.
