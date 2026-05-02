@@ -1,6 +1,6 @@
 """Unit tests for Rosenbrock-Wanner ODE solvers.
 
-Tests Rodas5 and GRKT4 against Kvaerno5 (reference) on stiff and non-stiff
+Tests Rodas5 against Kvaerno5 (reference) on stiff and non-stiff
 problems. Verifies: convergence order, accuracy, L-stability, and
 autodifferentiability (jax.grad through the solve).
 """
@@ -12,7 +12,7 @@ import pytest
 
 jax.config.update("jax_enable_x64", True)
 
-from clax.rosenbrock import Rodas5, GRKT4, Rodas5Batched
+from clax.rosenbrock import Rodas5, Rodas5Batched
 
 
 # ---------------------------------------------------------------------------
@@ -186,53 +186,6 @@ class TestRodas5:
         avg_rate = (rate1 + rate2) / 2
         assert avg_rate > 4.5, \
             f"Rodas5 convergence order: {avg_rate:.2f} (expected ~5)"
-
-
-# ---------------------------------------------------------------------------
-# GRKT4 tests
-# ---------------------------------------------------------------------------
-
-class TestGRKT4:
-    """Tests for the 4-stage GRKT4 Rosenbrock solver.
-
-    Note: GRKT4 uses the standard Rosenbrock formulation (Method I) with
-    J @ coupling. It works well with adaptive stepping but the order
-    conditions in this coefficient set give effective order ~1 convergence
-    on simple problems. For stiff problems (its primary use case), it
-    performs well in practice — matching Kvaerno5 within 1e-3 on VdP.
-    """
-
-    def test_order(self):
-        solver = GRKT4()
-        term = diffrax.ODETerm(lambda t, y, args: y)
-        assert solver.order(term) == 4
-        assert solver.error_order(term) == 3
-
-    def test_van_der_pol_matches_kvaerno5(self):
-        """GRKT4 matches Kvaerno5 on stiff Van der Pol (mu=10)."""
-        f = _van_der_pol(10.0)
-        y0 = jnp.array([2.0, 0.0])
-        y_grkt = _solve(GRKT4(), f, y0, t1=20.0, rtol=1e-6, atol=1e-6,
-                        max_steps=50000)
-        y_kvarn = _solve(diffrax.Kvaerno5(), f, y0, t1=20.0, rtol=1e-6,
-                         atol=1e-6, max_steps=50000)
-        diff = jnp.max(jnp.abs(y_grkt - y_kvarn))
-        assert diff < 1e-2, f"GRKT4 vs Kvaerno5 on VdP: diff {diff:.3e}"
-
-    def test_exponential_decay_constant_step(self):
-        """GRKT4 gives reasonable result with constant step size."""
-        f = _exponential_decay(1.0)
-        y0 = jnp.array([1.0])
-        sol = diffrax.diffeqsolve(
-            diffrax.ODETerm(f), GRKT4(), t0=0.0, t1=1.0, dt0=0.01, y0=y0,
-            stepsize_controller=diffrax.ConstantStepSize(),
-            max_steps=200,
-            saveat=diffrax.SaveAt(t1=True),
-        )
-        exact = jnp.exp(-1.0)
-        rel_err = abs(sol.ys[0, 0] / exact - 1)
-        assert rel_err < 1e-2, \
-            f"GRKT4 exp decay (constant step): rel err {rel_err:.3e}"
 
 
 # ---------------------------------------------------------------------------

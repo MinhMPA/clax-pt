@@ -1,9 +1,9 @@
 """Rosenbrock-Wanner ODE solvers for stiff systems.
 
-Implements Rodas5 (8-stage, order 5/4) and GRKT4 (4-stage, order 4/3)
-Rosenbrock methods as Diffrax-compatible adaptive solvers. These avoid
-Newton iteration: each step requires only one Jacobian evaluation and
-one LU factorization, followed by linear back-substitution per stage.
+Implements the Rodas5 (8-stage, order 5/4) Rosenbrock method as a
+Diffrax-compatible adaptive solver. This avoids Newton iteration: each
+step requires only one Jacobian evaluation and one LU factorization,
+followed by linear back-substitution per stage.
 
 For the Einstein-Boltzmann system (~60-150 equations), this is ~3-5x
 faster per step than implicit ESDIRK methods (Kvaerno5) which need
@@ -18,7 +18,6 @@ Mathematical formulation (transformed W-form):
 
 References:
     Rodas5: Di Marzo (1993), "RODAS5(4) - Méthodes de Rosenbrock d'ordre 5(4)"
-    GRKT4: Kaps & Rentrop (1979), "Generalized Runge-Kutta methods of order 4"
     Hairer & Wanner (1996), "Solving ODEs II", Section IV.7
     Transformed formulation: cf. DISCO-EB (Hahn, List & Porqueres, arXiv:2311.03291)
 """
@@ -98,34 +97,6 @@ _R5_D3 = -0.319231832186874912
 _R5_D4 = 0.3449828624725343
 _R5_D5 = -0.377417564392089818
 # d6 = d7 = d8 = 0.0 (implicit)
-
-
-# ===========================================================================
-# GRKT4 tableau (Kaps & Rentrop 1979, GRK4A variant)
-# ===========================================================================
-_G4_GAMMA = 0.395
-
-_G4_ALPHA21 = 0.438
-_G4_ALPHA31 = 0.796920457938
-_G4_ALPHA32 = 0.730795420615e-1
-
-_G4_GAMMA21 = -0.767672395484
-_G4_GAMMA31 = -0.851675323742
-_G4_GAMMA32 = 0.522967289188
-_G4_GAMMA41 = 0.288463109545
-_G4_GAMMA42 = 0.880214273381e-1
-_G4_GAMMA43 = -0.337389840627
-
-# Solution weights (4th order)
-_G4_C1 = 0.199293275701
-_G4_C2 = 0.482645235674
-_G4_C3 = 0.680614886256e-1
-_G4_C4 = 0.25
-
-# Embedded weights (3rd order)
-_G4_CHAT1 = 0.346325833758
-_G4_CHAT2 = 0.285693175712
-_G4_CHAT3 = 0.367980990530
 
 
 def _lu_solve(lu_piv, b):
@@ -235,85 +206,6 @@ class Rodas5(AbstractAdaptiveSolver):
         # -- Solution and error --
         y1 = u8 + k8
         y_error = k8
-
-        dense_info = dict(y0=y0, y1=y1)
-        return y1, y_error, dense_info, solver_state, RESULTS.successful
-
-
-class GRKT4(AbstractAdaptiveSolver):
-    """4-stage Rosenbrock method of order 4(3) (Kaps & Rentrop 1979).
-
-    A simpler and faster Rosenbrock method than Rodas5. Uses only 4 stages
-    (vs 8) and 4 function evaluations per step (vs 8). Order 4 with
-    embedded 3rd-order error estimation.
-
-    Suitable for moderately stiff systems or when lower accuracy is
-    acceptable (e.g., fit_cl preset).
-    """
-
-    term_structure = AbstractTerm
-    interpolation_cls = LocalLinearInterpolation
-
-    def order(self, terms):
-        return 4
-
-    def error_order(self, terms):
-        return 3
-
-    def init(self, terms, t0, t1, y0, args):
-        return None
-
-    def func(self, terms, t0, y0, args):
-        return terms.vf(t0, y0, args)
-
-    def step(self, terms, t0, t1, y0, args, solver_state, made_jump):
-        dt = t1 - t0
-        f = lambda t, y: terms.vf(t, y, args)
-
-        # -- Jacobian and time derivative --
-        f0 = f(t0, y0)
-        n = y0.shape[0]
-        J = jax.jacfwd(lambda y: f(t0, y))(y0)
-        dT = jax.jacfwd(lambda t: f(t, y0))(t0)
-
-        # -- Standard Rosenbrock: W = I/h - gamma*J (Hairer & Wanner IV.7) --
-        # Coupling uses J @ (gamma_ij * k_j) — NOT gamma_ij/h * k_j.
-        W = jnp.eye(n) / dt - _G4_GAMMA * J
-        lu_piv = jla.lu_factor(W)
-
-        # -- Stage 1 --
-        rhs1 = f0 + _G4_GAMMA * dt * dT
-        k1 = _lu_solve(lu_piv, rhs1)
-
-        # -- Stage 2 --
-        u2 = y0 + _G4_ALPHA21 * k1
-        rhs2 = (f(t0 + _G4_ALPHA21 * dt, u2)
-                + _G4_GAMMA * dt * dT
-                + J @ (_G4_GAMMA21 * k1))
-        k2 = _lu_solve(lu_piv, rhs2)
-
-        # -- Stage 3 --
-        u3 = y0 + _G4_ALPHA31 * k1 + _G4_ALPHA32 * k2
-        rhs3 = (f(t0 + (_G4_ALPHA31 + _G4_ALPHA32) * dt, u3)
-                + _G4_GAMMA * dt * dT
-                + J @ (_G4_GAMMA31 * k1 + _G4_GAMMA32 * k2))
-        k3 = _lu_solve(lu_piv, rhs3)
-
-        # -- Stage 4 (stiffly accurate: coupling uses solution weights) --
-        u4 = y0 + _G4_C1 * k1 + _G4_C2 * k2 + _G4_C3 * k3
-        rhs4 = (f(t0 + dt, u4)
-                + _G4_GAMMA * dt * dT
-                + J @ (_G4_GAMMA41 * k1 + _G4_GAMMA42 * k2 + _G4_GAMMA43 * k3))
-        k4 = _lu_solve(lu_piv, rhs4)
-
-        # -- 4th-order solution --
-        y1 = y0 + _G4_C1 * k1 + _G4_C2 * k2 + _G4_C3 * k3 + _G4_C4 * k4
-
-        # -- Error estimate: difference between 4th and 3rd order --
-        y_error = ((_G4_C1 - _G4_CHAT1) * k1
-                   + (_G4_C2 - _G4_CHAT2) * k2
-                   + (_G4_C3 - _G4_CHAT3) * k3
-                   + _G4_C4 * k4)
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, solver_state, RESULTS.successful
