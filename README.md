@@ -14,7 +14,7 @@ The goal is a differentiable alternative to [CLASS](https://github.com/lesgourg/
 
 ## Status
 
-Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. **34s on V100** with `fit_cl` preset (HMC-ready); 487s with `planck_cl` for science-grade accuracy. 95+ tests passing. See [CHANGELOG.md](CHANGELOG.md) for details.
+Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. `fit_cl` preset for HMC / fitting; `planck_cl` for science-grade accuracy (487s on H100). See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ## Accuracy comparison against CLASS v3.3.4
 
@@ -81,14 +81,11 @@ Validated at 10 LCDM parameter variations (omega_b, omega_cdm, h, n_s, tau_reio 
 
 ### Performance
 
-Two presets for different use cases:
-
 | Preset | Background | Thermo | Perturbations | Harmonic | **Total** | GPU |
 |--------|-----------|--------|--------------|----------|-----------|-----|
-| **fit_cl** | 0.5s | 1.5s | 30s | 2.4s | **34s** | V100 |
 | planck_cl | 1s | 53s | 401s | 33s | 487s | H100 |
 
-`fit_cl` uses 20 k/decade, l_max=17, table-based Bessel (all l at once), rtol=1e-3, max_steps=1024. Suitable for HMC/fitting at <1.5% TT/EE accuracy (l<=500). `planck_cl` gives sub-0.2% science-grade accuracy. All times are JIT-cached (second call onwards).
+`fit_cl` uses 20 k/decade, l_max=17, table-based Bessel (all l at once), rtol=1e-3, max_steps=1024, and defaults to the Rodas5 Rosenbrock solver. Suitable for HMC/fitting at <1.5% TT/EE accuracy (l<=500). `planck_cl` gives sub-0.2% science-grade accuracy with Kvaerno5. All times are JIT-cached (second call onwards).
 
 ## Quick start
 
@@ -168,7 +165,7 @@ CosmoParams --> background --> thermodynamics --> perturbations --> primordial
 
 - `CosmoParams` fields are JAX-traced for automatic differentiation. `PrecisionParams` fields are static (control array shapes, not traced).
 - Full Boltzmann hierarchy with smooth RSA damping post-recombination. Full ncdm Psi_l(q) phase-space hierarchy (5 q-bins x 18 multipoles). TCA (tight-coupling approximation) with CLASS-matching dual criteria for numerical stability.
-- Perturbation ODE solved with Kvaerno5 (implicit, stiff-capable) via Diffrax.
+- Perturbation ODE solved via Diffrax with either Kvaerno5 (ESDIRK, default) or Rodas5 (8-stage Rosenbrock, default in `fit_cl`); `Rodas5Batched` shares time-stepping across k-modes for batched `compute_pk_table` solves.
 - `compute_pk_table()` / `compute_pk_interpolator()` are the practical
   dense-spectrum and reusable-table `P(k)` APIs, especially on GPU; exact
   `compute_pk()` remains the single-mode reference path.
@@ -236,11 +233,13 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | `params.py`         | `CosmoParams` (traced) and `PrecisionParams` (static) |
 | `interpolation.py`  | Pytree-registered `CubicSpline`                  |
 | `ode.py`            | Diffrax ODE solver wrappers                      |
+| `rosenbrock.py`     | Rodas5 / Rodas5Batched Rosenbrock ODE solver     |
 | `background.py`     | Friedmann equation, distances, growth factor     |
 | `thermodynamics.py` | RECFAST recombination, visibility function       |
 | `perturbations.py`  | Full scalar + tensor Boltzmann hierarchy         |
 | `primordial.py`     | Power-law scalar and tensor spectra              |
 | `bessel.py`         | Spherical Bessel functions j_l(x)                |
+| `transfer.py`       | Linear matter P(k) from perturbation solve       |
 | `harmonic.py`       | C_l^TT/EE/TE/BB from line-of-sight integration  |
 | `lensing.py`        | Correlation-function lensing method              |
 | `nonlinear.py`      | HaloFit (Takahashi 2012)                         |
@@ -248,16 +247,16 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 
 ## Precision presets
 
-`PrecisionParams` provides four presets controlling the accuracy/speed tradeoff:
+`PrecisionParams` provides six presets controlling the accuracy/speed tradeoff:
 
-| Preset        | k/decade | l_max | k_max  | Time    | Use case                 |
-|---------------|----------|-------|--------|---------|--------------------------|
-| **`fit_cl()`**| 20       | 17    | 1.0    | **34s** | HMC / fitting (<1.5%)    |
-| **`planck_fast()`**| 60  | 50    | 1.0    | **~210s** | Science-grade, optimized |
-| `fast_cl()`   | 15       | 25    | 0.15   | ~60s    | Quick iteration, testing |
-| `medium_cl()` | 20       | 50    | 0.3    | ~120s   | Moderate accuracy        |
-| `planck_cl()` | 60       | 50    | 1.0    | ~487s   | Science-grade, original  |
-| `science_cl()`| 200      | 50    | 0.35   | ~600s   | Sub-percent C_l          |
+| Preset        | k/decade | l_max | k_max  | Use case                 |
+|---------------|----------|-------|--------|--------------------------|
+| **`fit_cl()`**| 20       | 17    | 1.0    | HMC / fitting (<1.5%)    |
+| **`planck_fast()`**| 60  | 50    | 1.0    | Science-grade, optimized |
+| `fast_cl()`   | 15       | 25    | 0.15   | Quick iteration, testing |
+| `medium_cl()` | 20       | 50    | 0.3    | Moderate accuracy        |
+| `planck_cl()` | 60       | 50    | 1.0    | Science-grade, original  |
+| `science_cl()`| 200      | 50    | 0.35   | Sub-percent C_l          |
 
 For science-grade results, use `compute_cl_tt_interp` / `compute_cl_ee_interp` which interpolate source functions to a fine k-grid (10000 points) before computing the transfer integral. This is robust regardless of the perturbation k-density.
 
@@ -278,7 +277,7 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 
 ## Known limitations
 
-- **Speed**: `fit_cl` preset runs in 34s on V100 (HMC-ready). Perturbation ODE is the floor at ~30s for 100 k-modes. Further speedup requires fewer k-modes or float32 (currently infeasible with `jax_enable_x64=True`). `planck_cl` at 487s for science-grade work.
+- **Speed**: `fit_cl` preset targets HMC / fitting; `planck_cl` runs in 487s on H100 for science-grade work. Further speedup requires fewer k-modes or float32 (currently infeasible with `jax_enable_x64=True`).
 - **TT l=400-800**: +0.10-0.18% residual from SW+Doppler source amplitude (~0.06% excess at k~0.03). Comparable to CAMB-CLASS inter-code variation (~0.07%).
 - **TT l>1200**: Degrades due to k-integration under-resolution (Bessel oscillation period constant in k, but log-uniform grid spacing grows). Hybrid linear/log k-grid would fix this.
 - **EE l=20-30**: ~0.2% from RECFAST visibility function bias. HyRec recombination would improve to sub-0.1%.
