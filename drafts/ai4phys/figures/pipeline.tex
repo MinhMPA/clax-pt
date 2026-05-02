@@ -6,8 +6,6 @@
 \definecolor{shared}{HTML}{E8EFF5}     % shared pipeline modules
 \definecolor{cmbmod}{HTML}{F8D7DA}     % CMB branch
 \definecolor{galmod}{HTML}{E2D4F0}     % galaxy branch
-\definecolor{oraclebg}{HTML}{FFF3CD}   % oracle boxes
-\definecolor{oracleline}{HTML}{C07000} % oracle arrows
 \definecolor{outputbg}{HTML}{F5F5F5}   % output boxes
 
 \begin{document}
@@ -31,17 +29,8 @@
         minimum width=1.4cm, minimum height=0.55cm, align=center,
         font=\sffamily\small
     },
-    % Oracle reference boxes
-    orc/.style={
-        rectangle, rounded corners=2pt, draw=oracleline!60, dashed,
-        fill=oraclebg, thick,
-        minimum width=1.3cm, minimum height=0.45cm, align=center,
-        font=\sffamily\small\bfseries
-    },
     % Arrows
     flow/.style={-{Stealth[length=4pt, width=3pt]}, thick, black!55},
-    orcflow/.style={-{Stealth[length=3.5pt, width=2.5pt]}, semithick,
-                    oracleline, densely dotted},
     % Branch fork dot
     dot/.style={circle, fill=black!55, inner sep=1.2pt},
 ]
@@ -67,10 +56,6 @@
 \draw[flow] (bg) -- (th);
 \draw[flow] (th) -- (eb);
 \draw[flow] (eb) -- (pr);
-
-% Oracle: CLASS above EB
-\node[orc, above=0.5cm of eb] (classref) {\textsc{class}\,v3.3.4};
-\draw[orcflow] (classref) -- (eb);
 
 % ===== Fork point below EB =====
 \node[dot, below=0.7cm of eb] (fork) {};
@@ -99,10 +84,6 @@
 % Galaxy branch arrow
 \draw[flow] (fork) -| (ept);
 
-% Oracle: CLASS-PT above EPT
-\node[orc, above=0.5cm of ept] (classptref) {\textsc{class-pt}};
-\draw[orcflow] (classptref) -- (ept);
-
 % ===== Row 3: Outputs =====
 \node[outputbox, below=0.7cm of tr] (pkout) {$P(k)$};
 \node[outputbox, below=0.7cm of le] (clout) {$C_\ell^{TT/EE/TE/BB}$\\[-2pt]{\small lensed\,$C_\ell$}};
@@ -121,13 +102,13 @@
 % ===== Background shading =====
 \begin{scope}[on background layer]
     % clax region
-    \node[fit=(bg)(th)(eb)(pr)(tr)(hr)(le)(pkout)(clout)(classref),
+    \node[fit=(bg)(th)(eb)(pr)(tr)(hr)(le)(pkout)(clout),
           draw=black!8, fill=shared!30, rounded corners=5pt,
           inner sep=10pt,
           label={[font=\sffamily\footnotesize\bfseries, text=black!30,
                   anchor=north west]north west:\textsc{clax}}] {};
     % clax-pt region (no overlap)
-    \node[fit=(ept)(pgout)(classptref),
+    \node[fit=(ept)(pgout),
           draw=galmod!40, fill=galmod!15, rounded corners=5pt,
           inner sep=10pt,
           label={[font=\sffamily\footnotesize\bfseries, text=black!30,
@@ -137,8 +118,6 @@
 % ===== Legend =====
 \node[anchor=north west, font=\sffamily\scriptsize] at ($(pkout.south west) + (-0.8, -0.45)$) {
     \tikz[baseline=-0.5ex]{\draw[flow] (0,0) -- (0.45,0);}\;data flow
-    \qquad
-    \tikz[baseline=-0.5ex]{\draw[orcflow] (0,0) -- (0.45,0);}\;oracle reference
 };
 
 \end{tikzpicture}

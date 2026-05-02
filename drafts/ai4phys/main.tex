@@ -127,10 +127,10 @@ No branching on traced values ensures compatibility with \texttt{jax.jit} and \t
 \centering
 \includegraphics[width=\textwidth]{figures/pipeline.pdf}
 \caption{Pipeline architecture of \clax and \claxpt.
-Solid arrows show data flow; dashed orange arrows show where \class and \classpt reference data feed into the oracle test suite.
-Blue dashed arrows indicate reverse-mode AD gradient flow (\texttt{jax.grad}) from outputs back through the full pipeline to \texttt{CosmoParams}.
-Each module is independently tested against reference data before the next is implemented.
-The Einstein--Boltzmann system is integrated with Kvaerno5 (ESDIRK) or Rodas5 (Rosenbrock) solvers via Diffrax.}
+The shared backbone (top row) computes background cosmology, recombination, and the Einstein--Boltzmann perturbation hierarchy.
+Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop EFT perturbation theory).
+Every module is independently validated against \class v3.3.4 (\clax) or \classpt (\claxpt) reference data.
+The entire pipeline is end-to-end differentiable: \texttt{jax.grad} propagates exact reverse-mode gradients from any output back to \texttt{CosmoParams}.}
 \label{fig:pipeline}
 \end{figure*}
 
