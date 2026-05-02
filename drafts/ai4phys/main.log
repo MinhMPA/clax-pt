@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 20:22
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 23:52
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -656,23 +656,29 @@ Overfull \hbox (22.7593pt too wide) detected at line 120
 
 
 [2]
-Underfull \hbox (badness 3989) in paragraph at lines 125--127
+<figures/pipeline.pdf, id=83, 418.49449pt x 179.88905pt>
+File: figures/pipeline.pdf Graphic file (type pdf)
+<use figures/pipeline.pdf>
+Package pdftex.def Info: figures/pipeline.pdf  used on input line 128.
+(pdftex.def)             Requested size: 487.8225pt x 209.70078pt.
+
+Underfull \hbox (badness 3989) in paragraph at lines 137--139
 []\OT1/ptm/m/n/10 (+20) The Einstein--Boltzmann sys-tem is in-te-grated us-ing
  []
 
 
-Underfull \hbox (badness 1484) in paragraph at lines 125--127
+Underfull \hbox (badness 1484) in paragraph at lines 137--139
 \OT1/ptm/m/n/10 (+20) a DISCO-EB-style fil-tered PID step con-troller us-ing
  []
 
 
-Underfull \hbox (badness 1997) in paragraph at lines 125--127
+Underfull \hbox (badness 1997) in paragraph at lines 137--139
 \OML/cmm/m/it/10 k$\OT1/ptm/m/n/10 (+20) -dependent weight-ing on six key per-t
 ur-ba-tion vari-
  []
 
 
-Underfull \hbox (badness 1237) in paragraph at lines 125--127
+Underfull \hbox (badness 1237) in paragraph at lines 137--139
 \OT1/pcr/m/n/10 RecursiveCheckpointAdjoint \OT1/ptm/m/n/10 (+20) for mem-ory ef
 -fi-
  []
@@ -683,38 +689,38 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
-Overfull \hbox (3.27762pt too wide) in paragraph at lines 182--194
+Overfull \hbox (3.27762pt too wide) in paragraph at lines 194--206
  [][] 
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 244--245
+Underfull \hbox (badness 10000) in paragraph at lines 256--257
 []\OT1/ptm/m/n/10 (+20) Key tech-ni-cal in-gre-di-ents en-abling sta-ble
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 244--245
+Underfull \hbox (badness 10000) in paragraph at lines 256--257
 \OT1/ptm/m/n/10 (+20) AD through the full pipeline in-clude: (1)
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 244--245
+Underfull \hbox (badness 10000) in paragraph at lines 256--257
 \OT1/pcr/m/n/10 RecursiveCheckpointAdjoint \OT1/ptm/m/n/10 (+20) for memory-
  []
 
 
-Underfull \hbox (badness 3219) in paragraph at lines 244--245
+Underfull \hbox (badness 3219) in paragraph at lines 256--257
 \OT1/ptm/m/n/10 (+20) efficient reverse-mode through the stiff per-tur-ba-tion
  []
 
 
-Underfull \hbox (badness 2608) in paragraph at lines 244--245
+Underfull \hbox (badness 2608) in paragraph at lines 256--257
 \OT1/ptm/m/n/10 (+20) ODE; (2) a \OT1/pcr/m/n/10 custom[]vjp \OT1/ptm/m/n/10 (+
 20) on the shoot-ing method
  []
 
 
-Underfull \hbox (badness 2027) in paragraph at lines 244--245
+Underfull \hbox (badness 2027) in paragraph at lines 256--257
 \OT1/ptm/m/n/10 (+20) implicit-function-theorem tan-gents to re-store nonzero
  []
 
@@ -724,14 +730,7 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 [3]
-
-
-Underfull \vbox (badness 1466) has occurred while \output is active []
-
-
-
-[4]
-Underfull \vbox (badness 10000) has occurred while \output is active []
+Underfull \vbox (badness 1484) has occurred while \output is active []
 
 
 
@@ -740,7 +739,19 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
-[5] (./main.bbl
+[4 <./figures/pipeline.pdf>]
+
+
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
+
+[5]
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
+
+(./main.bbl
 Underfull \hbox (badness 10000) in paragraph at lines 21--25
 \OT1/ptm/m/n/10 (+20) Tech-ni-cal Re-port, [][]$\OT1/pcr/m/n/10 http : / / anth
 ropic . com /
@@ -748,7 +759,7 @@ ropic . com /
 
 
 
-
+[6]
 Underfull \hbox (badness 1087) in paragraph at lines 99--102
 []\OT1/ptm/m/n/10 (+20) Lesgourgues, J.  The cos-mic lin-ear anisotropy solv-
  []
@@ -771,7 +782,11 @@ v preprint
 
 )
 
-[6] (./main.aux)
+
+
+[7
+
+] (./main.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
@@ -780,36 +795,42 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 17828 strings out of 473190
- 294741 string characters out of 5715801
- 775458 words of memory out of 5000000
- 40437 multiletter control sequences out of 15000+600000
- 608039 words of font info for 323 fonts, out of 8000000 for 9000
+ 17854 strings out of 473190
+ 295211 string characters out of 5715801
+ 776458 words of memory out of 5000000
+ 40451 multiletter control sequences out of 15000+600000
+ 608499 words of font info for 330 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,11n,79p,1001b,631s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb
-></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb><
-/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></u
-sr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr
-/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></usr
-/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/l
-ocal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/loca
-l/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/t
-exlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texl
-ive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive
-/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/
-2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/20
-25/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2025
-/texmf-dist/fonts/type1/public/amsfonts/symbols/msam10.pfb></usr/local/texlive/
-2025/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2025/tex
-mf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fo
-nts/type1/urw/times/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1
-/urw/times/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times
-/utmri8a.pfb>
-Output written on main.pdf (6 pages, 261207 bytes).
+></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb><
+/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></u
+sr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr
+/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/l
+ocal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></usr/l
+ocal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/loc
+al/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/
+texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/tex
+live/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texliv
+e/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2
+025/texmf-dist/fonts/type1/public/amsfonts/cm/cmss8.pfb></usr/local/texlive/202
+5/texmf-dist/fonts/type1/public/amsfonts/cm/cmss9.pfb></usr/local/texlive/2025/
+texmf-dist/fonts/type1/public/amsfonts/cm/cmssbx10.pfb></usr/local/texlive/2025
+/texmf-dist/fonts/type1/public/amsfonts/cm/cmssi8.pfb></usr/local/texlive/2025/
+texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2025/t
+exmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2025/tex
+mf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2025/texmf
+-dist/fonts/type1/public/amsfonts/cm/cmtt8.pfb></usr/local/texlive/2025/texmf-d
+ist/fonts/type1/public/amsfonts/symbols/msam10.pfb></usr/local/texlive/2025/tex
+mf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2025/texmf-dist/
+fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type
+1/urw/times/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/tim
+es/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a
+.pfb>
+Output written on main.pdf (7 pages, 329417 bytes).
 PDF statistics:
- 275 PDF objects out of 1000 (max. 8388607)
- 226 compressed objects within 3 object streams
- 56 named destinations out of 1000 (max. 500000)
- 71681 words of extra memory for PDF output out of 74296 (max. 10000000)
+ 337 PDF objects out of 1000 (max. 8388607)
+ 272 compressed objects within 3 object streams
+ 58 named destinations out of 1000 (max. 500000)
+ 71686 words of extra memory for PDF output out of 74296 (max. 10000000)
 

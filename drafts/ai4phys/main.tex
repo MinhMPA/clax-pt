@@ -121,6 +121,18 @@ This makes the boundary between supervised and unsupervised development especial
 where BG is background cosmology, TH is thermodynamics/recombination, EB is the Einstein--Boltzmann perturbation hierarchy, PR is the primordial spectrum, TR is transfer functions, HR is harmonic ($\Cl$) integration, and LE is CMB lensing via Wigner $d$-functions.
 \texttt{CosmoParams} fields are \jax-traced (for AD); \texttt{PrecisionParams} fields are static (control array shapes).
 No branching on traced values ensures compatibility with \texttt{jax.jit} and \texttt{jax.grad}.
+\Cref{fig:pipeline} shows the full pipeline architecture, including the two output branches (CMB spectra and galaxy power spectra) and the oracle test points.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/pipeline.pdf}
+\caption{Pipeline architecture of \clax and \claxpt.
+Solid arrows show data flow; dashed orange arrows show where \class and \classpt reference data feed into the oracle test suite.
+Blue dashed arrows indicate reverse-mode AD gradient flow (\texttt{jax.grad}) from outputs back through the full pipeline to \texttt{CosmoParams}.
+Each module is independently tested against reference data before the next is implemented.
+The Einstein--Boltzmann system is integrated with Kvaerno5 (ESDIRK) or Rodas5 (Rosenbrock) solvers via Diffrax.}
+\label{fig:pipeline}
+\end{figure*}
 
 The Einstein--Boltzmann system is integrated using Kvaerno5 (ESDIRK, default) or Rodas5 (Rosenbrock) solvers from the Diffrax library \citep{kidger2021}, with a DISCO-EB-style filtered PID step controller using $k$-dependent weighting on six key perturbation variables.
 Reverse-mode AD through the ODE solve uses \texttt{RecursiveCheckpointAdjoint} for memory efficiency, with \texttt{custom\_vjp} wrappers for the shooting method ($\theta_s \to H_0$ via implicit differentiation) and the Saha equilibrium (implicit-function-theorem JVP).
