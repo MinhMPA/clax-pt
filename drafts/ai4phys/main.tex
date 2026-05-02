@@ -70,7 +70,7 @@ We characterize the boundary between unsupervised and supervised modes of AI-ass
 \section{Introduction}
 \label{sec:intro}
 
-The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy surveys such as DESI \citep{desi2025v, desi2025vii} and Euclid \citep{euclid2026}, and CMB experiments including Planck \citep{planck2020}.
+The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy surveys such as DESI \citep{desi2025v, desi2025vii} and CMB experiments including Planck \citep{planck2020}.
 This comparison increasingly benefits from gradient-based inference: exact Fisher matrices require derivatives $\partial \Cl / \partial \theta_i$, HMC sampling \citep{neal2011} requires $\nabla_\theta \log P(\boldsymbol{\theta} | \mathrm{data})$, and even simulation-based inference \citep{cranmer2020}---which does not require gradients---can leverage them for score-matching and summary-network training.
 Gradient-based inference libraries such as NumPyro \citep{phan2019}, BlackJAX \citep{cabezas2024}, and normalizing-flow-augmented MCMC \citep{gabrie2022} are mature, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
 

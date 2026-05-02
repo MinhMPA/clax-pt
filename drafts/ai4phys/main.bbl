@@ -1,4 +1,4 @@
-\begin{thebibliography}{25}
+\begin{thebibliography}{24}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -62,12 +62,6 @@ Di~Marzo, G.
 \newblock M{\'e}thodes de {Rosenbrock} d'ordre 5(4) adapt{\'e}es aux
   syst{\`e}mes diff{\'e}rentiels-alg{\'e}briques, 1993.
 \newblock Diploma Thesis, University of Geneva.
-
-\bibitem[{Euclid Collaboration}(2026)]{euclid2026}
-{Euclid Collaboration}.
-\newblock {Euclid} preparation. {Galaxy} power spectrum modelling in redshift
-  space.
-\newblock \emph{arXiv preprint arXiv:2601.20826}, 2026.
 
 \bibitem[Fang et~al.(2017)Fang, Blazek, McEwen, and Hirata]{fang2017}
 Fang, X., Blazek, J.~A., McEwen, J.~E., and Hirata, C.~M.

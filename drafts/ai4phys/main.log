@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 20:08
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 20:22
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -615,6 +615,11 @@ LaTeX Font Info:    Font shape `OML/ptm/m/n' in size <9> not available
 
 
 
+Underfull \hbox (badness 1077) in paragraph at lines 73--76
+\OT1/ptm/m/n/10 (+20) gradients---can lever-age them for score-matching and
+ []
+
+
 Underfull \vbox (badness 1917) has occurred while \output is active []
 
 
@@ -744,35 +749,29 @@ ropic . com /
 
 
 
-Underfull \hbox (badness 1087) in paragraph at lines 105--108
+Underfull \hbox (badness 1087) in paragraph at lines 99--102
 []\OT1/ptm/m/n/10 (+20) Lesgourgues, J.  The cos-mic lin-ear anisotropy solv-
  []
 
 
-Underfull \hbox (badness 3746) in paragraph at lines 148--153
+Underfull \hbox (badness 3746) in paragraph at lines 142--147
 []\OT1/ptm/m/n/10 (+20) Sletmoen, H.  Sym-Boltz.jl: A symbolic-numeric,
  []
 
 
-Underfull \hbox (badness 5388) in paragraph at lines 162--166
+Underfull \hbox (badness 5388) in paragraph at lines 156--160
 \OT1/ptm/m/n/10 (+20) Python+JAX pack-age for the cos-mic mi-crowave
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 162--166
+Underfull \hbox (badness 10000) in paragraph at lines 156--160
 \OT1/ptm/m/n/10 (+20) back-ground power spec-trum.  \OT1/ptm/m/it/10 (+20) arXi
 v preprint
  []
 
+)
 
-
-[6])
-
-
-
-[7
-
-] (./main.aux)
+[6] (./main.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
@@ -781,10 +780,10 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 17833 strings out of 473190
- 294816 string characters out of 5715801
+ 17828 strings out of 473190
+ 294741 string characters out of 5715801
  775458 words of memory out of 5000000
- 40440 multiletter control sequences out of 15000+600000
+ 40437 multiletter control sequences out of 15000+600000
  608039 words of font info for 323 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,11n,79p,1001b,631s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -807,10 +806,10 @@ mf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fo
 nts/type1/urw/times/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1
 /urw/times/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times
 /utmri8a.pfb>
-Output written on main.pdf (7 pages, 262279 bytes).
+Output written on main.pdf (6 pages, 261207 bytes).
 PDF statistics:
- 283 PDF objects out of 1000 (max. 8388607)
- 233 compressed objects within 3 object streams
- 58 named destinations out of 1000 (max. 500000)
+ 275 PDF objects out of 1000 (max. 8388607)
+ 226 compressed objects within 3 object streams
+ 56 named destinations out of 1000 (max. 500000)
  71681 words of extra memory for PDF output out of 74296 (max. 10000000)
 
