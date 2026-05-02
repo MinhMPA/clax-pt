@@ -74,7 +74,7 @@ This comparison increasingly benefits from gradient-based inference: exact Fishe
 Gradient-based inference libraries such as NumPyro \citep{phan2019}, BlackJAX \citep{cabezas2024}, and normalizing-flow-augmented MCMC \citep{gabrie2022} are mature, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
 
 The dominant Boltzmann codes---\class \citep{blas2011} and CAMB \citep{lewis2000}---are written in C and Fortran, are not differentiable, and are not GPU-native.
-Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the matter power spectrum $\Pk$ but not CMB spectra or galaxy clustering observables; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and SymBoltz.jl \citep{sletmoen2024} provides a full Boltzmann solver in Julia but without GPU support.
+Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the matter power spectrum $\Pk$ but not CMB spectra or galaxy clustering observables; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and SymBoltz.jl \citep{sletmoen2026} provides a full Boltzmann solver in Julia but without GPU support.
 No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
 We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class and \classpt pipelines---and the oracle-guided agentic methodology used to build them.
@@ -332,9 +332,10 @@ Agents fail at recognizing that an architectural assumption is inconsistent with
 \textbf{Differentiable cosmological codes.}
 \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations in \jax to compute the matter power spectrum but does not compute CMB spectra ($\Cl$) or galaxy clustering observables.
 \abcmb \citep{zhou2026} provides a complete CMB pipeline in \jax including lensing, massive neutrinos, and a state-of-the-art HyRex recombination treatment, but does not include perturbation theory for galaxy surveys.
-SymBoltz.jl \citep{sletmoen2024} provides a full Boltzmann solver in Julia with automatic differentiation but without GPU support.
-\textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum but not the full Boltzmann hierarchy and not CMB spectra.
-\clax is the first \jax code to provide full CMB spectra plus one-loop galaxy power spectra with exact automatic differentiation and GPU execution.
+SymBoltz.jl \citep{sletmoen2026} is the closest comparison in design philosophy: it is approximation-free (no TCA/RSA/UFA switching), uses Rodas5P (the same Rosenbrock solver family as \clax), achieves 0.1\% accuracy against \class, and supports forward-mode AD for Fisher forecasts.
+However, SymBoltz.jl operates in Julia without GPU support, and its reverse-mode AD is not yet fast enough for MCMC with perturbation-derived spectra \citep{sletmoen2026}.
+\textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy.
+\clax is the first \jax code to provide full CMB spectra plus one-loop galaxy power spectra with exact reverse-mode automatic differentiation and GPU execution.
 
 \textbf{EFT power spectra and IR resummation.}
 The EFT of large-scale structure \citep{perko2016, damico2020} provides a systematic expansion for the galaxy power spectrum.

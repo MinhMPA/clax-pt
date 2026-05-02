@@ -15,7 +15,7 @@ Blas, D., Lesgourgues, J., and Tram, T.
 \bibitem[Cabezas et~al.(2024)]{cabezas2024}
 Cabezas, A. et~al.
 \newblock {BlackJAX}: Composable {Bayesian} inference in {JAX}.
-\newblock 2024.
+\newblock \emph{arXiv preprint arXiv:2402.10797}, 2024.
 
 \bibitem[Carlini(2026)]{carlini2026}
 Carlini, N.
@@ -105,13 +105,13 @@ Neal, R.~M.
 Perko, A., Senatore, L., Jennings, E., and Wechsler, R.~H.
 \newblock Biased tracers in redshift space in the {EFT} of large-scale
   structure.
-\newblock 2016.
+\newblock \emph{arXiv preprint arXiv:1602.00674}, 2016.
 
 \bibitem[Phan et~al.(2019)Phan, Pradhan, and Jankowiak]{phan2019}
 Phan, D., Pradhan, N., and Jankowiak, M.
 \newblock Composable effects for flexible and accelerated probabilistic
   programming in {NumPyro}.
-\newblock 2019.
+\newblock \emph{arXiv preprint arXiv:1912.11554}, 2019.
 
 \bibitem[Senatore \& Zaldarriaga(2015)Senatore and Zaldarriaga]{senatore2015}
 Senatore, L. and Zaldarriaga, M.
@@ -119,11 +119,12 @@ Senatore, L. and Zaldarriaga, M.
 \newblock \emph{JCAP}, 2015\penalty0 (02):\penalty0 013, 2015.
 \newblock \doi{10.1088/1475-7516/2015/02/013}.
 
-\bibitem[Sletmoen(2024)]{sletmoen2024}
+\bibitem[Sletmoen(2026)]{sletmoen2026}
 Sletmoen, H.
-\newblock {SymBoltz.jl}: A differentiable cosmological boltzmann solver in
-  {Julia}.
-\newblock \url{https://github.com/hersle/SymBoltz.jl}, 2024.
+\newblock {SymBoltz.jl}: A symbolic-numeric, approximation-free, and
+  differentiable linear {Einstein}--{Boltzmann} solver.
+\newblock \emph{Astronomy \& Astrophysics}, 707:\penalty0 A128, 2026.
+\newblock \doi{10.1051/0004-6361/202557450}.
 
 \bibitem[Vlah et~al.(2015)Vlah, White, and Aviles]{vlah2015}
 Vlah, Z., White, M., and Aviles, A.
@@ -136,7 +137,6 @@ Vlah, Z., White, M., and Aviles, A.
 Zhou, Z., Giovanetti, C., and Liu, H.
 \newblock {ABCMB}: A {Python+JAX} package for the cosmic microwave background
   power spectrum.
-\newblock 2026.
-\newblock arXiv:2602.15104.
+\newblock \emph{arXiv preprint arXiv:2602.15104}, 2026.
 
 \end{thebibliography}

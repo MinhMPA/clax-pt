@@ -3,49 +3,44 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: main.aux
 The style file: icml2026.bst
 Database file #1: references.bib
-Warning--empty journal in cabezas2024
-Warning--empty journal in perko2016
-Warning--empty journal in phan2019
-Warning--empty journal in zhou2026
 You've used 21 entries,
             2773 wiz_defined-function locations,
-            715 strings with 8242 characters,
-and the built_in function-call counts, 8699 in all, are:
-= -- 756
+            721 strings with 8405 characters,
+and the built_in function-call counts, 8760 in all, are:
+= -- 766
 > -- 512
 < -- 11
 + -- 175
 - -- 154
-* -- 686
-:= -- 1393
+* -- 697
+:= -- 1408
 add.period$ -- 74
 call.type$ -- 21
 change.case$ -- 109
 chr.to.int$ -- 21
-cite$ -- 46
-duplicate$ -- 406
-empty$ -- 721
+cite$ -- 42
+duplicate$ -- 411
+empty$ -- 725
 format.name$ -- 180
-if$ -- 1798
+if$ -- 1812
 int.to.chr$ -- 1
 int.to.str$ -- 1
-missing$ -- 16
+missing$ -- 17
 newline$ -- 123
 num.names$ -- 86
-pop$ -- 218
+pop$ -- 205
 preamble$ -- 1
 purify$ -- 89
 quote$ -- 0
 skip$ -- 307
 stack$ -- 0
-substring$ -- 176
-swap$ -- 18
+substring$ -- 188
+swap$ -- 22
 text.length$ -- 1
 text.prefix$ -- 0
 top$ -- 0
 type$ -- 231
-warning$ -- 4
-while$ -- 75
+warning$ -- 0
+while$ -- 76
 width$ -- 0
-write$ -- 289
-(There were 4 warnings)
+write$ -- 294
