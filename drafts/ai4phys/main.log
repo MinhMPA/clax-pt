@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 13:20
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  2 MAY 2026 13:38
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -671,9 +671,6 @@ Underfull \hbox (badness 1237) in paragraph at lines 124--126
  []
 
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
-
 
 [2]
 Overfull \hbox (3.27762pt too wide) in paragraph at lines 181--193
@@ -741,28 +738,7 @@ ropic . com /
 
 
 
-[5]
-Underfull \hbox (badness 3333) in paragraph at lines 72--78
-[]\OT1/ptm/m/n/10 (+20) Hahn, O., List, F., and Por-queres, N.  DISCO-
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 72--78
-\OT1/ptm/m/n/10 (+20) DJ: Dif-fer-en-tiable sim-u-la-tions for cos-mol-ogy --
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 72--78
-\OT1/ptm/m/n/10 (+20) Done with JAX.  [][]$\OT1/pcr/m/n/10 https : / / github .
- com /
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 72--78
-\OT1/pcr/m/n/10 DifferentiableUniverseInitiative /
- []
-
-)
+[5])
 
 
 
@@ -777,11 +753,11 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 17810 strings out of 473190
- 294448 string characters out of 5715801
+ 17813 strings out of 473190
+ 294472 string characters out of 5715801
  775458 words of memory out of 5000000
  40428 multiletter control sequences out of 15000+600000
- 607719 words of font info for 319 fonts, out of 8000000 for 9000
+ 607838 words of font info for 321 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,11n,79p,1001b,631s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb
@@ -803,10 +779,10 @@ mf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fo
 nts/type1/urw/times/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1
 /urw/times/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times
 /utmri8a.pfb>
-Output written on main.pdf (6 pages, 254904 bytes).
+Output written on main.pdf (6 pages, 254864 bytes).
 PDF statistics:
- 264 PDF objects out of 1000 (max. 8388607)
- 215 compressed objects within 3 object streams
+ 262 PDF objects out of 1000 (max. 8388607)
+ 213 compressed objects within 3 object streams
  53 named destinations out of 1000 (max. 500000)
  71681 words of extra memory for PDF output out of 74296 (max. 10000000)
 

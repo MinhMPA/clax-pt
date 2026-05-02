@@ -9,7 +9,7 @@ Warning--empty journal in phan2019
 Warning--empty journal in zhou2026
 You've used 21 entries,
             2773 wiz_defined-function locations,
-            715 strings with 8267 characters,
+            715 strings with 8242 characters,
 and the built_in function-call counts, 8699 in all, are:
 = -- 756
 > -- 512

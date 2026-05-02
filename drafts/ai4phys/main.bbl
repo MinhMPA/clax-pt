@@ -72,15 +72,8 @@ Gabri{\'e}, M., Rotskoff, G.~M., and Vanden-Eijnden, E.
 Hahn, O., List, F., and Porqueres, N.
 \newblock {DISCO-DJ}: Differentiable simulations for cosmology -- {Done with
   JAX}.
-\newblock \url{https://github.com/DifferentiableUniverseInitiative/disco-eb},
-  2023.
+\newblock \url{https://github.com/ohahn/DISCO-EB}, 2023.
 \newblock arXiv:2311.03291.
-
-\bibitem[Hermansen(2024)]{hermansen2024}
-Hermansen, H.
-\newblock {SymBoltz.jl}: A differentiable cosmological boltzmann solver in
-  {Julia}.
-\newblock \url{https://github.com/hersle/SymBoltz.jl}, 2024.
 
 \bibitem[Kidger(2021)]{kidger2021}
 Kidger, P.
@@ -125,6 +118,12 @@ Senatore, L. and Zaldarriaga, M.
 \newblock The {IR}-resummed effective field theory of large scale structures.
 \newblock \emph{JCAP}, 2015\penalty0 (02):\penalty0 013, 2015.
 \newblock \doi{10.1088/1475-7516/2015/02/013}.
+
+\bibitem[Sletmoen(2024)]{sletmoen2024}
+Sletmoen, H.
+\newblock {SymBoltz.jl}: A differentiable cosmological boltzmann solver in
+  {Julia}.
+\newblock \url{https://github.com/hersle/SymBoltz.jl}, 2024.
 
 \bibitem[Vlah et~al.(2015)Vlah, White, and Aviles]{vlah2015}
 Vlah, Z., White, M., and Aviles, A.

@@ -16,21 +16,21 @@ All comparisons at Planck 2018 best-fit LCDM, z=0.38, k < 0.30 h/Mpc:
 
 | Spectrum | Max error | Mean error | Notes |
 |----------|-----------|------------|-------|
-| P_mm real-space | **0.33%** | 0.10% | Matter-matter, IR resummed |
-| P_gg real-space | **0.35%** | 0.12% | Galaxy-galaxy (b1=2) |
-| P_gm real-space | **0.28%** | 0.09% | Galaxy-matter cross |
-| P_mm ell=0 | **0.21%** | 0.08% | Matter monopole |
-| P_mm ell=2 | **0.34%** | 0.11% | Matter quadrupole |
-| P_mm ell=4 | **1.2%** | 0.45% | Matter hexadecapole |
-| P_gg ell=0 | **0.42%** | 0.15% | Galaxy monopole |
+| P_mm real-space | **0.31%** | 0.04% | Matter-matter, IR resummed |
+| P_gg real-space | **0.31%** | 0.04% | Galaxy-galaxy (b1=2) |
+| P_gm real-space | **0.31%** | 0.04% | Galaxy-matter cross |
+| P_mm ell=0 | **0.59%** | 0.40% | Matter monopole |
+| P_mm ell=2 | **0.70%** | 0.44% | Matter quadrupole |
+| P_mm ell=4 | **0.70%** | 0.15% | Matter hexadecapole (abs/max metric) |
+| P_gg ell=0 | **0.56%** | 0.39% | Galaxy monopole |
 | P_gg ell=2 | **0.89%** | 0.50% | Galaxy quadrupole |
-| P_gg ell=4 | **1.8%** | 0.72% | Galaxy hexadecapole |
+| P_gg ell=4 | **1.43%** | 0.37% | Galaxy hexadecapole (abs/max metric) |
 
 Sub-percent accuracy for all monopole and quadrupole spectra. Hexadecapole within 2% (limited by the small signal amplitude and zero-crossings).
 
 ## clax: Boltzmann solver overview
 
-clax solves the coupled Einstein-Boltzmann equations for cosmological perturbations from first principles: background cosmology, hydrogen recombination, the full photon-baryon-neutrino Boltzmann hierarchy in synchronous gauge, line-of-sight integration for CMB angular power spectra, HaloFit for nonlinear matter power, gravitational lensing, and a shooting method for theta_s parametrization. The entire pipeline -- from cosmological parameters to P(k), C_l^TT/EE/TE/BB, and lensed C_l -- is end-to-end differentiable via JAX automatic differentiation.
+clax solves the coupled Einstein-Boltzmann equations for cosmological perturbations from first principles: background cosmology, hydrogen recombination, the full photon-baryon-neutrino Boltzmann hierarchy in synchronous gauge, dark energy fluid perturbations (CPL w0-wa equation of state), line-of-sight integration for CMB angular power spectra, HaloFit for nonlinear matter power, gravitational lensing, and a shooting method for theta_s parametrization. The entire pipeline -- from cosmological parameters to P(k), C_l^TT/EE/TE/BB, and lensed C_l -- is end-to-end differentiable via JAX automatic differentiation.
 
 The goal is a differentiable alternative to [CLASS](https://github.com/lesgourg/class_public) that enables gradient-based cosmological inference (HMC, variational methods) on CMB and large-scale structure data.
 
@@ -190,7 +190,7 @@ CosmoParams --> background --> thermodynamics --> perturbations --> primordial
 
 - `CosmoParams` fields are JAX-traced for automatic differentiation. `PrecisionParams` fields are static (control array shapes, not traced).
 - Full Boltzmann hierarchy with smooth RSA damping post-recombination. Full ncdm Psi_l(q) phase-space hierarchy (5 q-bins x 18 multipoles). TCA (tight-coupling approximation) with CLASS-matching dual criteria for numerical stability.
-- Perturbation ODE solved with Kvaerno5 (implicit, stiff-capable) via Diffrax.
+- Perturbation ODE solved with Kvaerno5 (implicit ESDIRK, default) or Rodas5 (Rosenbrock, no Newton iteration) via Diffrax. Controlled by `PrecisionParams.pt_ode_solver`: `"kvaerno5"` (default) or `"rodas5"`. The `fit_cl` preset uses Rodas5 for faster GPU execution. The Rodas5 implementation follows DISCO-EB's transformed W-formulation (Di Marzo 1993, arXiv:2311.03291).
 - `compute_pk_table()` / `compute_pk_interpolator()` are the practical
   dense-spectrum and reusable-table `P(k)` APIs, especially on GPU; exact
   `compute_pk()` remains the single-mode reference path.
@@ -266,7 +266,9 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | `harmonic.py`       | C_l^TT/EE/TE/BB from line-of-sight integration  |
 | `lensing.py`        | Correlation-function lensing method              |
 | `nonlinear.py`      | HaloFit (Takahashi 2012)                         |
+| `rosenbrock.py`     | Rodas5/GRKT4 Rosenbrock solvers (Diffrax-compatible) |
 | `shooting.py`       | theta_s -> H0 via Newton + `custom_vjp`          |
+| `ept.py`            | One-loop EFT power spectra (FFTLog, IR resummation, RSD) |
 
 ## Precision presets
 
@@ -309,10 +311,12 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 
 ## References
 
-- **CLASS-PT**: Chudaykin, Ivanov, Philcox & Simonovic (2020). Non-linear perturbation theory extension of CLASS. [arXiv:2004.10607](https://arxiv.org/abs/2004.10607)
-- **EFT-with-FFT**: Nguyen (2026). Pedagogical notes on FFTLog computation of one-loop PT integrals. [GitHub](https://github.com/MinhMPA/EFT-with-FFT)
 - **CLASS v3.3.4**: Blas, Lesgourgues & Tram (2011). [arXiv:1104.2933](https://arxiv.org/abs/1104.2933)
+- **CLASS-PT**: Chudaykin, Ivanov, Philcox & Simonovic (2020). Non-linear perturbation theory extension of CLASS. [arXiv:2004.10607](https://arxiv.org/abs/2004.10607)
+- **DISCO-DJ / DISCO-EB**: Hahn, List & Porqueres (2023). Differentiable Einstein-Boltzmann solver in JAX (P(k) only). [arXiv:2311.03291](https://arxiv.org/abs/2311.03291). [GitHub](https://github.com/ohahn/DISCO-EB)
+- **ABCMB**: Zhou, Giovanetti & Liu (2026). CMB power spectrum in JAX (C_l only, no PT). [arXiv:2602.15104](https://arxiv.org/abs/2602.15104). [GitHub](https://github.com/TonyZhou729/ABCMB)
 - **Bolt.jl**: Li, Sullivan & Millea (2023). Differentiable Boltzmann solver in Julia. [Zenodo: 10.5281/zenodo.10065126](https://zenodo.org/records/10065126)
+- **EFT-with-FFT**: Nguyen (2026). Pedagogical notes on FFTLog computation of one-loop PT integrals. [GitHub](https://github.com/MinhMPA/EFT-with-FFT)
 - Seljak & Zaldarriaga (1996). Line-of-sight integration approach. [arXiv:astro-ph/9603033](https://arxiv.org/abs/astro-ph/9603033)
 - Ma & Bertschinger (1995). Cosmological perturbation theory. [arXiv:astro-ph/9506072](https://arxiv.org/abs/astro-ph/9506072)
 

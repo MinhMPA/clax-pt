@@ -71,10 +71,10 @@ We characterize the boundary between unsupervised and supervised modes of AI-ass
 
 The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy surveys such as DESI \citep{desi2025}, Euclid, and CMB experiments including Planck.
 This comparison increasingly demands gradient-based inference: exact Fisher matrices, HMC sampling \citep{neal2011}, and simulation-based inference \citep{cranmer2020} all benefit from differentiable forward models.
-Libraries such as NumPyro \citep{phan2019}, BlackJAX \citep{cabezas2024}, and flowMC \citep{gabrie2022} provide state-of-the-art gradient-based samplers, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
+Libraries such as NumPyro \citep{phan2019}, BlackJAX \citep{cabezas2024}, and adaptive MCMC with normalizing flows \citep{gabrie2022} provide state-of-the-art gradient-based samplers, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
 
 The dominant Boltzmann codes---\class \citep{blas2011} and CAMB \citep{lewis2000}---are written in C and Fortran, are not differentiable, and are not GPU-native.
-Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} computes the nonlinear matter power spectrum $\Pk$ but not CMB spectra or galaxy clustering observables; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum but not the full Boltzmann hierarchy; and SymBoltz.jl \citep{hermansen2024} provides full CMB spectra in Julia but without GPU support.
+Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} computes the nonlinear matter power spectrum $\Pk$ but not CMB spectra or galaxy clustering observables; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum but not the full Boltzmann hierarchy; and SymBoltz.jl \citep{sletmoen2024} provides full CMB spectra in Julia but without GPU support.
 No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
 We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class and \classpt pipelines---and the oracle-guided agentic methodology used to build them.
@@ -211,7 +211,7 @@ Spectrum & Max error & Metric \\
 \midrule
 $P_{mm}^\mathrm{real}$, $P_{gg}^\mathrm{real}$, $P_{gm}^\mathrm{real}$ & 0.31\% & rel. \\
 $P_{mm}^{(\ell=0)}$, $P_{gg}^{(\ell=0)}$ & 0.59\%, 0.56\% & rel. \\
-$P_{mm}^{(\ell=2)}$, $P_{gg}^{(\ell=2)}$ & 0.70\%, 1.11\% & rel. \\
+$P_{mm}^{(\ell=2)}$, $P_{gg}^{(\ell=2)}$ & 0.70\%, 0.89\% & rel. \\
 $P_{mm}^{(\ell=4)}$, $P_{gg}^{(\ell=4)}$ & 0.70\%, 1.43\% & abs/max \\
 \bottomrule
 \end{tabular}
@@ -330,7 +330,7 @@ Agents fail at recognizing that an architectural assumption is inconsistent with
 \textbf{Differentiable cosmological codes.}
 \discoeb \citep{hahn2023} implements the nonlinear matter power spectrum in \jax but does not compute CMB spectra ($\Cl$) or galaxy clustering observables.
 \abcmb \citep{zhou2026} provides a complete CMB pipeline in \jax including lensing, massive neutrinos, and a state-of-the-art HyRex recombination treatment, but does not include perturbation theory for galaxy surveys.
-SymBoltz.jl \citep{hermansen2024} provides a full Boltzmann solver in Julia with automatic differentiation but without GPU support.
+SymBoltz.jl \citep{sletmoen2024} provides a full Boltzmann solver in Julia with automatic differentiation but without GPU support.
 \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum but not the full Boltzmann hierarchy and not CMB spectra.
 \clax is the first \jax code to provide full CMB spectra plus one-loop galaxy power spectra with exact automatic differentiation and GPU execution.
 
