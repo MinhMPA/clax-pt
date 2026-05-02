@@ -70,15 +70,15 @@ We characterize the boundary between unsupervised and supervised modes of AI-ass
 \section{Introduction}
 \label{sec:intro}
 
-The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy surveys such as DESI \citep{desi2025} and Euclid \citep{euclid2024}, and CMB experiments including Planck \citep{planck2020}.
+The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy surveys such as DESI \citep{desi2016, desi2025v, desi2025vii} and Euclid \citep{euclid2024, euclid2026}, and CMB experiments including Planck \citep{planck2020}.
 This comparison increasingly benefits from gradient-based inference: exact Fisher matrices require derivatives $\partial \Cl / \partial \theta_i$, HMC sampling \citep{neal2011} requires $\nabla_\theta \log P(\boldsymbol{\theta} | \mathrm{data})$, and even simulation-based inference \citep{cranmer2020}---which does not require gradients---can leverage them for score-matching and summary-network training.
 Gradient-based inference libraries such as NumPyro \citep{phan2019}, BlackJAX \citep{cabezas2024}, and normalizing-flow-augmented MCMC \citep{gabrie2022} are mature, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
 
-The dominant Boltzmann codes---\class \citep{blas2011} and CAMB \citep{lewis2000}---are written in C and Fortran, are not differentiable, and are not GPU-native.
+The dominant Boltzmann codes---\class \citep{lesgourgues2011, blas2011} and CAMB \citep{lewis2000}---are written in C and Fortran, are not differentiable, and are not GPU-native.
 Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the matter power spectrum $\Pk$ but not CMB spectra or galaxy clustering observables; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and SymBoltz.jl \citep{sletmoen2026} provides a full Boltzmann solver in Julia but without GPU support.
 No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
-We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class \citep{blas2011} and \classpt \citep{chudaykin2021} pipelines---and the oracle-guided agentic methodology used to build them.
+We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class \citep{lesgourgues2011, blas2011} and \classpt \citep{chudaykin2021} pipelines---and the oracle-guided agentic methodology used to build them.
 Using \class v3.3.4 and \classpt as ground truth, we find a clear boundary: agents handle implementation bugs (convention errors, algorithmic transcription, coefficient verification) autonomously and reliably, but fail at two classes of problem that require human physics judgment: (1) recognizing that an architecture is structurally incompatible with the intended physics, and (2) detecting that a numerically effective patch satisfies all oracle tests at the calibration point while encoding incorrect physics.
 
 \paragraph{Contributions.}
