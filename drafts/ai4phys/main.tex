@@ -1,0 +1,362 @@
+%%%%%%%% AI4Physics @ ICML 2026 — clax paper %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+\usepackage{icml2026}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usepackage{xspace}
+
+% Custom commands
+\newcommand{\clax}{\textsc{clax}\xspace}
+\newcommand{\claxpt}{\textsc{clax-pt}\xspace}
+\newcommand{\class}{\textsc{class}\xspace}
+\newcommand{\classpt}{\textsc{class-pt}\xspace}
+\newcommand{\discoeb}{\textsc{disco-eb}\xspace}
+\newcommand{\abcmb}{\textsc{abcmb}\xspace}
+\newcommand{\jax}{\textsc{jax}\xspace}
+\newcommand{\Cl}{C_\ell}
+\newcommand{\Pk}{P(k)}
+
+\icmltitlerunning{From Einstein-Boltzmann Equations to Galaxy Power Spectra}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{From Einstein-Boltzmann Equations to Galaxy Power Spectra: \\
+    Physicist-Supervised, Oracle-Guided AI Reimplementation in JAX}
+
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}
+    \icmlauthor{Siddharth Mishra-Sharma}{anthropic}
+    \icmlauthor{Minh Nguyen}{kavli}
+  \end{icmlauthorlist}
+
+  \icmlaffiliation{anthropic}{Anthropic, San Francisco, CA, USA}
+  \icmlaffiliation{kavli}{Kavli IPMU, University of Tokyo, Kashiwa, Japan}
+
+  \icmlcorrespondingauthor{Minh Nguyen}{nhat.minh.nguyen.111@gmail.com}
+
+  \icmlkeywords{differentiable programming, cosmology, Boltzmann solver, perturbation theory, AI-assisted development}
+
+  \vskip 0.3in
+]
+
+\printAffiliationsAndNotice{}
+
+% ===========================================================================
+\begin{abstract}
+Gradient-based inference methods such as Hamiltonian Monte Carlo and simulation-based inference require differentiable forward models, yet no existing code provides full CMB spectra plus one-loop galaxy power spectra with exact automatic differentiation on GPU.
+We address this gap with \clax and \claxpt, fully differentiable \jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt, developed via oracle-guided agentic development: AI agents iterate against reference data from \class and \classpt, autonomously resolving implementation bugs and escalating to human review only when oracle feedback stalls.
+Across 57 Claude Code sessions spanning 12 days, agents autonomously resolved 38 of 40 documented bugs (95\%) without human input.
+The remaining 5\% required human physics judgment and fell into exactly two failure modes: \emph{architectural incoherence} (code structure incompatible with the target physics) and \emph{oracle-passing fudge factors} (a numerical patch satisfying all tests but encoding no physical model).
+\clax achieves $< 0.1\%$ CMB accuracy at $\ell \leq 2000$; \claxpt achieves $< 0.7\%$ galaxy power spectrum accuracy for monopole and quadrupole spectra at $k < 0.3\;h/$Mpc.
+Automatic differentiation gradients agree with fourth-order finite differences to $0.15\%$ on average.
+The full pipeline runs at 34\,s/step on a single V100 GPU with HMC-ready accuracy.
+We characterize the boundary between unsupervised and supervised modes of AI-assisted scientific development, propose three principles for structuring human--agent collaboration, and compare against concurrent differentiable cosmology codes \discoeb and \abcmb.
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy surveys such as DESI \citep{desi2025}, Euclid, and CMB experiments including Planck.
+This comparison increasingly demands gradient-based inference: exact Fisher matrices, HMC sampling \citep{neal2011}, and simulation-based inference \citep{cranmer2020} all benefit from differentiable forward models.
+Libraries such as NumPyro \citep{phan2019}, BlackJAX \citep{cabezas2024}, and flowMC \citep{gabrie2022} provide state-of-the-art gradient-based samplers, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
+
+The dominant Boltzmann codes---\class \citep{blas2011} and CAMB \citep{lewis2000}---are written in C and Fortran, are not differentiable, and are not GPU-native.
+Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} computes the nonlinear matter power spectrum $\Pk$ but not CMB spectra or galaxy clustering observables; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum but not the full Boltzmann hierarchy; and SymBoltz.jl \citep{hermansen2024} provides full CMB spectra in Julia but without GPU support.
+No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
+
+We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class and \classpt pipelines---and the oracle-guided agentic methodology used to build them.
+Using \class v3.3.4 and \classpt \citep{chudaykin2021} as ground truth, we find a clear boundary: agents handle implementation bugs (convention errors, algorithmic transcription, coefficient verification) autonomously and reliably, but fail at two classes of problem that require human physics judgment: (1) recognizing that an architecture is structurally incompatible with the intended physics, and (2) detecting that a numerically effective patch satisfies all oracle tests at the calibration point while encoding incorrect physics.
+
+\paragraph{Contributions.}
+\begin{itemize}
+    \item \clax: a \jax reimplementation of the full \class CMB pipeline (background, thermodynamics, perturbations, transfer, lensing), achieving $< 0.1\%$ accuracy at $\ell \leq 2000$ with JIT-compiled GPU execution at 34\,s/step (V100, \texttt{fit\_cl} preset).
+    \item \claxpt: a \jax reimplementation of \classpt's one-loop EFT power spectra with IR resummation and RSD multipoles, achieving $< 0.7\%$ accuracy for monopole and quadrupole spectra.
+    \item Validated autodifferentiation gradients matching finite differences to $0.15\%$ across cosmological parameters.
+    \item A landscape comparison against \discoeb, \abcmb, \class, and \classpt, showing that \clax is the first code combining CMB and one-loop galaxy spectra with full AD on GPU.
+    \item An empirical bug taxonomy of 40 bugs across the development, classifying autonomous vs.\ human-required resolution and identifying two specific failure modes of oracle-guided development.
+\end{itemize}
+
+% ===========================================================================
+\section{Background}
+\label{sec:background}
+
+\subsection{Cosmological inference and differentiable Boltzmann codes}
+
+Galaxy surveys and CMB experiments measure the angular power spectrum $\Cl$ and the galaxy power spectrum $P_\mathrm{gg}(k, \ell)$, which depend on cosmological parameters $\boldsymbol{\theta}$ (density, dark matter density, Hubble constant, spectral index, etc.)\ through the Boltzmann equation---a coupled system of ODEs for photon, baryon, dark matter, and neutrino perturbations that must be integrated numerically.
+An exact Fisher matrix for parameter inference requires $\partial \Cl / \partial \theta_i$; HMC requires the full gradient $\nabla_\theta \log P(\boldsymbol{\theta} | \mathrm{data})$; both are expensive to approximate by finite differences and exact only with automatic differentiation (AD).
+\clax enables \texttt{jax.grad($\Cl$)(params)} for the first time in the CMB context, and \claxpt extends this to one-loop galaxy power spectrum multipoles.
+
+\subsection{AI-assisted scientific code development}
+
+The oracle-based methodology we employ is inspired by the AI C compiler project \citep{carlini2026}, in which 16 parallel Claude Code agents produced a 100k-line Rust C compiler over $\approx$2000 sessions, using GCC as an oracle.
+Key infrastructure includes: (i) a shared \texttt{CHANGELOG.md} updated after every session to prevent re-exploration of dead ends; (ii) test-first development where every module's tests are written against reference data before implementation; (iii) a \texttt{--fast} flag sampling 10\% of test cases to prevent ``time blindness''; and (iv) parallel agent teams using git worktrees to explore competing hypotheses independently.
+
+The critical challenge not addressed in the compiler setting is \emph{domain knowledge}: \class is not just a large codebase---it encodes decades of cosmological physics knowledge, conventions, and approximations that require physics expertise to interpret.
+This makes the boundary between supervised and unsupervised development especially important to characterize.
+
+% ===========================================================================
+\section{Methodology}
+\label{sec:methods}
+
+\subsection{Pipeline architecture}
+
+\clax implements a sequential pipeline of pure functions, each returning a frozen PyTree:
+\begin{equation*}
+\text{CosmoParams} \to \text{BG} \to \text{TH} \to \text{PT} \to \text{PR} \to \text{TR} \to \text{HR} \to \text{LE}
+\end{equation*}
+where BG is background cosmology, TH is thermodynamics/recombination, PT is perturbation theory (Einstein--Boltzmann hierarchy), PR is the primordial spectrum, TR is transfer functions, HR is harmonic ($\Cl$) integration, and LE is CMB lensing via Wigner $d$-functions.
+\texttt{CosmoParams} fields are \jax-traced (for AD); \texttt{PrecisionParams} fields are static (control array shapes).
+No branching on traced values ensures compatibility with \texttt{jax.jit} and \texttt{jax.grad}.
+
+The Einstein--Boltzmann system is integrated using Kvaerno5 (ESDIRK, default) or Rodas5 (Rosenbrock) solvers from the Diffrax library \citep{kidger2021}, with a DISCO-EB-style filtered PID step controller using $k$-dependent weighting on six key perturbation variables.
+Reverse-mode AD through the ODE solve uses \texttt{RecursiveCheckpointAdjoint} for memory efficiency, with \texttt{custom\_vjp} wrappers for the shooting method ($\theta_s \to H_0$ via implicit differentiation) and the Saha equilibrium (implicit-function-theorem JVP).
+
+\claxpt extends the pipeline with one-loop EFT power spectra following the \classpt algorithm: FFTLog decomposition of $P_{22}$ and $P_{13}$ integrals \citep{fang2017}, precomputed $M_{22}/M_{13}$ kernel matrices, IR resummation via DST with odd/even spline mode removal \citep{senatore2015, vlah2015}, an EFT bias expansion ($b_1, b_2, b_{s^2}, b_{3\mathrm{nl}}$, counterterms, stochastic contributions), and RSD multipoles ($\ell = 0, 2, 4$) via Gauss--Legendre quadrature over $\mu$ with anisotropic BAO damping.
+The entire \claxpt module ($\sim$2,100 lines) is end-to-end differentiable: \texttt{jax.grad} flows through FFTLog, IR resummation, bias assembly, and GL quadrature.
+
+\subsection{Development methodology}
+
+\clax was developed primarily by the first author over $\sim$6 days using Claude Code (Opus 4.6), producing $\sim$10,000 lines of \jax code across $\geq$100 agent sessions.
+\claxpt was developed by the second author over 12 days and 57 logged sessions, producing $\sim$2,100 lines.
+Both phases used the same oracle-guided methodology: every module has a test file written \emph{before} implementation, specifying what \class (or \classpt) produces; the code is finished when and only when the oracle tests pass.
+
+The supervision methodology---encoded in \texttt{CLAUDE.md} and refined across both development phases---proved essential.
+Two rules were particularly important: (1) never add fudge factors (if a test fails at 0.2\%, find the actual bug), and (2) test at multiple parameter points, not just the fiducial cosmology.
+Both rules directly prevented specific failure modes documented in \cref{sec:supervised}.
+
+% ===========================================================================
+\section{Results: Accuracy and Performance}
+\label{sec:results}
+
+\subsection{Landscape comparison}
+
+\Cref{tab:landscape} compares \clax against existing differentiable and non-differentiable cosmology codes.
+\clax is the first \jax code providing both CMB angular power spectra and one-loop galaxy power spectrum multipoles with end-to-end automatic differentiation on GPU.
+
+\begin{table*}[t]
+\caption{Comparison of cosmological theory codes. ``AD'' = automatic differentiation. ``PT'' = one-loop perturbation theory for galaxy clustering. \clax is the only code combining CMB $\Cl$, lensing, $\Pk$, and 1-loop PT with full AD on GPU.}
+\label{tab:landscape}
+\centering
+\small
+\begin{tabular}{lccccccc}
+\toprule
+Code & Framework & $\Cl$ & Lensing & $\Pk$ & 1-loop PT & AD & GPU \\
+\midrule
+\class + \classpt & C / Python & \checkmark & \checkmark & \checkmark & \checkmark & --- & --- \\
+CAMB & Fortran & \checkmark & \checkmark & \checkmark & --- & --- & --- \\
+\discoeb & \jax & --- & --- & \checkmark & --- & \checkmark & \checkmark \\
+\abcmb & \jax & \checkmark & \checkmark & \checkmark & --- & \checkmark & \checkmark \\
+SymBoltz.jl & Julia & \checkmark & --- & \checkmark & --- & \checkmark & --- \\
+\textbf{\clax + \claxpt} & \jax & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{CMB pipeline accuracy}
+
+\Cref{tab:cmb_accuracy} summarizes accuracy of \clax against \class at the Planck 2018 best-fit cosmology (\texttt{planck\_cl} preset).
+Background quantities match to $< 0.01\%$; thermodynamics to $< 0.1\%$.
+CMB temperature and polarization spectra are within $0.02\%$--$0.57\%$ across $\ell = 20$--$1000$.
+Lensed spectra at $\ell = 2000$ pass at $< 0.2\%$.
+Multi-cosmology validation across 10 parameter points (omega\_b/cdm $\pm 20\%$, $h \pm 10\%$, massive neutrinos 0.06--0.3~eV, $N_\mathrm{eff} = 2.0$--$4.0$) confirms sub-0.5\% accuracy throughout parameter space.
+
+\begin{table}[t]
+\caption{CMB accuracy (\clax vs.\ \class, \texttt{planck\_cl} preset, Planck 2018 fiducial).}
+\label{tab:cmb_accuracy}
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+Quantity & Max error \\
+\midrule
+$H(z)$, $D_A(z)$, $r_s$ & $< 0.01\%$ \\
+$x_e(z)$, $g(\tau)$ & $< 0.1\%$ \\
+$\Cl^{TT}$, $\ell = 20, 100, 500, 1000$ & 0.08\%, 0.02\%, 0.15\%, 0.57\% \\
+$\Cl^{EE}$, $\ell = 20, 100, 500, 1000$ & 0.21\%, 0.02\%, 0.15\%, 0.26\% \\
+Lensed $\Cl$, $\ell = 2000$ & $< 0.2\%$ \\
+Multi-cosmology (10 pts) & $< 0.5\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Galaxy power spectrum accuracy}
+
+\Cref{tab:pt_accuracy} shows accuracy for one-loop EFT galaxy power spectra at $z = 0.38$ (BOSS effective redshift) against \classpt.
+Real-space spectra ($P_{mm}$, $P_{gg}$, $P_{gm}$) agree to $< 0.31\%$ (mean 0.04\%).
+RSD monopoles ($\ell = 0$) agree to $< 0.6\%$ for matter and galaxies.
+Quadrupoles ($\ell = 2$) agree to $< 0.7\%$ for matter and $< 1.1\%$ for galaxies (the galaxy quadrupole has a known residual error in a tree-level bias term).
+Hexadecapoles ($\ell = 4$) are validated using $|\Delta|/\max(|\mathrm{ref}|) < 2\%$ since \classpt values are small and the spectrum crosses near zero.
+
+\begin{table}[t]
+\caption{Galaxy power spectrum accuracy (\claxpt vs.\ \classpt, $z = 0.38$).}
+\label{tab:pt_accuracy}
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Spectrum & Max error & Metric \\
+\midrule
+$P_{mm}^\mathrm{real}$, $P_{gg}^\mathrm{real}$, $P_{gm}^\mathrm{real}$ & 0.31\% & rel. \\
+$P_{mm}^{(\ell=0)}$, $P_{gg}^{(\ell=0)}$ & 0.59\%, 0.56\% & rel. \\
+$P_{mm}^{(\ell=2)}$, $P_{gg}^{(\ell=2)}$ & 0.70\%, 1.11\% & rel. \\
+$P_{mm}^{(\ell=4)}$, $P_{gg}^{(\ell=4)}$ & 0.70\%, 1.43\% & abs/max \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Gradient verification}
+
+Automatic differentiation gradients (reverse-mode, using \texttt{jax.grad}) agree with fourth-order centered finite differences to $0.15\%$ on average, with 97.7\% of $k$-modes passing a 1\% threshold.
+\Cref{tab:gradients} shows the parameter-by-parameter breakdown for the matter power spectrum $P_{mm}(k)$ at $k = 0.1\;h/$Mpc.
+
+\begin{table}[t]
+\caption{AD vs.\ finite-difference gradients for $P_{mm}(k=0.1\;h/\mathrm{Mpc})$.}
+\label{tab:gradients}
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Parameter & $|\mathrm{AD} / \mathrm{FD} - 1|$ & Status \\
+\midrule
+$\ln(10^{10} A_s)$ & $< 0.01\%$ & \checkmark \\
+$n_s$ & $< 0.01\%$ & \checkmark \\
+$h$ & $< 0.5\%$ & \checkmark \\
+$\omega_b$ & $< 1.0\%$ & \checkmark \\
+$\omega_\mathrm{cdm}$ & $< 0.5\%$ & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key technical ingredients enabling stable AD through the full pipeline include: (1) \texttt{RecursiveCheckpointAdjoint} for memory-efficient reverse-mode through the stiff perturbation ODE; (2) a \texttt{custom\_vjp} on the shooting method ($\theta_s \to H_0$) implementing implicit differentiation; and (3) a \texttt{custom\_jvp} on the hydrogen Saha equilibrium equation, replacing explicit \texttt{stop\_gradient} calls with implicit-function-theorem tangents to restore nonzero sensitivities around recombination.
+
+\subsection{Performance}
+
+\clax offers two presets for different use cases (\cref{tab:performance}).
+The \texttt{fit\_cl} preset uses 20~$k$/decade, $\ell_\mathrm{max} = 17$ hierarchy, table-based Bessel functions, and $\texttt{rtol} = 10^{-3}$ to achieve 34\,s/step on a V100 GPU---sufficient for HMC.
+The \texttt{planck\_cl} preset uses 60~$k$/decade, $\ell_\mathrm{max} = 50$, and tight tolerances for science-grade accuracy at $\sim$487\,s on H100.
+An alternative Rodas5 Rosenbrock solver \citep{dimarzio1993}, following \discoeb, avoids Newton iteration and offers $\sim$3--5$\times$ speedup on the perturbation ODE.
+
+\begin{table}[t]
+\caption{Performance summary.}
+\label{tab:performance}
+\centering
+\small
+\begin{tabular}{lccl}
+\toprule
+Preset & GPU & Time & $\Cl$ accuracy \\
+\midrule
+\texttt{fit\_cl} & V100-32GB & 34\,s & $<1.5\%$ ($\ell \leq 500$) \\
+\texttt{planck\_cl} & H100-80GB & 487\,s & $<0.2\%$ ($\ell \leq 2000$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Application: gradient scaling}
+
+The primary advantage of AD over finite differences for cosmological inference is the scaling of gradient cost with the number of parameters $d$.
+Finite-difference gradients require $2d$ forward evaluations (centered differences); AD requires a single forward pass plus one backward pass regardless of $d$.
+For \clax with $d = 6$ standard $\Lambda$CDM parameters, this represents a $\sim$12$\times$ reduction in gradient cost.
+For extended models ($d = 10$--$20$ including neutrino masses, dark energy, bias parameters, and counterterms), the advantage grows to 20--40$\times$.
+Combined with the 34\,s forward evaluation of \texttt{fit\_cl}, this makes gradient-based sampling with exact theory predictions feasible for the first time in full-shape galaxy clustering analysis.
+
+% ===========================================================================
+\section{Supervised vs.\ Unsupervised Development}
+\label{sec:supervised}
+
+\subsection{Bug taxonomy}
+
+Over the full development of \clax and \claxpt, we documented 40 bugs: 26 in the CMB pipeline and 14 in the PT module.
+We classify these into four types by their nature and whether autonomous resolution was possible.
+
+\textbf{Type~I: Convention and unit bugs.}
+Errors in translating \class conventions into \jax: wrong sign, missing numerical factor, incorrect unit conversion.
+\emph{Agents resolved all Type~I bugs autonomously} by reading the corresponding \class source code and correcting the factor.
+
+\textbf{Type~II: Algorithm implementation bugs.}
+Errors in the numerical algorithm itself: wrong grid type, incorrect matrix storage format, incomplete angular kernel functions.
+\emph{Agents resolved all Type~II bugs autonomously}, typically by careful comparison of intermediate arrays against \class/\classpt at specific $(k, z)$ points.
+
+\textbf{Type~III: Architectural bugs.}
+The computational structure assumed by the implementation is fundamentally incapable of representing the correct physics.
+One instance occurred: the analytic Legendre projection architecture assumed isotropic BAO damping, making it unable to handle anisotropic damping $\Sigma_\mathrm{tot}^2(\mu)$.
+\emph{This required human intervention.}
+
+\textbf{Type~IV: Physics judgment failures.}
+A numerical patch satisfies all oracle tests but encodes physically unmotivated behavior.
+One instance occurred: a scalar fudge factor $\alpha = 0.27$ passed all fiducial tests but has no physical derivation.
+\emph{This required human intervention.}
+
+The resolution breakdown is: Types~I+II (38 bugs): 100\% autonomous; Types~III+IV (2 bugs): 0\% autonomous.
+Overall, 38/40 bugs (95\%) were resolved without human input.
+
+\subsection{Principles for human--agent collaboration}
+
+We distill three principles from the empirical data:
+
+\textbf{P1: Oracle testing verifies \emph{what}, not \emph{why}.}
+An oracle compares numerical values at a reference parameter point.
+It catches implementation errors (wrong sign, wrong coefficient) but not physics errors (wrong model, numerically compensated).
+A fudge factor with zero degrees of freedom at the calibration point will pass every oracle test at that point.
+\emph{Defense}: test across diverse parameter space; test intermediate quantities; build auxiliary tests that check structural properties (e.g., that $P_\mathrm{tree}(k,\mu)$ has the correct anisotropy as a function of $\mu$), not just numerical values.
+
+\textbf{P2: Shared memory prevents re-exploration but not architectural loops.}
+\texttt{CHANGELOG.md} records which algorithms were tried and failed, preventing agents from rediscovering dead ends.
+This was effective for Type~I and~II bugs.
+It did not prevent 33 sessions of exploration within the wrong architectural framework because all attempts were coherent within the (incorrect) model.
+\emph{Defense}: when a bug persists after $N \approx 5$--10 sessions without progress, treat the lack of progress itself as evidence of an architectural problem and trigger human review.
+
+\textbf{P3: The irreducible human role is architectural and physical judgment.}
+Agents excel at reading \class source code and transcribing equations faithfully; identifying which term disagrees via targeted comparison with oracle outputs; and adjusting coefficients and conventions.
+Agents fail at recognizing that an architectural assumption is inconsistent with the physics, and at detecting that a numerically adequate patch produces zero test failures but is not physics.
+\emph{Detecting physics errors that pass all tests requires knowledge of what the physics should look like}, which is a form of human supervision that oracle testing cannot replace.
+
+% ===========================================================================
+\section{Related Work}
+\label{sec:related}
+
+\textbf{Differentiable cosmological codes.}
+\discoeb \citep{hahn2023} implements the nonlinear matter power spectrum in \jax but does not compute CMB spectra ($\Cl$) or galaxy clustering observables.
+\abcmb \citep{zhou2026} provides a complete CMB pipeline in \jax including lensing, massive neutrinos, and a state-of-the-art HyRex recombination treatment, but does not include perturbation theory for galaxy surveys.
+SymBoltz.jl \citep{hermansen2024} provides a full Boltzmann solver in Julia with automatic differentiation but without GPU support.
+\textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum but not the full Boltzmann hierarchy and not CMB spectra.
+\clax is the first \jax code to provide full CMB spectra plus one-loop galaxy power spectra with exact automatic differentiation and GPU execution.
+
+\textbf{EFT power spectra and IR resummation.}
+The EFT of large-scale structure \citep{perko2016, damico2020} provides a systematic expansion for the galaxy power spectrum.
+\classpt \citep{chudaykin2021} is the standard implementation; \claxpt reproduces it in differentiable \jax.
+IR resummation handles BAO peak broadening from long-wavelength displacements \citep{senatore2015, vlah2015}.
+
+\textbf{Agent-assisted scientific software.}
+Recent work has shown that LLM agents can complete extended scientific tasks autonomously \citep{carlini2026}, but most evaluations focus on syntactic correctness (compilation, test passage) rather than physical validity.
+Our work identifies semantic correctness---the requirement that a passing numerical patch has physical basis, not just calibration-point accuracy---as the key challenge distinguishing scientific software from general code generation.
+
+% ===========================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have developed \clax and \claxpt---fully differentiable \jax reimplementations of the \class and \classpt Boltzmann codes---using oracle-guided agentic development.
+The codes achieve $< 0.1\%$ CMB accuracy, $< 0.7\%$ galaxy power spectrum accuracy, with automatic differentiation gradients verified to 0.15\% and GPU execution at 34\,s/step on V100.
+Empirically, AI agents resolved 95\% of implementation bugs autonomously.
+The remaining 5\% required human physics judgment: recognizing a structural mismatch between an architecture and its target physics, and detecting a numerically effective but physically unmotivated fudge factor.
+
+These findings suggest a practical framework for AI-assisted scientific code development: agents operate autonomously in unsupervised mode for implementation work, but human scientists remain in the loop as architectural and physical reviewers, intervening proactively when oracle feedback stalls or when a numerical patch lacks physical derivation.
+The codes are open source at \url{https://github.com/smsharma/clax}.
+
+% ===========================================================================
+\bibliography{references}
+\bibliographystyle{icml2026}
+
+\end{document}

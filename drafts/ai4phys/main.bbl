@@ -1,0 +1,143 @@
+\begin{thebibliography}{21}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Blas et~al.(2011)Blas, Lesgourgues, and Tram]{blas2011}
+Blas, D., Lesgourgues, J., and Tram, T.
+\newblock The cosmic linear anisotropy solving system ({CLASS}). {Part II}:
+  Approximation schemes.
+\newblock \emph{JCAP}, 2011\penalty0 (07):\penalty0 034, 2011.
+\newblock \doi{10.1088/1475-7516/2011/07/034}.
+
+\bibitem[Cabezas et~al.(2024)]{cabezas2024}
+Cabezas, A. et~al.
+\newblock {BlackJAX}: Composable {Bayesian} inference in {JAX}.
+\newblock 2024.
+
+\bibitem[Carlini(2026)]{carlini2026}
+Carlini, N.
+\newblock Coding agent builds a {C} compiler.
+\newblock Anthropic Technical Report,
+  \url{http://anthropic.com/research/coding-agent-c-compiler}, 2026.
+
+\bibitem[Chudaykin et~al.(2021)Chudaykin, Ivanov, Philcox, and
+  Simonovi{\'c}]{chudaykin2021}
+Chudaykin, A., Ivanov, M.~M., Philcox, O. H.~E., and Simonovi{\'c}, M.
+\newblock Nonlinear perturbation theory extension of the boltzmann code
+  {CLASS}.
+\newblock \emph{Phys. Rev. D}, 103:\penalty0 023507, 2021.
+\newblock \doi{10.1103/PhysRevD.103.023507}.
+
+\bibitem[Cranmer et~al.(2020)Cranmer, Brehmer, and Louppe]{cranmer2020}
+Cranmer, K., Brehmer, J., and Louppe, G.
+\newblock The frontier of simulation-based inference.
+\newblock \emph{Proc. Natl. Acad. Sci.}, 117:\penalty0 30055--30062, 2020.
+\newblock \doi{10.1073/pnas.1912789117}.
+
+\bibitem[D'Amico et~al.(2020)]{damico2020}
+D'Amico, G. et~al.
+\newblock The cosmological analysis of the {SDSS/BOSS} data from the effective
+  field theory of large-scale structure.
+\newblock \emph{JCAP}, 2020\penalty0 (05):\penalty0 005, 2020.
+
+\bibitem[{DESI Collaboration}(2025)]{desi2025}
+{DESI Collaboration}.
+\newblock {DESI 2024 VI}: Cosmological constraints from the measurements of
+  baryon acoustic oscillations.
+\newblock \emph{AJ}, 169\penalty0 (3):\penalty0 163, 2025.
+
+\bibitem[Di~Marzo(1993)]{dimarzio1993}
+Di~Marzo, G.
+\newblock M{\'e}thodes de {Rosenbrock} d'ordre 5(4) adapt{\'e}es aux
+  syst{\`e}mes diff{\'e}rentiels-alg{\'e}briques, 1993.
+\newblock Diploma Thesis, University of Geneva.
+
+\bibitem[Fang et~al.(2017)Fang, Blazek, McEwen, and Hirata]{fang2017}
+Fang, X., Blazek, J.~A., McEwen, J.~E., and Hirata, C.~M.
+\newblock {FAST-PT II}: an algorithm to calculate convolution integrals of
+  general tensor quantities in cosmological perturbation theory.
+\newblock \emph{JCAP}, 2017\penalty0 (02):\penalty0 030, 2017.
+
+\bibitem[Gabri{\'e} et~al.(2022)Gabri{\'e}, Rotskoff, and
+  Vanden-Eijnden]{gabrie2022}
+Gabri{\'e}, M., Rotskoff, G.~M., and Vanden-Eijnden, E.
+\newblock Adaptive monte carlo augmented with normalizing flows.
+\newblock \emph{Proc. Natl. Acad. Sci.}, 119\penalty0 (10), 2022.
+\newblock \doi{10.1073/pnas.2109420119}.
+
+\bibitem[Hahn et~al.(2023)Hahn, List, and Porqueres]{hahn2023}
+Hahn, O., List, F., and Porqueres, N.
+\newblock {DISCO-DJ}: Differentiable simulations for cosmology -- {Done with
+  JAX}.
+\newblock \url{https://github.com/DifferentiableUniverseInitiative/disco-eb},
+  2023.
+\newblock arXiv:2311.03291.
+
+\bibitem[Hermansen(2024)]{hermansen2024}
+Hermansen, H.
+\newblock {SymBoltz.jl}: A differentiable cosmological boltzmann solver in
+  {Julia}.
+\newblock \url{https://github.com/hersle/SymBoltz.jl}, 2024.
+
+\bibitem[Kidger(2021)]{kidger2021}
+Kidger, P.
+\newblock \emph{On Neural Differential Equations}.
+\newblock PhD thesis, University of Oxford, 2021.
+
+\bibitem[Lemos et~al.(2023)]{lemos2023}
+Lemos, P. et~al.
+\newblock jax-cosmo: An end-to-end differentiable and {GPU} accelerated
+  cosmology library.
+\newblock \emph{The Open Journal of Astrophysics}, 6, 2023.
+\newblock \doi{10.21105/astro.2302.05163}.
+
+\bibitem[Lewis et~al.(2000)Lewis, Challinor, and Lasenby]{lewis2000}
+Lewis, A., Challinor, A., and Lasenby, A.
+\newblock Efficient computation of cosmic microwave background anisotropies in
+  closed {FRW} models.
+\newblock \emph{ApJ}, 538:\penalty0 473--476, 2000.
+\newblock \doi{10.1086/309179}.
+
+\bibitem[Neal(2011)]{neal2011}
+Neal, R.~M.
+\newblock {MCMC} using {Hamiltonian} dynamics.
+\newblock In Brooks, S., Gelman, A., Jones, G.~L., and Meng, X.-L. (eds.),
+  \emph{Handbook of Markov Chain Monte Carlo}, chapter~5. Chapman \& Hall/CRC,
+  2011.
+
+\bibitem[Perko et~al.(2016)Perko, Senatore, Jennings, and Wechsler]{perko2016}
+Perko, A., Senatore, L., Jennings, E., and Wechsler, R.~H.
+\newblock Biased tracers in redshift space in the {EFT} of large-scale
+  structure.
+\newblock 2016.
+
+\bibitem[Phan et~al.(2019)Phan, Pradhan, and Jankowiak]{phan2019}
+Phan, D., Pradhan, N., and Jankowiak, M.
+\newblock Composable effects for flexible and accelerated probabilistic
+  programming in {NumPyro}.
+\newblock 2019.
+
+\bibitem[Senatore \& Zaldarriaga(2015)Senatore and Zaldarriaga]{senatore2015}
+Senatore, L. and Zaldarriaga, M.
+\newblock The {IR}-resummed effective field theory of large scale structures.
+\newblock \emph{JCAP}, 2015\penalty0 (02):\penalty0 013, 2015.
+\newblock \doi{10.1088/1475-7516/2015/02/013}.
+
+\bibitem[Vlah et~al.(2015)Vlah, White, and Aviles]{vlah2015}
+Vlah, Z., White, M., and Aviles, A.
+\newblock A {Vlasov-Poisson} approach to the large-scale structure, with
+  applications to the {EFT}.
+\newblock \emph{JCAP}, 2015\penalty0 (09):\penalty0 014, 2015.
+\newblock \doi{10.1088/1475-7516/2015/09/014}.
+
+\bibitem[Zhou et~al.(2026)Zhou, Giovanetti, and Liu]{zhou2026}
+Zhou, Z., Giovanetti, C., and Liu, H.
+\newblock {ABCMB}: A {Python+JAX} package for the cosmic microwave background
+  power spectrum.
+\newblock 2026.
+\newblock arXiv:2602.15104.
+
+\end{thebibliography}
