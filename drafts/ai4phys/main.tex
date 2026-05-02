@@ -247,7 +247,9 @@ Key technical ingredients enabling stable AD through the full pipeline include: 
 \clax offers two presets for different use cases (\cref{tab:performance}).
 The \texttt{fit\_cl} preset uses 20~$k$/decade, $\ell_\mathrm{max} = 17$ hierarchy, table-based Bessel functions, and $\texttt{rtol} = 10^{-3}$ to achieve 34\,s/step on a V100 GPU---sufficient for HMC.
 The \texttt{planck\_cl} preset uses 60~$k$/decade, $\ell_\mathrm{max} = 50$, and tight tolerances for science-grade accuracy at $\sim$487\,s on H100.
-An alternative Rodas5 Rosenbrock solver \citep{dimarzio1993}, following \discoeb, avoids Newton iteration entirely (one LU factorization per step instead of iterative convergence), yielding a measured $\sim$1.3$\times$ speedup on CPU with larger gains expected on GPU.
+An alternative Rodas5 Rosenbrock solver \citep{dimarzio1993}, following \discoeb, avoids Newton iteration entirely (one LU factorization per step instead of iterative convergence).
+A batched variant (\texttt{Rodas5Batched}) solves all $k$-modes in a single \texttt{diffeqsolve} call with shared adaptive time-stepping across the batch, vmapping the Jacobian computation and LU factorization---the same architecture used by \discoeb.
+On CPU, the unbatched Rodas5 yields a measured $\sim$1.3$\times$ speedup over Kvaerno5; the batched variant is expected to offer substantially larger gains on GPU by saturating GPU throughput with large batched linear algebra.
 
 \begin{table}[t]
 \caption{Performance summary.}
