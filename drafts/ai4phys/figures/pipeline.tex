@@ -1,150 +1,144 @@
-\documentclass[tikz,border=3pt]{standalone}
+\documentclass[tikz,border=2pt]{standalone}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds}
 
-\definecolor{bgmod}{HTML}{E8F4FD}
-\definecolor{thmod}{HTML}{D4EDDA}
-\definecolor{ebmod}{HTML}{FFF3CD}
-\definecolor{hrmod}{HTML}{F8D7DA}
-\definecolor{ptmod}{HTML}{E2D4F0}
-\definecolor{oracle}{HTML}{FFE0B2}
-\definecolor{adcolor}{HTML}{2E86C1}
-\definecolor{oraclecolor}{HTML}{D35400}
-\definecolor{claxbg}{HTML}{F0F4F8}
-\definecolor{claxptbg}{HTML}{F3EDF9}
+% Palette
+\definecolor{shared}{HTML}{E8EFF5}     % shared pipeline modules
+\definecolor{cmbmod}{HTML}{F8D7DA}     % CMB branch
+\definecolor{galmod}{HTML}{E2D4F0}     % galaxy branch
+\definecolor{oraclebg}{HTML}{FFF3CD}   % oracle boxes
+\definecolor{oracleline}{HTML}{C07000} % oracle arrows
+\definecolor{outputbg}{HTML}{F5F5F5}   % output boxes
 
 \begin{document}
 \begin{tikzpicture}[
-    node distance=0.5cm and 0.65cm,
-    module/.style={
-        rectangle, rounded corners=3pt, draw=black!50,
-        minimum width=1.7cm, minimum height=0.6cm,
-        font=\small\sffamily, align=center, thick
+    % All text sans-serif, consistent sizing
+    every node/.style={font=\sffamily},
+    % Module boxes
+    mod/.style={
+        rectangle, rounded corners=2pt, draw=#1!60!black!40, fill=#1,
+        thick, minimum width=1.6cm, minimum height=0.8cm, align=center,
+        font=\sffamily\small
     },
-    param/.style={
-        module, fill=white, draw=black!80,
-        font=\small\sffamily\bfseries, minimum width=1.9cm
+    mod/.default=shared,
+    % Smaller file label below module
+    filelabel/.style={
+        font=\sffamily\tiny, text=black!45
     },
-    oraclenode/.style={
-        rectangle, rounded corners=2pt, draw=oraclecolor!70, dashed, thick,
-        fill=oracle!60, minimum width=1.4cm, minimum height=0.45cm,
-        font=\scriptsize\sffamily\bfseries, align=center
+    % Output boxes
+    outputbox/.style={
+        rectangle, rounded corners=2pt, draw=black!20, fill=outputbg,
+        minimum width=1.4cm, minimum height=0.55cm, align=center,
+        font=\sffamily\small
     },
-    outputnode/.style={
-        rectangle, rounded corners=2pt, draw=black!30,
-        fill=white, minimum width=1.5cm, minimum height=0.4cm,
-        font=\scriptsize\sffamily, align=center
+    % Oracle reference boxes
+    orc/.style={
+        rectangle, rounded corners=2pt, draw=oracleline!60, dashed,
+        fill=oraclebg, thick,
+        minimum width=1.3cm, minimum height=0.45cm, align=center,
+        font=\sffamily\small\bfseries
     },
-    arrow/.style={-{Stealth[length=4pt]}, semithick, black!65},
-    adarrow/.style={-{Stealth[length=4pt]}, semithick, adcolor, densely dashed},
-    oraclearrow/.style={-{Stealth[length=4pt]}, semithick, oraclecolor, densely dotted},
-    branchlabel/.style={font=\tiny\sffamily\itshape, text=black!45},
+    % Arrows
+    flow/.style={-{Stealth[length=4pt, width=3pt]}, thick, black!55},
+    orcflow/.style={-{Stealth[length=3.5pt, width=2.5pt]}, semithick,
+                    oracleline, densely dotted},
+    % Branch fork dot
+    dot/.style={circle, fill=black!55, inner sep=1.2pt},
 ]
 
-% =====================================================================
-% Row 1: Shared pipeline
-% =====================================================================
-\node[param] (params) {CosmoParams};
-\node[module, fill=bgmod, right=0.7cm of params] (bg) {Background\\[-2pt]{\tiny\texttt{background.py}}};
-\node[module, fill=thmod, right=of bg] (th) {Thermo\\[-2pt]{\tiny\texttt{thermodynamics.py}}};
-\node[module, fill=ebmod, right=of th] (eb) {Einstein--Boltzmann\\[-2pt]{\tiny\texttt{perturbations.py}}};
-\node[module, fill=bgmod!60, right=of eb] (pr) {Primordial\\[-2pt]{\tiny\texttt{primordial.py}}};
+% ===== Row 1: Shared pipeline =====
+\node[mod, draw=black!50, fill=white, font=\sffamily\small\bfseries]
+    (params) {CosmoParams};
 
-% Solver annotation under EB
-\node[font=\tiny\sffamily, text=black!40, anchor=north] at ($(eb.south) + (0, -0.02)$)
-    {Kvaerno5\,/\,Rodas5};
+\node[mod, right=0.55cm of params] (bg) {Background};
+\node[filelabel, below=0pt of bg] {\texttt{background.py}};
 
-% CLASS oracle above EB
-\node[oraclenode, above=0.4cm of eb] (classref) {\textsc{class}\,v3.3.4};
-\draw[oraclearrow] (classref) -- (eb);
+\node[mod, right=0.55cm of bg] (th) {Thermo};
+\node[filelabel, below=0pt of th] {\texttt{thermodynamics.py}};
 
-% =====================================================================
-% Row 2: Two branches, both flowing left-to-right
-% =====================================================================
+\node[mod, right=0.55cm of th, minimum width=2.0cm] (eb) {Einstein--Boltzmann};
+\node[filelabel, below=0pt of eb] {\texttt{perturbations.py}};
 
-% CMB branch (left side of row 2)
-\node[module, fill=hrmod!70, below=1.4cm of bg] (tr) {Transfer\\[-2pt]{\tiny\texttt{transfer.py}}};
-\node[module, fill=hrmod, right=of tr] (hr) {Harmonic\\[-2pt]{\tiny\texttt{harmonic.py}}};
-\node[module, fill=hrmod!50, right=of hr] (le) {Lensing\\[-2pt]{\tiny\texttt{lensing.py}}};
+\node[mod, right=0.55cm of eb] (pr) {Primordial};
+\node[filelabel, below=0pt of pr] {\texttt{primordial.py}};
 
-% Galaxy branch (right side of row 2)
-\node[module, fill=ptmod, below=1.4cm of pr] (ept) {One-loop PT\\[-2pt]{\tiny\texttt{ept.py}}};
+% Row 1 arrows
+\draw[flow] (params) -- (bg);
+\draw[flow] (bg) -- (th);
+\draw[flow] (th) -- (eb);
+\draw[flow] (eb) -- (pr);
 
-% CLASS-PT oracle above EPT
-\node[oraclenode, above=0.35cm of ept] (classptref) {\textsc{class-pt}};
-\draw[oraclearrow] (classptref) -- (ept);
+% Oracle: CLASS above EB
+\node[orc, above=0.5cm of eb] (classref) {\textsc{class}\,v3.3.4};
+\draw[orcflow] (classref) -- (eb);
 
-% =====================================================================
-% Row 3: Outputs
-% =====================================================================
-\node[outputnode, below=0.45cm of le] (clout) {$C_\ell^{TT/EE/TE/BB}$\\[-1pt]lensed\,$C_\ell$};
-\node[outputnode, below=0.45cm of tr] (pkout) {$P(k)$};
-\node[outputnode, below=0.45cm of ept] (pgout) {$P_{gg}(k,\ell{=}0,2,4)$\\[-1pt]$P_{mm},\;P_{gm}$};
+% ===== Fork point below EB =====
+\node[dot, below=0.7cm of eb] (fork) {};
+\draw[flow] (eb) -- (fork);
 
-% =====================================================================
-% Data flow arrows
-% =====================================================================
-% Row 1
-\draw[arrow] (params) -- (bg);
-\draw[arrow] (bg) -- (th);
-\draw[arrow] (th) -- (eb);
-\draw[arrow] (eb) -- (pr);
+% ===== Row 2 left: CMB branch =====
+\node[mod=cmbmod, below left=1.5cm and 1.8cm of eb] (tr) {Transfer};
+\node[filelabel, below=0pt of tr] {\texttt{transfer.py}};
 
-% Branch: EB feeds both rows
-\draw[arrow] (eb.south) -- ++(0,-0.35) -| (tr.north)
-    node[branchlabel, pos=0.25, right] {CMB};
-\draw[arrow] (eb.south) -- ++(0,-0.35) -| (ept.north)
-    node[branchlabel, pos=0.25, left] {galaxy};
+\node[mod=cmbmod, right=0.5cm of tr] (hr) {Harmonic};
+\node[filelabel, below=0pt of hr] {\texttt{harmonic.py}};
 
-% Primordial feeds Transfer
-\draw[arrow] (pr.south) -- ++(0,-0.2) -| ([xshift=3pt]tr.north east);
+\node[mod=cmbmod, right=0.5cm of hr] (le) {Lensing};
+\node[filelabel, below=0pt of le] {\texttt{lensing.py}};
 
-% CMB chain
-\draw[arrow] (tr) -- (hr);
-\draw[arrow] (hr) -- (le);
+% CMB branch arrows
+\draw[flow] (fork) -| (tr);
+\draw[flow] (pr) |- ([yshift=3pt]tr.north east);
+\draw[flow] (tr) -- (hr);
+\draw[flow] (hr) -- (le);
 
-% Outputs
-\draw[arrow] (le) -- (clout);
-\draw[arrow] (tr.south) -- (pkout);
-\draw[arrow] (ept) -- (pgout);
+% ===== Row 2 right: Galaxy branch =====
+\node[mod=galmod, below right=1.5cm and 1.8cm of eb] (ept) {One-loop PT};
+\node[filelabel, below=0pt of ept] {\texttt{ept.py}};
 
-% BG/TH feed EPT (for linear P_k, growth factor)
-\draw[arrow, black!35] (bg.south) -- ++(0,-0.55) -| ([xshift=-3pt]ept.north west);
-\draw[arrow, black!35] (th.south) -- ++(0,-0.45) -| ([xshift=3pt]ept.north west);
+% Galaxy branch arrow
+\draw[flow] (fork) -| (ept);
 
-% =====================================================================
-% AD gradient arrow
-% =====================================================================
-\coordinate (adbot) at ($(pkout.south) + (0, -0.4)$);
-\draw[adarrow] (clout.south) |- (adbot);
-\draw[adarrow] (pgout.south) |- (adbot);
-\draw[adarrow] (adbot) -| ($(params.south) + (0, 0)$)
-    node[pos=0.5, below, font=\scriptsize\sffamily, text=adcolor]
-    {\texttt{jax.grad}\,(reverse-mode AD)};
+% Oracle: CLASS-PT above EPT
+\node[orc, above=0.5cm of ept] (classptref) {\textsc{class-pt}};
+\draw[orcflow] (classptref) -- (ept);
 
-% =====================================================================
-% Background boxes
-% =====================================================================
+% ===== Row 3: Outputs =====
+\node[outputbox, below=0.7cm of tr] (pkout) {$P(k)$};
+\node[outputbox, below=0.7cm of le] (clout) {$C_\ell^{TT/EE/TE/BB}$\\[-2pt]{\small lensed\,$C_\ell$}};
+\node[outputbox, below=0.7cm of ept] (pgout) {$P_{gg}(k,\ell)$\\[-2pt]{\small $P_{mm},\,P_{gm}$}};
+
+\draw[flow] (tr) -- (pkout);
+\draw[flow] (le) -- (clout);
+\draw[flow] (ept) -- (pgout);
+
+% ===== Branch labels =====
+\node[font=\sffamily\scriptsize\itshape, text=black!40]
+    at ($(fork) + (-1.8, -0.35)$) {CMB spectra};
+\node[font=\sffamily\scriptsize\itshape, text=black!40]
+    at ($(fork) + (1.8, -0.35)$) {galaxy clustering};
+
+% ===== Background shading =====
 \begin{scope}[on background layer]
-    \node[fit=(bg)(th)(eb)(pr)(tr)(hr)(le)(clout)(pkout)(classref),
-          draw=black!12, fill=claxbg, rounded corners=6pt,
-          inner sep=9pt,
-          label={[font=\footnotesize\sffamily\bfseries, text=black!40,
+    % clax region
+    \node[fit=(bg)(th)(eb)(pr)(tr)(hr)(le)(pkout)(clout)(classref),
+          draw=black!8, fill=shared!30, rounded corners=5pt,
+          inner sep=10pt,
+          label={[font=\sffamily\footnotesize\bfseries, text=black!30,
                   anchor=north west]north west:\textsc{clax}}] {};
+    % clax-pt region (no overlap)
     \node[fit=(ept)(pgout)(classptref),
-          draw=ptmod!40, fill=claxptbg, rounded corners=6pt,
-          inner sep=9pt,
-          label={[font=\footnotesize\sffamily\bfseries, text=black!40,
+          draw=galmod!40, fill=galmod!15, rounded corners=5pt,
+          inner sep=10pt,
+          label={[font=\sffamily\footnotesize\bfseries, text=black!30,
                   anchor=north east]north east:\textsc{clax-pt}}] {};
 \end{scope}
 
-% =====================================================================
-% Legend
-% =====================================================================
-\node[font=\scriptsize\sffamily, anchor=north west] at ($(params.south west) + (-0.2, -3.0)$) {
-    \tikz[baseline=-0.5ex]{\draw[arrow] (0,0) -- (0.5,0);}\,data flow \quad
-    \tikz[baseline=-0.5ex]{\draw[oraclearrow] (0,0) -- (0.5,0);}\,oracle test \quad
-    \tikz[baseline=-0.5ex]{\draw[adarrow] (0,0) -- (0.5,0);}\,AD gradient
+% ===== Legend =====
+\node[anchor=north west, font=\sffamily\scriptsize] at ($(pkout.south west) + (-0.8, -0.45)$) {
+    \tikz[baseline=-0.5ex]{\draw[flow] (0,0) -- (0.45,0);}\;data flow
+    \qquad
+    \tikz[baseline=-0.5ex]{\draw[orcflow] (0,0) -- (0.45,0);}\;oracle reference
 };
 
 \end{tikzpicture}
