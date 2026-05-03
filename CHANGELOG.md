@@ -5,66 +5,6 @@
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
 
-### May 3, 2026: C_l^phiphi API consolidation + Halofit nonlinear injection (BREAKING)
-
-**Collapsed six redundant `compute_cl_pp_*` implementations into a single public
-`compute_cl_pp(... nonlinear="none"|"halofit")` backed by the source-Limber
-kernel. Halofit nonlinear corrections are now z-aware on-the-fly, matching
-the CLASS approach.**
-
-**Public API:**
-
-```python
-clax.compute_cl_pp(pt, params, bg, th, l_max, *, nonlinear="none")
-# nonlinear ∈ {"none", "halofit"}; anything else raises ValueError
-```
-
-The function is now re-exported at the package root (`clax.compute_cl_pp`)
-along with `clax.lens_cls`.
-
-**Removed** (BREAKING):
-
-- `compute_cl_pp` (Siddharth's original — superseded by source-Limber)
-- `compute_cl_pp_fast` (inaccurate at l ≥ 300; documented in its own docstring)
-- `compute_cl_pp_vmap` (Hermite Bessel-table vmap; superseded)
-- `compute_cl_pp_limber` (Poisson-reconstruction Limber; ~20% overestimate at
-  l = 2500 vs CLASS — see prior memory note on the systematic)
-
-**Renamed:**
-
-- `compute_cl_pp_source_limber` → `compute_cl_pp` (sole public entry)
-- `compute_cl_pp_transfer` → `_compute_cl_pp_full_bessel` (private oracle,
-  retained only as the slow, dense-Bessel reference for cross-impl tests)
-
-**Halofit modulator** (new, private — `_halofit_modulator`):
-
-- Builds `R(k, z) = P_NL(k, z) / P_lin(k, z)` on a 50-point z-grid via
-  `vmap(compute_pk_nonlinear)` over z.
-- Power-law-extrapolates `pt.k_grid` in log-log to `k_max ≥ 10 Mpc^-1` so
-  that Halofit's σ(R) bisection converges (per the existing `feedback`
-  memory on Halofit k-grid requirements).
-- 2D-interpolates `R` onto every `(k_grid, tau_grid)` lattice point using
-  `bg.loga_of_tau` for the τ→z mapping.
-- Multiplies `sqrt(R)` directly into `S_transfer`, mirroring CLASS's
-  source-multiplication recipe (no growth-factor approximation).
-
-**Tests:**
-
-- `tests/test_cl_pp.py` (renamed from `test_cl_pp_source_limber.py`):
-  contract + linear-accuracy + cross-impl-vs-`_compute_cl_pp_full_bessel`
-  + Halofit smoke tests + JIT/AD compatibility.
-- `tests/test_clpp_halofit_ratio.py` (rewritten): NL/linear ratio vs
-  CLASS Halofit reference (`reference_data/classpt_clpp_halofit.npz`),
-  <5% at l ≤ 500 and <10% at l ≥ 1000.
-- `tests/test_lensing.py` (Siddharth's): updated to the new
-  `compute_cl_pp` signature.
-- Deleted: `tests/test_cl_pp_implementations.py`, `tests/test_cl_pp_limber.py`.
-
-**Migration note (pre-1.0, hard break):** call sites of the deleted
-implementations should switch to the unified `compute_cl_pp(... nonlinear=...)`
-entry. The `nonlinear="ept"` value is reserved for a follow-up PR that wires
-the EFTofLSS one-loop bridge once `clax/ept.py` is in upstream.
-
 ### Apr 20, 2026: Rodas5 Rosenbrock solver + dark energy perturbations + accuracy fixes
 
 **Added an alternative Rosenbrock ODE solver (Rodas5) for the perturbation
