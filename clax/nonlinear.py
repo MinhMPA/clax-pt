@@ -410,18 +410,12 @@ def compute_pk_nonlinear(
     # Dark energy EOS at this redshift (CPL parameterization)
     w = w0 + wa * (1.0 - a)
 
-    # Check if the k-grid supports sigma(R)=1 for Halofit.
-    # CLASS does NOT extrapolate beyond the perturbation k-grid.
-    # When k_max is too small, CLASS sets nl_corr=1.0 (no correction).
+    # Check if the k-grid supports sigma(R)=1 for Halofit, vmap/jit-safe.
+    # CLASS does NOT extrapolate beyond the perturbation k-grid: when k_max
+    # is too small, CLASS sets nl_corr=1.0 (no correction).
     # cf. CLASS fourier.c:1597-1716, precisions.h: nonlinear_min_k_max=5.0
-    #
-    # Skip the check inside JIT (tracer values can't be concretized).
-    # Callers using jax.grad/jit typically provide a wide k-grid.
     lnk = jnp.log(k)
-    try:
-        if not _sigma_convergence_check(lnk, pk_lin):
-            return pk_lin
-    except jax.errors.ConcretizationTypeError:
-        pass  # inside JIT trace — assume grid is adequate
-
-    return halofit_nl_pk(k, pk_lin, Omega_m, Omega_v, w, fnu, h)
+    R_min = jnp.sqrt(-jnp.log(1e-7)) / k[-1]
+    sig = sigma_R(R_min, lnk, pk_lin)
+    pk_nl = halofit_nl_pk(k, pk_lin, Omega_m, Omega_v, w, fnu, h)
+    return jnp.where(sig >= 1.0, pk_nl, pk_lin)
