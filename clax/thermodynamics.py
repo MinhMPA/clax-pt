@@ -706,8 +706,10 @@ def thermodynamics_solve(
     z_grid = 1.0 / a_grid - 1.0
     mu_H = 1.0 / (1.0 - Y_He)
     _bigH = 3.2407792902755102e-18  # H0=100 km/s/Mpc in s^-1
-    _m_p = 1.672621637e-27  # proton mass [kg], cf. CLASS thermodynamics.h:705
-    n_H_0 = 3.0 * (_bigH * params.h)**2 / (8.0 * math.pi * const.G_SI * _m_p * mu_H) * Omega_b
+    # n_H_0 = (1-Y_He) * rho_b / m_H, where the appropriate mass is the hydrogen
+    # atom mass (m_H), NOT the proton mass (m_p).  CLASS does the same at
+    # thermodynamics.c:812 using _m_H_ = 1.673575e-27 kg.
+    n_H_0 = 3.0 * (_bigH * params.h)**2 / (8.0 * math.pi * const.G_SI * const.m_H_kg * mu_H) * Omega_b
     # kappa_dot prefactor: kappa_dot(z) = xe * n_H_0 * (1+z)^2 * sigma_T * c/Mpc
     kd_prefactor = n_H_0 * (1.0 + z_grid)**2 * const.sigma_T * const.Mpc_over_m
     dtau_grid = jnp.diff(tau_grid)
