@@ -58,21 +58,22 @@ Lensing algorithm sub-0.2% at all l=10-2000 for TT and EE (tested with CLASS unl
 `clax.compute_cl_pp(pt, params, bg, th, l_max, *, nonlinear="none")` uses
 the source-based Limber kernel (CLASS `transfer.c` + `harmonic.c`):
 
-| Multipole l | nonlinear="none" vs CLASS | nonlinear="halofit" NL/lin vs CLASS |
-|-------------|---------------------------|-------------------------------------|
-| 100         | **<0.1%**                 | **<1%**                             |
-| 200         | **<1%**                   | **<3%**                             |
-| 500         | **<3%**                   | **<7%**                             |
-| 1000        | **<5%**                   | **<10%**                            |
-| 2500        | **<5%**                   | **<10%**                            |
+With `pt_k_max_cl >= 5.0 Mpc^-1` (required for Halofit's σ(R) bisection):
 
-Linear path matches CLASS to <1% for ℓ ≤ 2500. Halofit injection
+| Multipole l | nonlinear="none" vs CLASS | nonlinear="halofit" NL/lin err vs CLASS |
+|-------------|---------------------------|------------------------------------------|
+| 100         | **<1%**                   | **<1%**                                  |
+| 200         | **<1%**                   | **<3%**                                  |
+| 500         | **<1%**                   | **<7%**                                  |
+| 1000        | **<1%**                   | **<10%**                                 |
+| 2500        | **<1%**                   | **<10%**                                 |
+
+Linear path matches CLASS to <1% at all ℓ ≤ 2500. Halofit injection
 multiplies the lensing source by sqrt(R(k, z(τ))) where R = P_NL/P_lin is
 computed on a 100-point z-grid via `vmap(compute_pk_nonlinear)` and
 interpolated, matching CLASS's source-multiplication recipe with the
-σ(R) ≥ 1 skip from `fourier.c:1706-1716`. Halofit requires
-`pt.k_grid[-1] >= 5 Mpc^-1` for σ(R) bisection; narrower grids gracefully
-degrade to no NL correction.
+σ(R) ≥ 1 skip from `fourier.c:1706-1716`. Narrower k-grids
+(`pt_k_max_cl < 5`) gracefully degrade to no NL correction (R = 1).
 
 ### Multi-cosmology validation
 
