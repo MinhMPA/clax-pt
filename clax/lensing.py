@@ -149,7 +149,7 @@ def _halofit_modulator(
         ``S_transfer`` to inject NL corrections into the source-Limber
         kernel (CLASS source-multiplication recipe).
     """
-    from clax.nonlinear import compute_pk_nonlinear
+    from clax.nonlinear import compute_pk_nonlinear, sigma_R
     from clax.interpolation import CubicSpline
 
     # --- Extended k-grid (power-law extrapolation if pt.k_grid too narrow) ---
@@ -216,12 +216,22 @@ def _halofit_modulator(
     fnu = bg.Omega_ncdm / jnp.maximum(Omega_m_0, 1e-30)
 
     # --- P_NL(k_ext, z) via vmap over z ---
+    # CLASS skips Halofit when sigma(R)<1 (cf. fourier.c:1706-1716, where
+    # nl_corr_density = 1.0). The Python-level check inside
+    # compute_pk_nonlinear is bypassed under vmap (try/except catches
+    # ConcretizationTypeError), so we replicate the check inline here.
+    lnk_ext = jnp.log(k_ext)
+    R_min = jnp.sqrt(-jnp.log(1e-7)) / k_ext[-1]
+
     def _halofit_one_z(pk_lin_one, z):
-        return compute_pk_nonlinear(
+        pk_nl = compute_pk_nonlinear(
             k_ext, pk_lin_one,
             Omega_m_0=Omega_m_0, Omega_lambda_0=Omega_lambda_0,
             Omega_r_0=Omega_r_0, w0=params.w0, wa=params.wa,
             fnu=fnu, h=params.h, z=z)
+        # Force pk_nl = pk_lin when sigma(R_min) < 1 (Halofit not applicable)
+        sig = sigma_R(R_min, lnk_ext, pk_lin_one)
+        return jnp.where(sig >= 1.0, pk_nl, pk_lin_one)
 
     pk_nl_z = jax.vmap(_halofit_one_z)(pk_lin_z, z_grid)  # (n_z, Nk_ext)
 
