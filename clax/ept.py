@@ -2023,11 +2023,11 @@ def compute_ept_from_clax(
     delta_m_0 = pt.delta_m[:, -1]  # shape (Nk_pt,), at z≈0
     from clax.interpolation import CubicSpline as CS
     spline = CS(lnk_pt, delta_m_0)
-    delta_m_ept = spline(lnk_out)
+    delta_m_ept = spline.evaluate(lnk_out)
 
     # Linear P(k) in Mpc³
     k_arr = jnp.array(k_mpc)
-    prim = primordial_scalar_pk(params, k_arr)  # primordial power spectrum
+    prim = primordial_scalar_pk(k_arr, params)  # primordial power spectrum
     pk_mpc3 = prim * delta_m_ept ** 2 / k_arr ** 3
 
     # Convert to h-units: P_h = P * h³,  k_h = k / h
