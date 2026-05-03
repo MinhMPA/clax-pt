@@ -1,5 +1,90 @@
 # clax Development Progress
 
+### May 4, 2026: README — TE accuracy: flag zero-crossing rows; remove misleading "Known limitation"
+
+The unlensed-`C_l^TE` accuracy table reported `(clax − CLASS) / CLASS` at every
+multipole, including ℓ values near the two ΛCDM TE zero crossings (ℓ≈52, ℓ≈400).
+Near a zero crossing the denominator goes to ~0, so the relative number blows up
+even when the absolute residual matches neighboring ℓ. This was being framed in
+the "Known limitations" section as a real shortcoming, when it is purely a metric
+artifact — the underlying `C_l^TE` matches CLASS as well as TT/EE do.
+
+**Changes:**
+
+1. **README accuracy table:** added a `†` marker on the three rows clearly
+   inside the first zero-crossing region (ℓ=20, 30, 50) and a footnote that
+   states the relative-error metric is ill-defined there, points at the Hu &
+   White (1997) correlation criterion `|C_l^TE| / √(C_l^TT · C_l^EE) < 0.02`,
+   and notes that a Gaussian likelihood weights these modes by
+   `1/Var(C_l^TE) → 0` automatically.
+
+2. **README "Known limitations":** removed the "TE zero crossings" bullet — it
+   was not a physics limitation, only a presentation issue. The remaining
+   limitations in that section (speed, TT ℓ=400-800, TT ℓ>1200, EE ℓ=20-30,
+   primordial BB) are all genuine outstanding items.
+
+**Note on tests:** the existing unlensed-TE accuracy tests in
+`tests/test_harmonic.py::TestClTE` only probe ℓ=100 and ℓ=200, neither of which
+is near a zero crossing, so no test changes are needed. The lensed-TE test
+`tests/test_lensing.py::TestLensCls::test_lensed_te_accuracy` already skips
+zero-crossing ℓ via the same correlation criterion (`corr < 0.02`) — that
+convention is now also documented in the README.
+
+This change is documentation-only; no clax module code is modified.
+
+The ℓ=1000 TE entry (+1.7%) is **not** a zero-crossing artifact — it is a real
+residual driven by k-grid under-resolution at high ℓ (same root cause as the TT
+ℓ>1200 known limitation), to be addressed separately by a hybrid linear/log
+k-grid PR.
+
+### May 4, 2026: Primordial BB sub-percent — fix BB radial kernel + add fine-k interpolation
+
+**`clax/harmonic.py:compute_cl_bb` had two compounding bugs that produced
+clax/CLASS C_l^BB ratios anywhere in [0.4×, 22×] depending on l. Both are
+fixed; primordial BB now matches CLASS sub-percent at l<=200, ~2% at l=300.**
+
+**Bug 1 — wrong radial kernel.** The function used
+`sqrt[l(l-1)(l+1)(l+2)] * j_l(x)/x^2`, which is CLASS's
+`TENSOR_TEMPERATURE_2` kernel (`transfer.c:4241-4249`), not the BB kernel.
+Replaced with the CLASS `TENSOR_POLARISATION_B` kernel
+(`transfer.c:4263-4272`, flat-space limit):
+
+    K_l^B(x) = 0.5 * (j_l'(x) + 2 * j_l(x) / x)
+
+using the recurrence `j_l'(x) = j_{l-1}(x) - (l+1)/x * j_l(x)` together with
+the existing `spherical_jl_backward` for both `j_l` and `j_{l-1}`.
+
+**Bug 2 — k-grid undersampling for BB integration.** `compute_cl_bb`
+integrated `P_T(k) * |B_l(k)|^2` over the raw 160-mode perturbation k-grid.
+The Bessel-driven oscillation period at the BB recombination peak
+(k ~ 0.005-0.05 Mpc^-1, x = k * chi_rec ~ l) is comparable to the
+log-uniform k-mode spacing, so adjacent modes can sample opposing peaks of
+`|B_l(k)|^2` and produce trapezoidal-rule errors of 6-30% with sign that
+flips with l. Added cubic-spline interpolation of `source_p` from the
+perturbation k-grid to a fine log-uniform k-grid (`n_k_fine=2000` default),
+mirroring `compute_cls_all_fast` for scalar T,E.
+
+**Validation (`tests/test_tensor.py::TestClBB::test_cl_bb_vs_class`):** ratio
+band tightened from `[0.05, 20.0]` to `[0.95, 1.05]` at l=2,10. At
+production precision (l_max_g=30, 40 k/decade, rtol=1e-6, n_k_fine=2000),
+clax/CLASS BB ratios across l=2,10,30,50,80,100,150,200,300:
+
+| l | ratio |
+|---|-------|
+| 2   | 0.998 |
+| 10  | 0.994 |
+| 30  | 0.996 |
+| 50  | 1.000 |
+| 80  | 1.001 |
+| 100 | 1.001 |
+| 150 | 1.002 |
+| 200 | 1.008 |
+| 300 | 1.018 |
+
+**API:** `compute_cl_bb` now takes an additional keyword-only `n_k_fine=2000`
+argument. Existing positional callers `compute_cl_bb(tpt, params, bg, l_values)`
+work unchanged.
+
 
 ### May 3, 2026: clax-pt module + EPT lensing injection
 
@@ -493,54 +578,6 @@ which still take the same arguments). If tests break, fix them — do NOT skip.
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
-
-### May 4, 2026: Primordial BB sub-percent — fix BB radial kernel + add fine-k interpolation
-
-**`clax/harmonic.py:compute_cl_bb` had two compounding bugs that produced
-clax/CLASS C_l^BB ratios anywhere in [0.4×, 22×] depending on l. Both are
-fixed; primordial BB now matches CLASS sub-percent at l<=200, ~2% at l=300.**
-
-**Bug 1 — wrong radial kernel.** The function used
-`sqrt[l(l-1)(l+1)(l+2)] * j_l(x)/x^2`, which is CLASS's
-`TENSOR_TEMPERATURE_2` kernel (`transfer.c:4241-4249`), not the BB kernel.
-Replaced with the CLASS `TENSOR_POLARISATION_B` kernel
-(`transfer.c:4263-4272`, flat-space limit):
-
-    K_l^B(x) = 0.5 * (j_l'(x) + 2 * j_l(x) / x)
-
-using the recurrence `j_l'(x) = j_{l-1}(x) - (l+1)/x * j_l(x)` together with
-the existing `spherical_jl_backward` for both `j_l` and `j_{l-1}`.
-
-**Bug 2 — k-grid undersampling for BB integration.** `compute_cl_bb`
-integrated `P_T(k) * |B_l(k)|^2` over the raw 160-mode perturbation k-grid.
-The Bessel-driven oscillation period at the BB recombination peak
-(k ~ 0.005-0.05 Mpc^-1, x = k * chi_rec ~ l) is comparable to the
-log-uniform k-mode spacing, so adjacent modes can sample opposing peaks of
-`|B_l(k)|^2` and produce trapezoidal-rule errors of 6-30% with sign that
-flips with l. Added cubic-spline interpolation of `source_p` from the
-perturbation k-grid to a fine log-uniform k-grid (`n_k_fine=2000` default),
-mirroring `compute_cls_all_fast` for scalar T,E.
-
-**Validation (`tests/test_tensor.py::TestClBB::test_cl_bb_vs_class`):** ratio
-band tightened from `[0.05, 20.0]` to `[0.95, 1.05]` at l=2,10. At
-production precision (l_max_g=30, 40 k/decade, rtol=1e-6, n_k_fine=2000),
-clax/CLASS BB ratios across l=2,10,30,50,80,100,150,200,300:
-
-| l | ratio |
-|---|-------|
-| 2   | 0.998 |
-| 10  | 0.994 |
-| 30  | 0.996 |
-| 50  | 1.000 |
-| 80  | 1.001 |
-| 100 | 1.001 |
-| 150 | 1.002 |
-| 200 | 1.008 |
-| 300 | 1.018 |
-
-**API:** `compute_cl_bb` now takes an additional keyword-only `n_k_fine=2000`
-argument. Existing positional callers `compute_cl_bb(tpt, params, bg, l_values)`
-work unchanged.
 
 ### Apr 20, 2026: Rodas5 Rosenbrock solver + dark energy perturbations + accuracy fixes
 
