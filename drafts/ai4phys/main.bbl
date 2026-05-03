@@ -1,4 +1,4 @@
-\begin{thebibliography}{20}
+\begin{thebibliography}{23}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -33,6 +33,21 @@ Blas, D., Lesgourgues, J., and Tram, T.
   Approximation schemes.
 \newblock \emph{JCAP}, 2011\penalty0 (07):\penalty0 034, 2011.
 \newblock \doi{10.1088/1475-7516/2011/07/034}.
+
+\bibitem[Bonici et~al.(2023)Bonici, Bianchini, and
+  Ruiz-Zapatero]{Bonici:2023xjk}
+Bonici, M., Bianchini, F., and Ruiz-Zapatero, J.
+\newblock {Capse.jl}: efficient and auto-differentiable {CMB} power spectra
+  emulation.
+\newblock \emph{Open J. Astrophys.}, 2023.
+\newblock \doi{10.21105/astro.2307.14339}.
+
+\bibitem[Bonici et~al.(2025)Bonici, D'Amico, Bel, and Carbone]{Bonici:2025ltp}
+Bonici, M., D'Amico, G., Bel, J., and Carbone, C.
+\newblock {Effort.jl}: a fast and differentiable emulator for the effective
+  field theory of the large scale structure of the universe.
+\newblock \emph{JCAP}, 2025\penalty0 (09):\penalty0 044, 2025.
+\newblock \doi{10.1088/1475-7516/2025/09/044}.
 
 \bibitem[Cabezas et~al.(2024)]{cabezas2024}
 Cabezas, A. et~al.
@@ -110,6 +125,13 @@ Phan, D., Pradhan, N., and Jankowiak, M.
 \newblock Composable effects for flexible and accelerated probabilistic
   programming in {NumPyro}.
 \newblock \emph{arXiv preprint arXiv:1912.11554}, 2019.
+
+\bibitem[Reeves et~al.(2026)Reeves, Zhang, and Zheng]{Reeves:2025bxn}
+Reeves, A., Zhang, P., and Zheng, H.
+\newblock {PyBird-JAX}: Accelerated inference in large-scale structure with
+  model-independent emulation of one-loop galaxy power spectra.
+\newblock \emph{JCAP}, 02:\penalty0 016, 2026.
+\newblock \doi{10.1088/1475-7516/2026/02/016}.
 
 \bibitem[Senatore \& Zaldarriaga(2015)Senatore and Zaldarriaga]{senatore2015}
 Senatore, L. and Zaldarriaga, M.

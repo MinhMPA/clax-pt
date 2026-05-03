@@ -27,15 +27,15 @@
 \newlabel{sec:results}{{4}{3}{}{section.4}{}}
 \newlabel{sec:results@cref}{{[section][4][]4}{[1][3][]3}{}{}{}}
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{fig:pipeline}{{1}{4}{Pipeline architecture of \clax and \claxpt . The shared backbone (top row) computes background cosmology, recombination, and the Einstein--Boltzmann perturbation hierarchy. Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop EFT perturbation theory). Every module is independently validated against \class (\clax ) or \classpt (\claxpt ) reference data. The entire pipeline is end-to-end differentiable: \texttt {jax.grad} propagates exact reverse-mode gradients from any output back to \texttt {CosmoParams}}{figure.caption.1}{}}
+\newlabel{fig:pipeline}{{1}{4}{Pipeline architecture of \clax and \claxpt . The shared backbone (top row) computes background cosmology, recombination, and the Einstein--Boltzmann perturbation hierarchy. Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop perturbation theory). Every module is independently validated against \class (\clax ) or \classpt (\claxpt ) reference data. The entire pipeline is end-to-end differentiable: \texttt {jax.grad} propagates exact reverse-mode gradients from any output back to \texttt {CosmoParams}}{figure.caption.1}{}}
 \newlabel{fig:pipeline@cref}{{[figure][1][]1}{[1][3][]4}{}{}{}}
-\newlabel{tab:landscape}{{1}{4}{Comparison of cosmological theory codes. ``AD'' = automatic differentiation. ``PT'' = one-loop perturbation theory for galaxy clustering. \clax is the only code combining CMB $\Cl $, lensing, $\Pk $, and 1-loop PT with full AD on GPU}{table.caption.2}{}}
+\newlabel{tab:landscape}{{1}{4}{Comparison of cosmological theory codes. ``AD'' = automatic differentiation. ``PT'' = one-loop perturbation theory for galaxy clustering. PyBird-JAX provides emulated (not exact) one-loop PT. \clax is the only code combining CMB $\Cl $, lensing, $\Pk $, and exact 1-loop PT with full AD on GPU}{table.caption.2}{}}
 \newlabel{tab:landscape@cref}{{[table][1][]1}{[1][3][]4}{}{}{}}
 \newlabel{tab:cmb_accuracy}{{2}{4}{CMB accuracy (\clax vs.\ \class , \texttt {planck\_cl} preset, Planck 2018 fiducial)}{table.caption.3}{}}
 \newlabel{tab:cmb_accuracy@cref}{{[table][2][]2}{[1][4][]4}{}{}{}}
 \citation{dimarzio1993}
 \newlabel{tab:pk_accuracy}{{3}{5}{Matter and galaxy power spectrum accuracy}{table.caption.4}{}}
-\newlabel{tab:pk_accuracy@cref}{{[table][3][]3}{[1][4][]5}{}{}{}}
+\newlabel{tab:pk_accuracy@cref}{{[table][3][]3}{[1][5][]5}{}{}{}}
 \newlabel{tab:gradients}{{4}{5}{AD vs.\ finite-difference gradients for $P_{mm}(k=0.1\;h/\mathrm {Mpc})$}{table.caption.5}{}}
 \newlabel{tab:gradients@cref}{{[table][4][]4}{[1][5][]5}{}{}{}}
 \newlabel{tab:performance}{{5}{5}{Performance summary}{table.caption.6}{}}
@@ -50,32 +50,38 @@
 \citation{lemos2023}
 \citation{perko2016,damico2020}
 \citation{chudaykin2021}
+\citation{Bonici:2023xjk}
+\citation{Reeves:2025bxn}
+\citation{Bonici:2025ltp}
 \citation{senatore2015,vlah2015}
 \citation{carlini2026}
 \newlabel{sec:related}{{6}{6}{}{section.6}{}}
 \newlabel{sec:related@cref}{{[section][6][]6}{[1][6][]6}{}{}{}}
-\newlabel{sec:conclusion}{{7}{6}{}{section.7}{}}
-\newlabel{sec:conclusion@cref}{{[section][7][]7}{[1][6][]6}{}{}{}}
 \bibdata{references}
 \bibcite{DESI:2024hhd}{{1}{2025{a}}{{Adame et~al.}}{{}}}
 \bibcite{DESI:2024jxi}{{2}{2025{b}}{{Adame et~al.}}{{}}}
 \bibcite{Planck:2018vyg}{{3}{2020}{{Aghanim et~al.}}{{}}}
 \bibcite{blas2011}{{4}{2011}{{Blas et~al.}}{{Blas, Lesgourgues, and Tram}}}
-\bibcite{cabezas2024}{{5}{2024}{{Cabezas et~al.}}{{}}}
-\bibcite{lemos2023}{{6}{2023}{{Campagne et~al.}}{{Campagne, Lanusse, Zuntz, Boucaud, Casas, Karamanis, Kirkby, Lanzieri, Li, and Peel}}}
-\bibcite{carlini2026}{{7}{2026}{{Carlini}}{{}}}
-\bibcite{chudaykin2021}{{8}{2021}{{Chudaykin et~al.}}{{Chudaykin, Ivanov, Philcox, and Simonovi{\'c}}}}
-\bibcite{damico2020}{{9}{2020}{{D'Amico et~al.}}{{}}}
-\bibcite{dimarzio1993}{{10}{1993}{{Di~Marzo}}{{}}}
-\bibcite{fang2017}{{11}{2017}{{Fang et~al.}}{{Fang, Blazek, McEwen, and Hirata}}}
-\bibcite{hahn2023}{{12}{2023}{{Hahn et~al.}}{{Hahn, List, and Porqueres}}}
-\bibcite{kidger2021}{{13}{2021}{{Kidger}}{{}}}
-\bibcite{lesgourgues2011}{{14}{2011}{{Lesgourgues}}{{}}}
-\bibcite{perko2016}{{15}{2016}{{Perko et~al.}}{{Perko, Senatore, Jennings, and Wechsler}}}
-\bibcite{phan2019}{{16}{2019}{{Phan et~al.}}{{Phan, Pradhan, and Jankowiak}}}
-\bibcite{senatore2015}{{17}{2015}{{Senatore \& Zaldarriaga}}{{Senatore and Zaldarriaga}}}
-\bibcite{sletmoen2026}{{18}{2026}{{Sletmoen}}{{}}}
-\bibcite{vlah2015}{{19}{2015}{{Vlah et~al.}}{{Vlah, White, and Aviles}}}
-\bibcite{zhou2026}{{20}{2026}{{Zhou et~al.}}{{Zhou, Giovanetti, and Liu}}}
+\bibcite{Bonici:2023xjk}{{5}{2023}{{Bonici et~al.}}{{Bonici, Bianchini, and Ruiz-Zapatero}}}
+\bibcite{Bonici:2025ltp}{{6}{2025}{{Bonici et~al.}}{{Bonici, D'Amico, Bel, and Carbone}}}
+\bibcite{cabezas2024}{{7}{2024}{{Cabezas et~al.}}{{}}}
+\bibcite{lemos2023}{{8}{2023}{{Campagne et~al.}}{{Campagne, Lanusse, Zuntz, Boucaud, Casas, Karamanis, Kirkby, Lanzieri, Li, and Peel}}}
+\bibcite{carlini2026}{{9}{2026}{{Carlini}}{{}}}
+\bibcite{chudaykin2021}{{10}{2021}{{Chudaykin et~al.}}{{Chudaykin, Ivanov, Philcox, and Simonovi{\'c}}}}
+\bibcite{damico2020}{{11}{2020}{{D'Amico et~al.}}{{}}}
+\bibcite{dimarzio1993}{{12}{1993}{{Di~Marzo}}{{}}}
+\bibcite{fang2017}{{13}{2017}{{Fang et~al.}}{{Fang, Blazek, McEwen, and Hirata}}}
+\bibcite{hahn2023}{{14}{2023}{{Hahn et~al.}}{{Hahn, List, and Porqueres}}}
+\bibcite{kidger2021}{{15}{2021}{{Kidger}}{{}}}
+\bibcite{lesgourgues2011}{{16}{2011}{{Lesgourgues}}{{}}}
+\bibcite{perko2016}{{17}{2016}{{Perko et~al.}}{{Perko, Senatore, Jennings, and Wechsler}}}
+\bibcite{phan2019}{{18}{2019}{{Phan et~al.}}{{Phan, Pradhan, and Jankowiak}}}
+\newlabel{sec:conclusion}{{7}{7}{}{section.7}{}}
+\newlabel{sec:conclusion@cref}{{[section][7][]7}{[1][7][]7}{}{}{}}
+\bibcite{Reeves:2025bxn}{{19}{2026}{{Reeves et~al.}}{{Reeves, Zhang, and Zheng}}}
+\bibcite{senatore2015}{{20}{2015}{{Senatore \& Zaldarriaga}}{{Senatore and Zaldarriaga}}}
+\bibcite{sletmoen2026}{{21}{2026}{{Sletmoen}}{{}}}
+\bibcite{vlah2015}{{22}{2015}{{Vlah et~al.}}{{Vlah, White, and Aviles}}}
+\bibcite{zhou2026}{{23}{2026}{{Zhou et~al.}}{{Zhou, Giovanetti, and Liu}}}
 \bibstyle{icml2026}
-\gdef \@abspage@last{7}
+\gdef \@abspage@last{8}
