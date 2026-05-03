@@ -19,7 +19,7 @@ jax.config.update("jax_enable_x64", True)
 
 from clax.constants import *  # noqa: F401,F403
 from clax.params import CosmoParams, PrecisionParams  # noqa: F401
-from clax.background import background_solve, BackgroundResult, H_of_z, angular_diameter_distance  # noqa: F401
+from clax.background import background_solve, BackgroundResult, H_of_z, angular_diameter_distance, sound_horizon_drag  # noqa: F401
 from clax.thermodynamics import thermodynamics_solve, ThermoResult  # noqa: F401
 from clax.perturbations import MatterPerturbationResult, PerturbationResult, TensorPerturbationResult, perturbations_solve, perturbations_solve_mpk, tensor_perturbations_solve  # noqa: F401
 from clax.primordial import primordial_scalar_pk, primordial_tensor_pk  # noqa: F401

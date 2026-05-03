@@ -196,8 +196,12 @@ the robust criterion; any absolute error < 2% of the spectrum's characteristic s
 
 1. RSD multipole 1-loop kernels: all implemented but still ~2-8% error at k>0.15 h/Mpc.
    Sub-leading terms or coefficient differences not yet traced. See accuracy table above.
-2. `rs_h` default = 99.0 Mpc/h hardcoded; should come from thermodynamics background.
-   Actual Planck 2018 value: 99.09 Mpc/h. Effect on sigma_BAO: <0.1%.
+2. ~~`rs_h` default = 99.0 hardcoded~~ — **Resolved (2026-05-03)**: `compute_ept_from_clax`
+   now plumbs `clax.background.sound_horizon_drag(params) * params.h` (Aubourg+2014 Eq. 17,
+   Neff-aware) into IR resummation. Matches `ps_1loop_jax` at machine precision and
+   CLASS `pth->rs_d` to 0.002% at fiducial Planck. The variable name `rs_h` was also
+   misleading: dimensions are r_s × h in Mpc, NOT r_s/h in Mpc/h — docstrings updated.
+   Direct callers of `compute_ept(...)` still default to 99.0 (Planck-fiducial fallback).
 3. σ_v² integration over FFTLog grid rather than fine CLASS-PT grid — ~0.1% error.
 
 ---

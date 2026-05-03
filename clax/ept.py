@@ -546,7 +546,13 @@ def _ir_resummation_numpy(
     Args:
         pk_lin_h: P_lin(k) in (Mpc/h)³, shape (N,)
         k_h:      k in h/Mpc, shape (N,)
-        rs_h:     BAO sound horizon at drag epoch in Mpc/h (default 99.0 Mpc/h)
+        rs_h:     Sound horizon at drag epoch times h, in Mpc (i.e. r_s(z_d) * h,
+                  NOT r_s/h). Default 99.0 ≈ r_s_drag * h at Planck 2018 fiducial
+                  (147.05 Mpc * 0.6736 = 99.05). For cosmology-varying values,
+                  use ``clax.background.sound_horizon_drag(params) * params.h``.
+                  This product enters the j_2-filter argument
+                  ``x = k_int [h/Mpc] * rs_h [Mpc*h] = k [1/Mpc] * r_s [Mpc]``,
+                  matching CLASS-PT nonlinear_pt.c:5637 ``qint2 * rbao``.
         h:        Hubble parameter h = H₀/100 (needed to match CLASS-PT DST grid
                   which is hardcoded in 1/Mpc: kmin2=0.00007 1/Mpc, kmax2=7 1/Mpc)
 
@@ -1478,10 +1484,13 @@ def compute_ept(
                   of the broadband shape at fixed cosmology. For a perturbation
                   δpk around the fiducial, the wiggle component changes as
                   δpk_w = δpk_lin, and the resummed spectrum damps it by exp(-Σ²k²).
-        rs_h:     Sound horizon at drag epoch in Mpc/h (~99 for Planck 2018 LCDM).
-                  Used by IR resummation to set the BAO oscillation scale k_osc = 1/rs_h
-                  for the Σ²_BAO j₂-filter integral.  Ignored if _ir_precomputed is
-                  provided (the caller already computed Σ²_BAO) or ir_resummation=False.
+        rs_h:     Sound horizon at drag epoch times h, in Mpc (i.e. r_s(z_d) * h,
+                  NOT r_s/h).  Default 99.0 ≈ Planck 2018 fiducial; for
+                  cosmology-varying values, prefer ``compute_ept_from_clax`` which
+                  computes ``sound_horizon_drag(params) * params.h`` automatically.
+                  Used by IR resummation in the Σ²_BAO j₂-filter integral.
+                  Ignored if ``_ir_precomputed`` is provided (the caller already
+                  computed Σ²_BAO) or ``ir_resummation=False``.
 
     Returns:
         EPTComponents with all spectral arrays on the EPT k-grid
@@ -2004,7 +2013,13 @@ def compute_ept_from_clax(
     from clax.primordial import primordial_scalar_pk
     from clax.interpolation import CubicSpline
 
+    from clax.background import sound_horizon_drag
+
     h = float(params.h)
+    # Cosmology-consistent BAO sound horizon for IR resummation. Convention:
+    # rs_h := r_s_drag * h, in Mpc (matches CLASS-PT pth->rs_d * h numerically;
+    # see nonlinear_pt.c:5637 qint2 * rbao = k_h * rs_h_value).
+    rs_h_value = float(sound_horizon_drag(params)) * h
 
     # EPT k-grid in h/Mpc → convert to Mpc⁻¹ for clax
     k_h = ept_kgrid(prec)  # h/Mpc
@@ -2041,4 +2056,5 @@ def compute_ept_from_clax(
     # Growth rate f ≈ Ω_m(z)^0.55 (approximation; improve later)
     f = float(bg.Omega_m_of_z(z)) ** 0.55 if hasattr(bg, "Omega_m_of_z") else 0.8
 
-    return compute_ept(jnp.array(pk_h), jnp.array(k_h), h=h, f=f, prec=prec)
+    return compute_ept(jnp.array(pk_h), jnp.array(k_h), h=h, f=f, prec=prec,
+                        rs_h=rs_h_value)
