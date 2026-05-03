@@ -135,36 +135,38 @@ class TestLinearAccuracy:
 class TestCrossImplAgreement:
     """Cross-check the public source-Limber path against the slow Bessel oracle.
 
-    ``_compute_cl_pp_full_bessel`` is kept private precisely to support this
-    test: it computes the same observable via dense ``j_l(k*chi)``
-    integration and is the ground-truth reference for the Limber
-    approximation in the public path.
+    ``_compute_cl_pp_full_bessel`` uses ``clax.bessel.spherical_jl``, which
+    relies on upward Bessel recurrence. That recurrence is reliable at low l
+    (l <= ~100) but becomes unstable in the classically-forbidden region
+    (x < 0.7l) at high l, so the oracle is NOT a trusted reference at
+    l >= 200. The Limber approximation, in contrast, becomes more accurate
+    as l increases — CLASS uses ``l_switch_limber`` between 9 and 40 for
+    the lensing path because Limber is the correct answer there.
+
+    This test therefore restricts the cross-check to l <= 100. At higher l,
+    the linear-accuracy test against an external CLASS reference is the
+    right verification.
     """
 
-    def test_source_limber_vs_full_bessel(self, pipeline):
-        """``compute_cl_pp(nonlinear="none")`` matches the full-Bessel oracle.
-
-        Tolerance widens at low l where Limber breaks down: <5% at l=10,
-        <2% by l=50, <1% by l=200. (CLASS itself uses
-        ``l_switch_limber=9-40`` for the same reason.)
-        """
+    def test_source_limber_vs_full_bessel_low_l(self, pipeline):
+        """``compute_cl_pp(nonlinear="none")`` matches the full-Bessel oracle
+        at low l where the oracle's upward Bessel recurrence is stable."""
         from clax.lensing import compute_cl_pp, _compute_cl_pp_full_bessel
         params, bg, th, pt = pipeline
 
-        l_max = 500
-        l_probe = jnp.array([10, 20, 50, 100, 200, 500], dtype=jnp.float64)
+        l_probe = jnp.array([10, 20, 50, 100], dtype=jnp.float64)
 
-        cl_public = np.array(compute_cl_pp(pt, params, bg, th, l_max=l_max))
+        cl_public = np.array(compute_cl_pp(pt, params, bg, th, l_max=100))
         cl_oracle = np.array(
             _compute_cl_pp_full_bessel(pt, params, bg, th, l_probe))
 
-        tols = {10: 0.05, 20: 0.03, 50: 0.02, 100: 0.01, 200: 0.01, 500: 0.01}
-        for i, l_val in enumerate([10, 20, 50, 100, 200, 500]):
+        tols = {10: 0.05, 20: 0.03, 50: 0.005, 100: 0.005}
+        for i, l_val in enumerate([10, 20, 50, 100]):
             ratio = cl_public[l_val] / cl_oracle[i]
             err = abs(ratio - 1.0)
             print(f"  l={l_val}: source_limber/full_bessel = {ratio:.4f} ({err:.2%})")
             assert err < tols[l_val], (
-                f"l={l_val}: {err:.2%} exceeds tolerance {tols[l_val]:.0%}")
+                f"l={l_val}: {err:.2%} exceeds tolerance {tols[l_val]:.1%}")
 
 
 # -----------------------------------------------------------------------------
