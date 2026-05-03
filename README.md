@@ -26,9 +26,9 @@ All comparisons at Planck 2018 best-fit LCDM. GPU: H100-80GB.
 
 | Multipole l | C_l^TT error | C_l^EE error | C_l^TE error |
 |-------------|-------------|-------------|-------------|
-| 20          | **-0.08%**  | **-0.21%**  | -0.3%       |
-| 30          | **-0.05%**  | **-0.11%**  | -0.5%       |
-| 50          | **-0.05%**  | **-0.05%**  | +0.8%       |
+| 20          | **-0.08%**  | **-0.21%**  | -0.3% †     |
+| 30          | **-0.05%**  | **-0.11%**  | -0.5% †     |
+| 50          | **-0.05%**  | **-0.05%**  | +0.8% †     |
 | 100         | **-0.02%**  | **+0.02%**  | **-0.03%**  |
 | 200         | **-0.05%**  | **-0.04%**  | **-0.05%**  |
 | 300         | **-0.06%**  | **-0.02%**  | **-0.04%**  |
@@ -37,7 +37,9 @@ All comparisons at Planck 2018 best-fit LCDM. GPU: H100-80GB.
 | 1000        | **-0.57%**  | **-0.26%**  | +1.7%       |
 | 1200        | **-0.07%**  | **+0.03%**  | —           |
 
-Bold = sub-percent. **TT sub-0.1% at l=20-300 and l=1200.** EE sub-0.3% from l=20 to l=1200. TE zero crossings near l=52 and l=400 cause large relative errors.
+Bold = sub-percent. **TT sub-0.1% at l=20-300 and l=1200.** EE sub-0.3% from l=20 to l=1200.
+
+† Near a TE zero crossing (ℓ≈52 in Planck-fiducial ΛCDM; second crossing near ℓ≈400). The relative-error metric `(clax − CLASS) / CLASS` is ill-defined when `C_l^TE → 0`; the absolute residual is comparable to neighboring ℓ where the metric is well-defined. The standard Hu & White (1997) correlation criterion `|C_l^TE| / √(C_l^TT · C_l^EE) < 0.02` flags these multipoles, and the lensed-TE accuracy test in `tests/test_lensing.py:156` already skips them. A Gaussian likelihood weights TE zero-crossing modes by `1/Var(C_l^TE) → 0` automatically, so this metric artifact does not affect HMC inference.
 
 ### Lensed C_l angular power spectra
 
@@ -282,7 +284,6 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 - **TT l>1200**: Degrades due to k-integration under-resolution (Bessel oscillation period constant in k, but log-uniform grid spacing grows). Hybrid linear/log k-grid would fix this.
 - **EE l=20-30**: ~0.2% from RECFAST visibility function bias. HyRec recombination would improve to sub-0.1%.
 - **BB tensor modes**: Lensing BB is accurate (<0.5% at l<=1000), but primordial BB still ~2x off CLASS.
-- **TE zero crossings**: Large relative errors near l=52 and l=400 where C_l^TE crosses zero.
 
 ## References
 

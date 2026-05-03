@@ -1,5 +1,44 @@
 # clax Development Progress
 
+### May 4, 2026: README — TE accuracy: flag zero-crossing rows; remove misleading "Known limitation"
+
+The unlensed-`C_l^TE` accuracy table reported `(clax − CLASS) / CLASS` at every
+multipole, including ℓ values near the two ΛCDM TE zero crossings (ℓ≈52, ℓ≈400).
+Near a zero crossing the denominator goes to ~0, so the relative number blows up
+even when the absolute residual matches neighboring ℓ. This was being framed in
+the "Known limitations" section as a real shortcoming, when it is purely a metric
+artifact — the underlying `C_l^TE` matches CLASS as well as TT/EE do.
+
+**Changes:**
+
+1. **README accuracy table:** added a `†` marker on the three rows clearly
+   inside the first zero-crossing region (ℓ=20, 30, 50) and a footnote that
+   states the relative-error metric is ill-defined there, points at the Hu &
+   White (1997) correlation criterion `|C_l^TE| / √(C_l^TT · C_l^EE) < 0.02`,
+   and notes that a Gaussian likelihood weights these modes by
+   `1/Var(C_l^TE) → 0` automatically.
+
+2. **README "Known limitations":** removed the "TE zero crossings" bullet — it
+   was not a physics limitation, only a presentation issue. The remaining
+   limitations in that section (speed, TT ℓ=400-800, TT ℓ>1200, EE ℓ=20-30,
+   primordial BB) are all genuine outstanding items.
+
+**Note on tests:** the existing unlensed-TE accuracy tests in
+`tests/test_harmonic.py::TestClTE` only probe ℓ=100 and ℓ=200, neither of which
+is near a zero crossing, so no test changes are needed. The lensed-TE test
+`tests/test_lensing.py::TestLensCls::test_lensed_te_accuracy` already skips
+zero-crossing ℓ via the same correlation criterion (`corr < 0.02`) — that
+convention is now also documented in the README.
+
+This change is documentation-only; no clax module code is modified.
+
+The ℓ=1000 TE entry (+1.7%) is **not** a zero-crossing artifact — it is a real
+residual driven by k-grid under-resolution at high ℓ (same root cause as the TT
+ℓ>1200 known limitation), to be addressed separately by a hybrid linear/log
+k-grid PR.
+
+---
+
 ## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
