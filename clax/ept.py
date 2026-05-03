@@ -2029,10 +2029,11 @@ def compute_ept_from_clax(
     spline = CS(lnk_pt, delta_m_at_z)
     delta_m_ept = spline.evaluate(lnk_out)
 
-    # Linear P(k) in Mpc³
+    # Linear P(k) in Mpc³: P_m(k) = 2π² / k³ * P_R(k) * δ_m²(k)
+    # (matches clax/transfer.py::compute_linear_matter_pk_from_perturbations)
     k_arr = jnp.array(k_mpc)
-    prim = primordial_scalar_pk(k_arr, params)  # primordial power spectrum
-    pk_mpc3 = prim * delta_m_ept ** 2 / k_arr ** 3
+    prim = primordial_scalar_pk(k_arr, params)  # dimensionless P_R(k)
+    pk_mpc3 = 2.0 * jnp.pi**2 / k_arr ** 3 * prim * delta_m_ept ** 2
 
     # Convert to h-units: P_h = P * h³,  k_h = k / h
     pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³
