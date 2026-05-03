@@ -61,22 +61,29 @@ the source-based Limber kernel (CLASS `transfer.c` + `harmonic.c`):
 With `pt_k_max_cl >= 5.0 Mpc^-1` (required for Halofit's σ(R) bisection),
 measured residuals at the default cosmology:
 
-| Multipole l | nonlinear="none" vs CLASS | nonlinear="halofit" NL/lin vs CLASS |
-|-------------|---------------------------|--------------------------------------|
-| 100         | **<1%**                   | **0.01%**                            |
-| 200         | **<1%**                   | **0.04%**                            |
-| 500         | **<1%**                   | **0.21%**                            |
-| 1000        | **<1%**                   | **0.63%**                            |
-| 1500        | **<1%**                   | **0.79%**                            |
-| 2000        | **<1%**                   | **1.40%**                            |
-| 2500        | **<1%**                   | **0.96%**                            |
+Absolute |C_l^phiphi_clax / C_l^phiphi_CLASS - 1| at the default cosmology:
 
-Linear path matches CLASS to <1% at all ℓ ≤ 2500. Halofit injection
+| Multipole l | nonlinear="none" | nonlinear="halofit" | NL/lin ratio agreement |
+|-------------|-----------------:|--------------------:|-----------------------:|
+| 100         | 0.18%            | 0.16%               | 0.02%                  |
+| 200         | 0.14%            | 0.10%               | 0.05%                  |
+| 500         | 0.23%            | 0.15%               | 0.09%                  |
+| 1000        | 0.12%            | 0.08%               | 0.04%                  |
+| 1500        | 0.49%            | 0.61%               | 0.11%                  |
+| 2000        | 0.71%            | 0.76%               | 0.05%                  |
+| 2500        | 0.39%            | 1.16%               | 0.76%                  |
+
+Both nonlinear modes share the same source-Limber kernel, so they track
+each other closely — the absolute Halofit residual is dominated by the
+common linear-kernel systematic, with a small extra contribution from the
+R(k, z) accuracy that the third column isolates. Halofit injection
 multiplies the lensing source by sqrt(R(k, z(τ))) where R = P_NL/P_lin
 is computed on a 100-point z-grid via `vmap(compute_pk_nonlinear)` with
-log-log k-extension to k_max=10 Mpc^-1 (CLASS itself uses a dedicated
+log-log k-extension to k_max=20 Mpc^-1 (CLASS itself uses a dedicated
 nonlinear k-grid that extends past the perturbation k-range; the
-extension provides the equivalent coverage). Narrower k-grids
+extension provides the equivalent coverage). Sub-percent absolute
+residual across all ℓ ≤ 2000; ~1% at ℓ=2500 where linear-kernel and
+R-residual systematics add constructively. Narrower k-grids
 (`pt_k_max_cl < 5`) gracefully degrade to no NL correction (R = 1, per
 CLASS `fourier.c:1706-1716`).
 

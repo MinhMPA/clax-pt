@@ -87,11 +87,11 @@ class TestClppHalofitRatio:
     """``compute_cl_pp(nonlinear='halofit')`` NL/linear ratio vs CLASS Halofit."""
 
     def test_ratio_at_low_l(self, cl_pp_results, class_reference):
-        """NL/linear ratio matches CLASS within 1% for l <= 500.
+        """NL/linear ratio matches CLASS within 0.5% for l <= 500.
 
         Source-multiplication recipe (matches CLASS) + 100-point z-grid +
-        log-log k-extension to 10 Mpc^-1. Measured residuals at the
-        default cosmology: 0.01% at l=100, 0.04% at l=200, 0.21% at l=500.
+        log-log k-extension to 20 Mpc^-1. Measured residuals at the
+        default cosmology: 0.02% at l=100, 0.04% at l=200, 0.09% at l=500.
         """
         cl_pp_lin, cl_pp_hf = cl_pp_results
         ref = class_reference
@@ -105,15 +105,15 @@ class TestClppHalofitRatio:
 
             rel_err = abs(our_ratio / ref_ratio - 1.0)
             print(f"  {l_val:5d}  {our_ratio:8.4f}  {ref_ratio:8.4f}  {rel_err:8.2%}")
-            assert rel_err < 0.01, (
-                f"l={l_val}: NL ratio err={rel_err:.2%} exceeds 1%")
+            assert rel_err < 0.005, (
+                f"l={l_val}: NL ratio err={rel_err:.2%} exceeds 0.5%")
 
     def test_ratio_at_high_l(self, cl_pp_results, class_reference):
-        """NL/linear ratio matches CLASS within 2% at l >= 1000.
+        """NL/linear ratio matches CLASS within 1% at l >= 1000.
 
-        Measured residuals at the default cosmology: 0.63% at l=1000,
-        0.79% at l=1500, 1.40% at l=2000, 0.96% at l=2500. The 2%
-        threshold leaves a margin for cosmology variations.
+        Measured residuals at the default cosmology with k_max_extend=20:
+        0.04% at l=1000, 0.11% at l=1500, 0.05% at l=2000, 0.76% at
+        l=2500. The 1% threshold leaves a margin for cosmology variations.
         """
         cl_pp_lin, cl_pp_hf = cl_pp_results
         ref = class_reference
@@ -125,8 +125,8 @@ class TestClppHalofitRatio:
             ref_ratio = ref['pp_halofit'][idx] / ref['pp_lin'][idx]
             our_ratio = cl_pp_hf[l_val] / cl_pp_lin[l_val]
             print(f"  {l_val:5d}  {our_ratio:8.4f}  {ref_ratio:8.4f}  {our_ratio/ref_ratio:8.4f}")
-            assert abs(our_ratio / ref_ratio - 1) < 0.02, (
-                f"l={l_val}: ratio discrepancy exceeds 2%")
+            assert abs(our_ratio / ref_ratio - 1) < 0.01, (
+                f"l={l_val}: ratio discrepancy exceeds 1%")
 
     def test_ratio_monotonic_increase(self, cl_pp_results):
         """NL/linear ratio increases with l from l=100 to l~2000."""
