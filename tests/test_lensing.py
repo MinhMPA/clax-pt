@@ -26,10 +26,10 @@ from clax.thermodynamics import thermodynamics_solve
 from clax.perturbations import perturbations_solve
 from clax.lensing import compute_cl_pp, lens_cl_tt, lens_cls
 
-REFERENCE_DIR = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
-
 from dataclasses import replace as _dc_replace
 PREC = _dc_replace(PrecisionParams.fast_cl(), pt_k_chunk_size=20)
+
+REFERENCE_DIR = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
 
 
 @pytest.fixture(scope="module")
@@ -53,11 +53,10 @@ class TestCLpp:
 
     def test_cl_pp_positive(self, pipeline):
         """``C_l^pp`` is positive on the probe grid; expects positive values for ``l >= 2``."""
-        params, bg, _, pt = pipeline
-        l_values = [2, 10, 50, 100, 200]
-        cl_pp = compute_cl_pp(pt, params, bg, l_values)
-        for i, l in enumerate(l_values):
-            val = float(cl_pp[i])
+        params, bg, th, pt = pipeline
+        cl_pp = compute_cl_pp(pt, params, bg, th, l_max=200)
+        for l in [2, 10, 50, 100, 200]:
+            val = float(cl_pp[l])
             print(f"C_l^pp(l={l}) = {val:.4e}")
             assert val > 0, f"C_l^pp(l={l}) = {val:.4e} is not positive"
 

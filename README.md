@@ -131,6 +131,16 @@ th = clax.thermodynamics_solve(params, prec, bg)
 pt = perturbations_solve(params, prec, bg, th)
 cl_tt = compute_cl_tt_interp(pt, params, bg, [30, 100, 200])
 cl_ee = compute_cl_ee_interp(pt, params, bg, [30, 100, 200])
+
+# CMB lensing potential C_l^phiphi (linear or Halofit-corrected)
+cl_pp_lin = clax.compute_cl_pp(pt, params, bg, th, l_max=2500)
+cl_pp_nl  = clax.compute_cl_pp(pt, params, bg, th, l_max=2500,
+                                nonlinear="halofit")
+
+# Lens the unlensed CMB spectra
+cl_tt_lensed, cl_ee_lensed, cl_te_lensed, cl_bb_lensed = clax.lens_cls(
+    cl_tt_unlensed, cl_ee_unlensed, cl_te_unlensed, cl_bb_unlensed,
+    cl_pp_nl, l_max=2500)
 ```
 
 ## Installation
@@ -241,7 +251,7 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | `bessel.py`         | Spherical Bessel functions j_l(x)                |
 | `transfer.py`       | Linear matter P(k) from perturbation solve       |
 | `harmonic.py`       | C_l^TT/EE/TE/BB from line-of-sight integration  |
-| `lensing.py`        | Correlation-function lensing method              |
+| `lensing.py`        | C_l^phiphi (source-Limber, optional Halofit NL) and lensed C_l (correlation-function method) |
 | `nonlinear.py`      | HaloFit (Takahashi 2012)                         |
 | `shooting.py`       | theta_s -> H0 via Newton + `custom_vjp`          |
 
