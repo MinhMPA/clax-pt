@@ -1,9 +1,31 @@
-\begin{thebibliography}{24}
+\begin{thebibliography}{20}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doi}[1]{doi: #1}\else
   \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Adame et~al.(2025{\natexlab{a}})]{DESI:2024hhd}
+Adame, A.~G. et~al.
+\newblock {DESI 2024 VII: cosmological constraints from the full-shape modeling
+  of clustering measurements}.
+\newblock \emph{JCAP}, 07:\penalty0 028, 2025{\natexlab{a}}.
+\newblock \doi{10.1088/1475-7516/2025/07/028}.
+
+\bibitem[Adame et~al.(2025{\natexlab{b}})]{DESI:2024jxi}
+Adame, A.~G. et~al.
+\newblock {DESI 2024 V: Full-Shape galaxy clustering from galaxies and
+  quasars}.
+\newblock \emph{JCAP}, 09:\penalty0 008, 2025{\natexlab{b}}.
+\newblock \doi{10.1088/1475-7516/2025/09/008}.
+\newblock [Erratum: JCAP 02, E02 (2026)].
+
+\bibitem[Aghanim et~al.(2020)]{Planck:2018vyg}
+Aghanim, N. et~al.
+\newblock {Planck 2018 results. VI. Cosmological parameters}.
+\newblock \emph{Astron. Astrophys.}, 641:\penalty0 A6, 2020.
+\newblock \doi{10.1051/0004-6361/201833910}.
+\newblock [Erratum: Astron.Astrophys. 652, C4 (2021)].
 
 \bibitem[Blas et~al.(2011)Blas, Lesgourgues, and Tram]{blas2011}
 Blas, D., Lesgourgues, J., and Tram, T.
@@ -16,6 +38,15 @@ Blas, D., Lesgourgues, J., and Tram, T.
 Cabezas, A. et~al.
 \newblock {BlackJAX}: Composable {Bayesian} inference in {JAX}.
 \newblock \emph{arXiv preprint arXiv:2402.10797}, 2024.
+
+\bibitem[Campagne et~al.(2023)Campagne, Lanusse, Zuntz, Boucaud, Casas,
+  Karamanis, Kirkby, Lanzieri, Li, and Peel]{lemos2023}
+Campagne, J.-E., Lanusse, F., Zuntz, J., Boucaud, A., Casas, S., Karamanis, M.,
+  Kirkby, D., Lanzieri, D., Li, Y., and Peel, A.
+\newblock {JAX-COSMO}: An end-to-end differentiable and {GPU} accelerated
+  cosmology library.
+\newblock \emph{Open J. Astrophys.}, 6:\penalty0 1--15, 2023.
+\newblock \doi{10.21105/astro.2302.05163}.
 
 \bibitem[Carlini(2026)]{carlini2026}
 Carlini, N.
@@ -30,32 +61,13 @@ Chudaykin, A., Ivanov, M.~M., Philcox, O. H.~E., and Simonovi{\'c}, M.
   {CLASS}.
 \newblock \emph{Phys. Rev. D}, 103:\penalty0 023507, 2021.
 \newblock \doi{10.1103/PhysRevD.103.023507}.
-
-\bibitem[Cranmer et~al.(2020)Cranmer, Brehmer, and Louppe]{cranmer2020}
-Cranmer, K., Brehmer, J., and Louppe, G.
-\newblock The frontier of simulation-based inference.
-\newblock \emph{Proc. Natl. Acad. Sci.}, 117:\penalty0 30055--30062, 2020.
-\newblock \doi{10.1073/pnas.1912789117}.
+\newblock \url{https://github.com/Michalychforever/CLASS-PT}.
 
 \bibitem[D'Amico et~al.(2020)]{damico2020}
 D'Amico, G. et~al.
 \newblock The cosmological analysis of the {SDSS/BOSS} data from the effective
   field theory of large-scale structure.
 \newblock \emph{JCAP}, 2020\penalty0 (05):\penalty0 005, 2020.
-
-\bibitem[{DESI Collaboration}(2025{\natexlab{a}})]{desi2025v}
-{DESI Collaboration}.
-\newblock {DESI 2024 V}: Full-shape galaxy clustering from galaxies and
-  quasars.
-\newblock \emph{JCAP}, 2025\penalty0 (09):\penalty0 008, 2025{\natexlab{a}}.
-\newblock \doi{10.1088/1475-7516/2025/09/008}.
-
-\bibitem[{DESI Collaboration}(2025{\natexlab{b}})]{desi2025vii}
-{DESI Collaboration}.
-\newblock {DESI 2024 VII}: Cosmological constraints from the full-shape
-  modeling of clustering measurements.
-\newblock \emph{JCAP}, 2025\penalty0 (07):\penalty0 028, 2025{\natexlab{b}}.
-\newblock \doi{10.1088/1475-7516/2025/07/028}.
 
 \bibitem[Di~Marzo(1993)]{dimarzio1993}
 Di~Marzo, G.
@@ -69,13 +81,6 @@ Fang, X., Blazek, J.~A., McEwen, J.~E., and Hirata, C.~M.
   general tensor quantities in cosmological perturbation theory.
 \newblock \emph{JCAP}, 2017\penalty0 (02):\penalty0 030, 2017.
 
-\bibitem[Gabri{\'e} et~al.(2022)Gabri{\'e}, Rotskoff, and
-  Vanden-Eijnden]{gabrie2022}
-Gabri{\'e}, M., Rotskoff, G.~M., and Vanden-Eijnden, E.
-\newblock Adaptive monte carlo augmented with normalizing flows.
-\newblock \emph{Proc. Natl. Acad. Sci.}, 119\penalty0 (10), 2022.
-\newblock \doi{10.1073/pnas.2109420119}.
-
 \bibitem[Hahn et~al.(2023)Hahn, List, and Porqueres]{hahn2023}
 Hahn, O., List, F., and Porqueres, N.
 \newblock {DISCO-DJ}: Differentiable simulations for cosmology -- {Done with
@@ -88,31 +93,11 @@ Kidger, P.
 \newblock \emph{On Neural Differential Equations}.
 \newblock PhD thesis, University of Oxford, 2021.
 
-\bibitem[Lemos et~al.(2023)]{lemos2023}
-Lemos, P. et~al.
-\newblock jax-cosmo: An end-to-end differentiable and {GPU} accelerated
-  cosmology library.
-\newblock \emph{The Open Journal of Astrophysics}, 6, 2023.
-\newblock \doi{10.21105/astro.2302.05163}.
-
 \bibitem[Lesgourgues(2011)]{lesgourgues2011}
 Lesgourgues, J.
 \newblock The cosmic linear anisotropy solving system ({CLASS}). {I}. overview.
 \newblock \emph{arXiv preprint arXiv:1104.2932}, 2011.
-
-\bibitem[Lewis et~al.(2000)Lewis, Challinor, and Lasenby]{lewis2000}
-Lewis, A., Challinor, A., and Lasenby, A.
-\newblock Efficient computation of cosmic microwave background anisotropies in
-  closed {FRW} models.
-\newblock \emph{ApJ}, 538:\penalty0 473--476, 2000.
-\newblock \doi{10.1086/309179}.
-
-\bibitem[Neal(2011)]{neal2011}
-Neal, R.~M.
-\newblock {MCMC} using {Hamiltonian} dynamics.
-\newblock In Brooks, S., Gelman, A., Jones, G.~L., and Meng, X.-L. (eds.),
-  \emph{Handbook of Markov Chain Monte Carlo}, chapter~5. Chapman \& Hall/CRC,
-  2011.
+\newblock \url{https://github.com/lesgourg/class_public}.
 
 \bibitem[Perko et~al.(2016)Perko, Senatore, Jennings, and Wechsler]{perko2016}
 Perko, A., Senatore, L., Jennings, E., and Wechsler, R.~H.
@@ -125,12 +110,6 @@ Phan, D., Pradhan, N., and Jankowiak, M.
 \newblock Composable effects for flexible and accelerated probabilistic
   programming in {NumPyro}.
 \newblock \emph{arXiv preprint arXiv:1912.11554}, 2019.
-
-\bibitem[{Planck Collaboration}(2020)]{planck2020}
-{Planck Collaboration}.
-\newblock {Planck} 2018 results. {VI}. cosmological parameters.
-\newblock \emph{A\&A}, 641:\penalty0 A6, 2020.
-\newblock \doi{10.1051/0004-6361/201833910}.
 
 \bibitem[Senatore \& Zaldarriaga(2015)Senatore and Zaldarriaga]{senatore2015}
 Senatore, L. and Zaldarriaga, M.

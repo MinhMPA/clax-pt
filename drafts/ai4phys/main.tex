@@ -70,11 +70,11 @@ We characterize the boundary between unsupervised and supervised modes of AI-ass
 \section{Introduction}
 \label{sec:intro}
 
-The standard model of cosmology is tested by comparing theoretical predictions against observations from galaxy redshift surveys such as the Dark Energy Spectroscopic Instrument~\citep{desi2025v, desi2025vii} and cosmic microwave background experiments including the Planck satellite~\citep{planck2020}.
+The standard model of cosmology is tested by comparing theoretical predictions against observations of the cosmic microwave background (CMB) angular power spectra from CMB experiments~\citep[e.g.,][]{Planck:2018vyg} and of the galaxy power spectrum multipoles from galaxy redshift surveys~\citep[e.g.,][]{DESI:2024jxi,DESI:2024hhd}.
 This comparison increasingly benefits from gradient-based inference: forecasts require derivatives the likelihood derivatives, HMC analyses require the posterior derivatives.
-Gradient-based inference libraries such as \textsc{NumPyro} \citep{phan2019}, \textsc{BlackJAX} \citep{cabezas2024}, and normalizing-flow-augmented MCMC \citep{gabrie2022} are mature, but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
+Gradient-based inference libraries such as \textsc{NumPyro} \citep{phan2019} and \textsc{BlackJAX} \citep{cabezas2024} but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
 
-The industry standard Boltzmann codes---\class \citep{lesgourgues2011} and \textsc{CAMB} \citep{lewis2000}---are written in C and Fortran, are not differentiable, and are not GPU-native.
+Standard Boltzmann solvers for CMB angular power spectrum, e.g., \class \citep{lesgourgues2011}, and effective-field-theory (EFT) codes for one-loop EFT galaxy power spectrum, e.g., \classpt, are written in C (or Fortran), are not differentiable, and are not GPU-native.
 Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the linear matter power spectrum $\Pk$ but not CMB angular power spectra or galaxy power spectrum multipoles; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and \textsc{SymBoltz.jl} \citep{sletmoen2026} provides a full Boltzmann solver in Julia but without GPU support.
 No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
