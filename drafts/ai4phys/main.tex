@@ -180,6 +180,7 @@ CAMB & Fortran & \checkmark & \checkmark & \checkmark & --- & --- & --- \\
 \abcmb & \jax & \checkmark & \checkmark & \checkmark & --- & \checkmark & \checkmark \\
 SymBoltz.jl & Julia & \checkmark & --- & \checkmark & --- & \checkmark & --- \\
 PyBird-JAX & \jax & --- & --- & --- & emul. & \checkmark & \checkmark \\
+Capse.jl & Julia & emul. & --- & --- & --- & \checkmark & --- \\
 Effort.jl & Julia & --- & --- & --- & emul. & \checkmark & --- \\
 \textbf{\clax + \claxpt} & \jax & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
 \bottomrule
@@ -369,7 +370,7 @@ However, SymBoltz.jl operates in Julia without GPU support, and its reverse-mode
 \textbf{EFT power spectra and IR resummation.}
 The EFT of large-scale structure \citep{perko2016, damico2020} provides a systematic expansion for the galaxy power spectrum multipoles.
 \classpt \citep{chudaykin2021} is the standard implementation; \claxpt reproduces it exactly in differentiable \jax.
-PyBird-JAX \citep{Reeves:2025bxn} and Effort.jl \citep{Bonici:2025ltp} take a complementary approach: they emulate the one-loop power spectrum multipoles using neural networks, achieving sub-millisecond evaluation but without computing the loop integrals directly.
+Several differentiable emulators take a complementary approach: Capse.jl \citep{Bonici:2023xjk} emulates CMB angular power spectra, while PyBird-JAX \citep{Reeves:2025bxn} and Effort.jl \citep{Bonici:2025ltp} emulate one-loop galaxy power spectrum multipoles, all achieving sub-millisecond evaluation using neural networks but without computing the integrals directly.
 \claxpt computes the FFTLog integrals and IR resummation \citep{senatore2015, vlah2015} from first principles, preserving exact differentiability through the full computation at the cost of higher per-evaluation time.
 
 \textbf{Agent-assisted scientific software.}
