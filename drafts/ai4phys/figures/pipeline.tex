@@ -10,28 +10,19 @@
 
 \begin{document}
 \begin{tikzpicture}[
-    % All text sans-serif, consistent sizing
     every node/.style={font=\sffamily},
-    % Module boxes
     mod/.style={
         rectangle, rounded corners=2pt, draw=#1!60!black!40, fill=#1,
         thick, minimum width=1.6cm, minimum height=0.8cm, align=center,
         font=\sffamily\small
     },
     mod/.default=shared,
-    % Smaller file label below module
-    filelabel/.style={
-        font=\sffamily\tiny, text=black!45
-    },
-    % Output boxes
     outputbox/.style={
         rectangle, rounded corners=2pt, draw=black!20, fill=outputbg,
         minimum width=1.4cm, minimum height=0.55cm, align=center,
         font=\sffamily\small
     },
-    % Arrows
     flow/.style={-{Stealth[length=4pt, width=3pt]}, thick, black!55},
-    % Branch fork dot
     dot/.style={circle, fill=black!55, inner sep=1.2pt},
 ]
 
@@ -40,16 +31,9 @@
     (params) {CosmoParams};
 
 \node[mod, right=0.55cm of params] (bg) {Background};
-\node[filelabel, below=0pt of bg] {\texttt{background.py}};
-
 \node[mod, right=0.55cm of bg] (th) {Thermo};
-\node[filelabel, below=0pt of th] {\texttt{thermodynamics.py}};
-
 \node[mod, right=0.55cm of th, minimum width=2.0cm] (eb) {Einstein--Boltzmann};
-\node[filelabel, below=0pt of eb] {\texttt{perturbations.py}};
-
 \node[mod, right=0.55cm of eb] (pr) {Primordial};
-\node[filelabel, below=0pt of pr] {\texttt{primordial.py}};
 
 % Row 1 arrows
 \draw[flow] (params) -- (bg);
@@ -63,26 +47,38 @@
 
 % ===== Row 2 left: CMB branch =====
 \node[mod=cmbmod, below left=1.5cm and 1.8cm of eb] (tr) {Transfer};
-\node[filelabel, below=0pt of tr] {\texttt{transfer.py}};
-
 \node[mod=cmbmod, right=0.5cm of tr] (hr) {Harmonic};
-\node[filelabel, below=0pt of hr] {\texttt{harmonic.py}};
-
 \node[mod=cmbmod, right=0.5cm of hr] (le) {Lensing};
-\node[filelabel, below=0pt of le] {\texttt{lensing.py}};
 
 % CMB branch arrows
 \draw[flow] (fork) -| (tr);
-\draw[flow] (pr) |- ([yshift=3pt]tr.north east);
 \draw[flow] (tr) -- (hr);
 \draw[flow] (hr) -- (le);
 
 % ===== Row 2 right: Galaxy branch =====
 \node[mod=galmod, below right=1.5cm and 1.8cm of eb] (ept) {One-loop PT};
-\node[filelabel, below=0pt of ept] {\texttt{ept.py}};
 
 % Galaxy branch arrow
 \draw[flow] (fork) -| (ept);
+
+% ===== Primordial feeds both branches =====
+% Primordial → Transfer (goes down then left)
+\draw[flow] (pr.south) -- ++(0,-0.4) -| ([xshift=3pt]tr.north east);
+
+% Primordial → One-loop PT (goes down then right)
+% This line crosses the fork→EPT vertical, so we add a bridge/hop
+\coordinate (pr_down) at ($(pr.south) + (0,-0.4)$);
+\coordinate (ept_top_left) at ([xshift=-3pt]ept.north west);
+% The horizontal segment from pr_down going right to ept crosses
+% the fork→ept vertical. Compute the crossing point:
+\coordinate (cross_x) at ($(fork)!(pr_down)!(ept_top_left)$);
+\path let \p1=(fork), \p2=(pr_down) in coordinate (bridge_pt) at (\x1, \y2);
+% Draw with a small arc bridge at the crossing
+\draw[flow] (pr_down) -- ++(0.3,0)
+    -- ([xshift=-0.15cm]bridge_pt)
+    arc[start angle=180, end angle=0, radius=0.15cm]
+    -- (ept_top_left |- pr_down)
+    -- (ept_top_left);
 
 % ===== Row 3: Outputs =====
 \node[outputbox, below=0.7cm of tr] (pkout) {$P(k)$};
@@ -101,18 +97,13 @@
           inner sep=10pt,
           label={[font=\sffamily\footnotesize\bfseries, text=black!30,
                   anchor=north west]north west:\textsc{clax}}] {};
-    % clax-pt region (no overlap)
+    % clax-pt region
     \node[fit=(ept)(pgout),
           draw=galmod!40, fill=galmod!15, rounded corners=5pt,
           inner sep=10pt,
           label={[font=\sffamily\footnotesize\bfseries, text=black!30,
                   anchor=north east]north east:\textsc{clax-pt}}] {};
 \end{scope}
-
-% ===== Legend =====
-\node[anchor=north west, font=\sffamily\scriptsize] at ($(pkout.south west) + (-0.8, -0.45)$) {
-    \tikz[baseline=-0.5ex]{\draw[flow] (0,0) -- (0.45,0);}\;data flow
-};
 
 \end{tikzpicture}
 \end{document}
