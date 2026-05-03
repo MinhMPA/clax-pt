@@ -79,7 +79,7 @@ Several \jax implementations exist but cover only subsets of the problem: \disco
 No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
 We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class \citep{lesgourgues2011} and \classpt \citep{chudaykin2021} pipelines---and the oracle-guided agentic methodology used to build them.
-Using \class v3.3.4 and \classpt as ground truth, we find a clear boundary: agents handle implementation bugs (convention errors, algorithmic transcription, coefficient verification) autonomously and reliably, but fail at two classes of problem that require human physics judgment: (1) recognizing that an architecture is structurally incompatible with the intended physics, and (2) detecting that a numerically effective patch satisfies all oracle tests at the calibration point while encoding incorrect physics.
+Using \class and \classpt as ground truth, we find a clear boundary: agents handle implementation bugs (convention errors, algorithmic transcription, coefficient verification) autonomously and reliably, but fail at two classes of problem that require human physics judgment: (1) recognizing that an architecture is structurally incompatible with the intended physics, and (2) detecting that a numerically effective patch satisfies all oracle tests at the calibration point while encoding incorrect physics.
 
 \paragraph{Contributions.}
 \begin{itemize}
@@ -129,7 +129,7 @@ No branching on traced values ensures compatibility with \texttt{jax.jit} and \t
 \caption{Pipeline architecture of \clax and \claxpt.
 The shared backbone (top row) computes background cosmology, recombination, and the Einstein--Boltzmann perturbation hierarchy.
 Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop EFT perturbation theory).
-Every module is independently validated against \class v3.3.4 (\clax) or \classpt (\claxpt) reference data.
+Every module is independently validated against \class (\clax) or \classpt (\claxpt) reference data.
 The entire pipeline is end-to-end differentiable: \texttt{jax.grad} propagates exact reverse-mode gradients from any output back to \texttt{CosmoParams}.}
 \label{fig:pipeline}
 \end{figure*}
@@ -383,7 +383,7 @@ Empirically, AI agents resolved 95\% of implementation bugs autonomously.
 The remaining 5\% required human physics judgment: recognizing a structural mismatch between an architecture and its target physics, and detecting a numerically effective but physically unmotivated fudge factor.
 
 These findings suggest a practical framework for AI-assisted scientific code development: agents operate autonomously in unsupervised mode for implementation work, but human scientists remain in the loop as architectural and physical reviewers, intervening proactively when oracle feedback stalls or when a numerical patch lacks physical derivation.
-The codes are open source at \url{https://github.com/smsharma/clax}.
+The codes will be made publicly available.
 
 % ===========================================================================
 \bibliography{references}
