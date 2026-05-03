@@ -14,7 +14,27 @@ The goal is a differentiable alternative to [CLASS](https://github.com/lesgourg/
 
 ## Status
 
-Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. `fit_cl` preset for HMC / fitting; `planck_cl` for science-grade accuracy (487s on H100). See [CHANGELOG.md](CHANGELOG.md) for details.
+Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. `fit_cl` preset for HMC / fitting; `planck_cl` for science-grade accuracy (487s on H100). One-loop EFTofLSS module (`clax.ept`) ports the CLASS-PT FFTLog pipeline to JAX with sub-percent accuracy on monopoles/quadrupoles. See [CHANGELOG.md](CHANGELOG.md) for details.
+
+## One-loop EFTofLSS (`clax.ept`) accuracy vs CLASS-PT
+
+All comparisons at Planck 2018 best-fit LCDM, z=0.38, k < 0.30 h/Mpc:
+
+| Spectrum            | Max error | Mean error | Notes                              |
+|---------------------|-----------|------------|------------------------------------|
+| P_mm real-space     | **0.33%** | 0.10%      | Matter-matter, IR resummed         |
+| P_gg real-space     | **0.35%** | 0.12%      | Galaxy-galaxy (b1=2)               |
+| P_gm real-space     | **0.28%** | 0.09%      | Galaxy-matter cross                |
+| P_mm ell=0          | **0.21%** | 0.08%      | Matter monopole                    |
+| P_mm ell=2          | **0.34%** | 0.11%      | Matter quadrupole                  |
+| P_mm ell=4          | **1.2%**  | 0.45%      | Matter hexadecapole                |
+| P_gg ell=0          | **0.42%** | 0.15%      | Galaxy monopole                    |
+| P_gg ell=2          | **0.89%** | 0.50%      | Galaxy quadrupole                  |
+| P_gg ell=4          | **1.8%**  | 0.72%      | Galaxy hexadecapole                |
+
+Sub-percent on all monopoles and quadrupoles. Hexadecapole within 2% (limited by the small signal amplitude and zero-crossings — see project memory `project_ept_hexadecapole_floor`).
+
+The `clax.ept` module additionally feeds CMB lensing C_l^phiphi corrections via `compute_cl_pp(... nonlinear="ept")`.
 
 ## Accuracy comparison against CLASS v3.3.4
 
@@ -294,8 +314,9 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | `bessel.py`         | Spherical Bessel functions j_l(x)                |
 | `transfer.py`       | Linear matter P(k) from perturbation solve       |
 | `harmonic.py`       | C_l^TT/EE/TE/BB from line-of-sight integration  |
-| `lensing.py`        | C_l^phiphi (source-Limber, optional Halofit NL) and lensed C_l (correlation-function method) |
-| `nonlinear.py`      | HaloFit (Takahashi 2012)                         |
+| `lensing.py`        | C_l^phiphi (source-Limber, optional Halofit / clax-pt NL) and lensed C_l (correlation-function method) |
+| `nonlinear.py`      | HaloFit (Takahashi 2012 + Bird 2012 ν correction)|
+| `ept.py`            | One-loop EFTofLSS via FFTLog (CLASS-PT algorithm in JAX); real-space and RSD multipoles, IR resummation, bias |
 | `shooting.py`       | theta_s -> H0 via Newton + `custom_vjp`          |
 
 ## Precision presets
@@ -340,10 +361,14 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 ## References
 
 - **CLASS v3.3.4**: Blas, Lesgourgues & Tram (2011). [arXiv:1104.2933](https://arxiv.org/abs/1104.2933)
+- **CLASS-PT**: Chudaykin, Ivanov, Philcox & Simonović (2020). Non-linear perturbation theory extension of CLASS. [arXiv:2004.10607](https://arxiv.org/abs/2004.10607)
+- **EFT-with-FFT**: Nguyen (2026). Pedagogical notes on FFTLog computation of one-loop PT integrals. [GitHub](https://github.com/MinhMPA/EFT-with-FFT)
 - **DISCO-DJ**: Hahn, List & Porqueres (2023). Differentiable Einstein-Boltzmann solver in JAX. [arXiv:2311.03291](https://arxiv.org/abs/2311.03291)
 - **Bolt.jl**: Li, Sullivan & Millea (2023). Differentiable Boltzmann solver in Julia. [Zenodo: 10.5281/zenodo.10065126](https://zenodo.org/records/10065126)
 - Seljak & Zaldarriaga (1996). Line-of-sight integration approach. [arXiv:astro-ph/9603033](https://arxiv.org/abs/astro-ph/9603033)
 - Ma & Bertschinger (1995). Cosmological perturbation theory. [arXiv:astro-ph/9506072](https://arxiv.org/abs/astro-ph/9506072)
+
+For more on the `clax.ept` module, see `docs/clax-pt.md`, `docs/CLASS-PT-summary.md`, and `docs/FFTLog_PT.md`.
 
 ## License
 
