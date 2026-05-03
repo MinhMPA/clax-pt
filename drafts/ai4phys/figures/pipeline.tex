@@ -2,11 +2,11 @@
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds}
 
-% Palette
-\definecolor{shared}{HTML}{E8EFF5}     % shared pipeline modules
-\definecolor{cmbmod}{HTML}{F8D7DA}     % CMB branch
-\definecolor{galmod}{HTML}{E2D4F0}     % galaxy branch
-\definecolor{outputbg}{HTML}{F5F5F5}   % output boxes
+\definecolor{shared}{HTML}{E8EFF5}
+\definecolor{cmbmod}{HTML}{F8D7DA}
+\definecolor{galmod}{HTML}{E2D4F0}
+\definecolor{outputbg}{HTML}{F5F5F5}
+\definecolor{prmod}{HTML}{DCEDC8}       % primordial — light green, distinct
 
 \begin{document}
 \begin{tikzpicture}[
@@ -26,65 +26,56 @@
     dot/.style={circle, fill=black!55, inner sep=1.2pt},
 ]
 
-% ===== Row 1: Shared pipeline =====
+% ===== Row 1: Boltzmann chain =====
 \node[mod, draw=black!50, fill=white, font=\sffamily\small\bfseries]
     (params) {CosmoParams};
 
 \node[mod, right=0.55cm of params] (bg) {Background};
 \node[mod, right=0.55cm of bg] (th) {Thermo};
 \node[mod, right=0.55cm of th, minimum width=2.0cm] (eb) {Einstein--Boltzmann};
-\node[mod, right=0.55cm of eb] (pr) {Primordial};
+
+% Primordial: independent of EB, depends only on CosmoParams
+% Place it below the main row, between params and the fork
+\node[mod=prmod, below=0.7cm of params] (pr) {Primordial};
 
 % Row 1 arrows
 \draw[flow] (params) -- (bg);
 \draw[flow] (bg) -- (th);
 \draw[flow] (th) -- (eb);
-\draw[flow] (eb) -- (pr);
 
-% ===== Fork point below EB =====
+% CosmoParams also feeds Primordial directly
+\draw[flow] (params) -- (pr);
+
+% ===== Fork point: EB output splits into two branches =====
 \node[dot, below=0.7cm of eb] (fork) {};
 \draw[flow] (eb) -- (fork);
 
 % ===== Row 2 left: CMB branch =====
-\node[mod=cmbmod, below left=1.5cm and 1.8cm of eb] (tr) {Transfer};
+\node[mod=cmbmod, below=1.5cm of bg] (tr) {Transfer};
 \node[mod=cmbmod, right=0.5cm of tr] (hr) {Harmonic};
 \node[mod=cmbmod, right=0.5cm of hr] (le) {Lensing};
 
-% CMB branch arrows
-\draw[flow] (fork) -| (tr);
-\draw[flow] (tr) -- (hr);
-\draw[flow] (hr) -- (le);
-
 % ===== Row 2 right: Galaxy branch =====
-\node[mod=galmod, below right=1.5cm and 1.8cm of eb] (ept) {One-loop PT};
+\node[mod=galmod, below=1.5cm of eb, xshift=2.0cm] (ept) {One-loop PT};
 
-% Galaxy branch arrow
+% Fork → both branches
+\draw[flow] (fork) -| (tr);
 \draw[flow] (fork) -| (ept);
 
-% ===== Primordial feeds both branches =====
-% Primordial → Transfer (goes down then left)
-\draw[flow] (pr.south) -- ++(0,-0.4) -| ([xshift=3pt]tr.north east);
-
-% Primordial → One-loop PT (goes down then right)
-% This line crosses the fork→EPT vertical, so we add a bridge/hop
-\coordinate (pr_down) at ($(pr.south) + (0,-0.4)$);
-\coordinate (ept_top_left) at ([xshift=-3pt]ept.north west);
-% The horizontal segment from pr_down going right to ept crosses
-% the fork→ept vertical. Compute the crossing point:
-\coordinate (cross_x) at ($(fork)!(pr_down)!(ept_top_left)$);
-\path let \p1=(fork), \p2=(pr_down) in coordinate (bridge_pt) at (\x1, \y2);
-% Draw with a small arc bridge at the crossing
-\draw[flow] (pr_down) -- ++(0.3,0)
-    -- ([xshift=-0.15cm]bridge_pt)
-    arc[start angle=180, end angle=0, radius=0.15cm]
-    -- (ept_top_left |- pr_down)
-    -- (ept_top_left);
+% Primordial merges into the fork line — feeds both branches
+% Draw Primordial → fork (joins the vertical from EB)
+\draw[flow] (pr) -| (fork);
 
 % ===== Row 3: Outputs =====
 \node[outputbox, below=0.7cm of tr] (pkout) {$P(k)$};
 \node[outputbox, below=0.7cm of le] (clout) {$C_\ell^{TT/EE/TE/BB}$\\[-2pt]{\small lensed\,$C_\ell$}};
 \node[outputbox, below=0.7cm of ept] (pgout) {$P_{gg}(k,\ell)$\\[-2pt]{\small $P_{mm},\,P_{gm}$}};
 
+% CMB chain
+\draw[flow] (tr) -- (hr);
+\draw[flow] (hr) -- (le);
+
+% Outputs
 \draw[flow] (tr) -- (pkout);
 \draw[flow] (le) -- (clout);
 \draw[flow] (ept) -- (pgout);
