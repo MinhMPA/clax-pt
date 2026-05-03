@@ -74,9 +74,9 @@ The standard model of cosmology is tested by comparing theoretical predictions a
 This comparison increasingly benefits from gradient-based inference: forecasts require derivatives the likelihood derivatives, HMC analyses require the posterior derivatives.
 Gradient-based inference libraries such as \textsc{NumPyro} \citep{phan2019} and \textsc{BlackJAX} \citep{cabezas2024} but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
 
-Standard Boltzmann solvers for CMB angular power spectrum, e.g., \class \citep{lesgourgues2011}, and effective-field-theory (EFT) codes for one-loop EFT galaxy power spectrum, e.g., \classpt, are written in C (or Fortran), are not differentiable, and are not GPU-native.
+Standard Boltzmann solvers for CMB angular power spectra, e.g., \class \citep{lesgourgues2011}, and one-loop perturbation theory codes for galaxy power spectrum multipoles, e.g., \classpt, are written in C (or Fortran), are not differentiable, and are not GPU-native.
 Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the linear matter power spectrum $\Pk$ but not CMB angular power spectra or galaxy power spectrum multipoles; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and \textsc{SymBoltz.jl} \citep{sletmoen2026} provides a full Boltzmann solver in Julia but without GPU support.
-No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop EFT galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
+No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
 We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class \citep{lesgourgues2011} and \classpt \citep{chudaykin2021} pipelines---and the oracle-guided agentic methodology used to build them.
 Using \class and \classpt as ground truth, we find a clear boundary: agents handle implementation bugs (convention errors, algorithmic transcription, coefficient verification) autonomously and reliably, but fail at two classes of problem that require human physics judgment: (1) recognizing that an architecture is structurally incompatible with the intended physics, and (2) detecting that a numerically effective patch satisfies all oracle tests at the calibration point while encoding incorrect physics.
@@ -128,7 +128,7 @@ No branching on traced values ensures compatibility with \texttt{jax.jit} and \t
 \includegraphics[width=\textwidth]{figures/pipeline.pdf}
 \caption{Pipeline architecture of \clax and \claxpt.
 The shared backbone (top row) computes background cosmology, recombination, and the Einstein--Boltzmann perturbation hierarchy.
-Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop EFT perturbation theory).
+Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop perturbation theory).
 Every module is independently validated against \class (\clax) or \classpt (\claxpt) reference data.
 The entire pipeline is end-to-end differentiable: \texttt{jax.grad} propagates exact reverse-mode gradients from any output back to \texttt{CosmoParams}.}
 \label{fig:pipeline}
@@ -218,7 +218,7 @@ Multi-cosmology (10 pts) & $< 0.5\%$ \\
 
 \subsection{Matter and galaxy power spectrum accuracy}
 
-\Cref{tab:pk_accuracy} summarizes accuracy for the linear matter power spectrum $\Pk$ (\clax vs.\ \class) and one-loop EFT galaxy power spectra (\claxpt vs.\ \classpt at $z = 0.38$, the BOSS effective redshift).
+\Cref{tab:pk_accuracy} summarizes accuracy for the linear matter power spectrum $\Pk$ (\clax vs.\ \class) and one-loop galaxy power spectrum multipoles (\claxpt vs.\ \classpt at $z = 0.38$, the BOSS effective redshift).
 The linear $\Pk$ agrees to $1$--$3\%$ across $k = 0.001$--$0.3\;\mathrm{Mpc}^{-1}$; this is the input to both the CMB transfer integrals and the one-loop computation.
 Real-space one-loop spectra ($P_{mm}$, $P_{gg}$, $P_{gm}$) agree to $< 0.31\%$ (mean 0.04\%).
 RSD monopoles ($\ell = 0$) agree to $< 0.6\%$ for matter and galaxies.
@@ -238,7 +238,7 @@ Spectrum & Max error & Metric & Oracle \\
 $\Pk$, $k = 0.01$--$0.1\;\mathrm{Mpc}^{-1}$ & 1.3--1.6\% & rel. & \class \\
 $\Pk$, $k = 0.3\;\mathrm{Mpc}^{-1}$ & 3.5\% & rel. & \class \\
 \midrule
-\multicolumn{4}{l}{\textit{One-loop EFT (\claxpt vs.\ \classpt, $z = 0.38$)}} \\
+\multicolumn{4}{l}{\textit{One-loop (\claxpt vs.\ \classpt, $z = 0.38$)}} \\
 $P_{mm}^\mathrm{real}$, $P_{gg}^\mathrm{real}$, $P_{gm}^\mathrm{real}$ & 0.31\% & rel. & \classpt \\
 $P_{mm}^{(\ell=0)}$, $P_{gg}^{(\ell=0)}$ & 0.59\%, 0.56\% & rel. & \classpt \\
 $P_{mm}^{(\ell=2)}$, $P_{gg}^{(\ell=2)}$ & 0.70\%, 0.89\% & rel. & \classpt \\
@@ -367,8 +367,8 @@ However, SymBoltz.jl operates in Julia without GPU support, and its reverse-mode
 \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy.
 \clax is the first \jax code to provide full CMB angular power spectra plus one-loop galaxy power spectrum multipoles with exact reverse-mode automatic differentiation and GPU execution.
 
-\textbf{EFT power spectra and IR resummation.}
-The EFT of large-scale structure \citep{perko2016, damico2020} provides a systematic expansion for the galaxy power spectrum multipoles.
+\textbf{One-loop perturbation theory and IR resummation.}
+The effective field theory (EFT) of large-scale structure \citep{perko2016, damico2020} provides a systematic one-loop expansion for the galaxy power spectrum multipoles.
 \classpt \citep{chudaykin2021} is the standard implementation; \claxpt reproduces it exactly in differentiable \jax.
 Several differentiable emulators take a complementary approach: Capse.jl \citep{Bonici:2023xjk} emulates CMB angular power spectra, while PyBird-JAX \citep{Reeves:2025bxn} and Effort.jl \citep{Bonici:2025ltp} emulate one-loop galaxy power spectrum multipoles, all achieving sub-millisecond evaluation using neural networks but without computing the integrals directly.
 \claxpt computes the FFTLog integrals and IR resummation \citep{senatore2015, vlah2015} from first principles, preserving exact differentiability through the full computation at the cost of higher per-evaluation time.
