@@ -2016,13 +2016,17 @@ def compute_ept_from_clax(
     lnk_pt  = jnp.log(pt.k_grid)
     lnk_out = jnp.log(jnp.array(k_mpc))
 
-    # Interpolate δ_m to EPT k-grid at τ corresponding to redshift z
-    # (simple: use z=0 δ_m for now)
-    # delta_m_interp = ...  # TODO: proper z interpolation
-    # For now, use δ_m at last τ in pt.tau_grid
-    delta_m_0 = pt.delta_m[:, -1]  # shape (Nk_pt,), at z≈0
+    # Interpolate δ_m to τ(z) along the τ axis (vmap-safe; no Python branch
+    # on z), then spline along log-k onto the EPT k-grid. At z=0 the τ
+    # interpolation evaluates at τ_0 and matches pt.delta_m[:, -1] up to
+    # spline edge effects; for z > 0 it gives the correct δ_m(k, z) so
+    # downstream loop integrals reflect the requested redshift.
     from clax.interpolation import CubicSpline as CS
-    spline = CS(lnk_pt, delta_m_0)
+    loga_z = jnp.log(1.0 / (1.0 + z))
+    tau_z = bg.tau_of_loga.evaluate(loga_z)
+    delta_m_at_z = jax.vmap(
+        lambda dm_k: CS(pt.tau_grid, dm_k).evaluate(tau_z))(pt.delta_m)
+    spline = CS(lnk_pt, delta_m_at_z)
     delta_m_ept = spline.evaluate(lnk_out)
 
     # Linear P(k) in Mpc³
