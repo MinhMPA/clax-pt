@@ -28,21 +28,21 @@
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
 \newlabel{fig:pipeline}{{1}{3}{Pipeline architecture of \clax and \claxpt . The shared backbone (top row) computes background cosmology, recombination, and the Einstein--Boltzmann perturbation hierarchy. Two branches produce CMB angular power spectra (left, via line-of-sight integration and lensing) and galaxy power spectrum multipoles (right, via one-loop perturbation theory). Every module is independently validated against \class (\clax ) or \classpt (\claxpt ) reference data. The entire pipeline is end-to-end differentiable: \texttt {jax.grad} propagates exact reverse-mode gradients from any output back to \texttt {CosmoParams}}{figure.caption.1}{}}
 \newlabel{fig:pipeline@cref}{{[figure][1][]1}{[1][2][]3}{}{}{}}
+\newlabel{sec:results}{{4}{3}{}{section.4}{}}
+\newlabel{sec:results@cref}{{[section][4][]4}{[1][3][]3}{}{}{}}
 \citation{dimarzio1993}
-\newlabel{sec:results}{{4}{4}{}{section.4}{}}
-\newlabel{sec:results@cref}{{[section][4][]4}{[1][4][]4}{}{}{}}
-\newlabel{tab:landscape}{{1}{5}{Comparison of cosmological theory codes. ``AD'' = automatic differentiation. ``PT'' = one-loop perturbation theory for galaxy clustering. PyBird-JAX provides emulated (not exact) one-loop PT. \clax is the only code combining CMB $\Cl $, lensing, $\Pk $, and exact 1-loop PT with full AD on GPU}{table.caption.2}{}}
-\newlabel{tab:landscape@cref}{{[table][1][]1}{[1][4][]5}{}{}{}}
-\newlabel{tab:cmb_accuracy}{{2}{5}{CMB accuracy (\clax vs.\ \class , Planck 2018 fiducial). Post-fix values reflect the hydrogen-mass and BB-kernel corrections described in the text}{table.caption.3}{}}
-\newlabel{tab:cmb_accuracy@cref}{{[table][2][]2}{[1][4][]5}{}{}{}}
-\newlabel{tab:pk_accuracy}{{3}{5}{Matter and galaxy power spectrum accuracy}{table.caption.4}{}}
-\newlabel{tab:pk_accuracy@cref}{{[table][3][]3}{[1][4][]5}{}{}{}}
-\newlabel{sec:supervised}{{5}{5}{}{section.5}{}}
-\newlabel{sec:supervised@cref}{{[section][5][]5}{[1][4][]5}{}{}{}}
-\newlabel{tab:gradients}{{4}{5}{AD vs.\ finite-difference gradients for $P_{mm}(k=0.1\;h/\mathrm {Mpc})$}{table.caption.5}{}}
-\newlabel{tab:gradients@cref}{{[table][4][]4}{[1][4][]5}{}{}{}}
+\newlabel{tab:landscape}{{1}{4}{Comparison of cosmological theory codes. ``AD'' = automatic differentiation. ``PT'' = one-loop perturbation theory for galaxy clustering. PyBird-JAX provides emulated (not exact) one-loop PT. \clax is the only code combining CMB $\Cl $, lensing, $\Pk $, and exact 1-loop PT with full AD on GPU}{table.caption.2}{}}
+\newlabel{tab:landscape@cref}{{[table][1][]1}{[1][3][]4}{}{}{}}
+\newlabel{tab:cmb_accuracy}{{2}{4}{CMB accuracy (\clax vs.\ \class , Planck 2018 fiducial). Post-fix values reflect the hydrogen-mass and BB-kernel corrections described in the text}{table.caption.3}{}}
+\newlabel{tab:cmb_accuracy@cref}{{[table][2][]2}{[1][3][]4}{}{}{}}
+\newlabel{tab:pk_accuracy}{{3}{4}{Matter and galaxy power spectrum accuracy}{table.caption.4}{}}
+\newlabel{tab:pk_accuracy@cref}{{[table][3][]3}{[1][4][]4}{}{}{}}
+\newlabel{tab:gradients}{{4}{4}{AD vs.\ finite-difference gradients for $P_{mm}(k=0.1\;h/\mathrm {Mpc})$}{table.caption.5}{}}
+\newlabel{tab:gradients@cref}{{[table][4][]4}{[1][4][]4}{}{}{}}
 \newlabel{tab:performance}{{5}{5}{Performance summary}{table.caption.6}{}}
-\newlabel{tab:performance@cref}{{[table][5][]5}{[1][4][]5}{}{}{}}
+\newlabel{tab:performance@cref}{{[table][5][]5}{[1][5][]5}{}{}{}}
+\newlabel{sec:supervised}{{5}{5}{}{section.5}{}}
+\newlabel{sec:supervised@cref}{{[section][5][]5}{[1][5][]5}{}{}{}}
 \citation{hahn2023}
 \citation{zhou2026}
 \citation{sletmoen2026}
@@ -55,9 +55,9 @@
 \citation{Reeves:2025bxn}
 \citation{Bonici:2025ltp}
 \citation{senatore2015,vlah2015}
+\citation{carlini2026}
 \newlabel{sec:related}{{6}{6}{}{section.6}{}}
 \newlabel{sec:related@cref}{{[section][6][]6}{[1][6][]6}{}{}{}}
-\citation{carlini2026}
 \bibdata{references}
 \bibcite{DESI:2024hhd}{{1}{2025{a}}{{Adame et~al.}}{{}}}
 \bibcite{DESI:2024jxi}{{2}{2025{b}}{{Adame et~al.}}{{}}}
@@ -76,11 +76,11 @@
 \bibcite{kidger2021}{{15}{2021}{{Kidger}}{{}}}
 \bibcite{lesgourgues2011}{{16}{2011}{{Lesgourgues}}{{}}}
 \bibcite{perko2016}{{17}{2016}{{Perko et~al.}}{{Perko, Senatore, Jennings, and Wechsler}}}
-\newlabel{sec:conclusion}{{7}{7}{}{section.7}{}}
-\newlabel{sec:conclusion@cref}{{[section][7][]7}{[1][7][]7}{}{}{}}
 \bibcite{phan2019}{{18}{2019}{{Phan et~al.}}{{Phan, Pradhan, and Jankowiak}}}
 \bibcite{Reeves:2025bxn}{{19}{2026}{{Reeves et~al.}}{{Reeves, Zhang, and Zheng}}}
 \bibcite{seager1999}{{20}{1999}{{Seager et~al.}}{{Seager, Sasselov, and Scott}}}
+\newlabel{sec:conclusion}{{7}{7}{}{section.7}{}}
+\newlabel{sec:conclusion@cref}{{[section][7][]7}{[1][6][]7}{}{}{}}
 \bibcite{seager2000}{{21}{2000}{{Seager et~al.}}{{Seager, Sasselov, and Scott}}}
 \bibcite{senatore2015}{{22}{2015}{{Senatore \& Zaldarriaga}}{{Senatore and Zaldarriaga}}}
 \bibcite{simonovic2018}{{23}{2018}{{Simonovi{\'c} et~al.}}{{Simonovi{\'c}, Baldauf, Zaldarriaga, Carrasco, and Kollmeier}}}

@@ -93,9 +93,8 @@ Using \class and \classpt as ground truth, we find a clear boundary: agents hand
 
 \subsection{Cosmological inference and differentiable Boltzmann codes}
 
-Galaxy surveys and CMB experiments measure the angular power spectrum $\Cl$ and the galaxy power spectrum $P_\mathrm{gg}(k, \ell)$, which depend on cosmological parameters $\boldsymbol{\theta}$ (density, dark matter density, Hubble constant, spectral index, etc.)\ through the Boltzmann equation---a coupled system of ODEs for photon, baryon, dark matter, and neutrino perturbations that must be integrated numerically.
-Both are expensive to approximate by finite differences and practical to compute exactly only with automatic differentiation (AD) for codes of this complexity.
-While concurrent work (\abcmb, \textsc{SymBoltz.jl}) provides AD for CMB angular power spectra, \clax and \claxpt are the first work to combine differentiable CMB $\Cl$ with one-loop galaxy power spectrum multipoles, forward-mode and reverse-mode AD through the full cosmological analysis pipelines for CMB and galaxy clustering data.
+Both CMB angular power spectra $\Cl$ and galaxy power spectrum multipoles $P_\mathrm{gg}(k, \ell)$ depend on cosmological parameters through the Boltzmann equation---a coupled system of ordinary differential equations for photon, baryon, dark matter, and neutrino perturbations.
+Their derivatives with respect to cosmological parameters are expensive to approximate by finite differences and practical to compute exactly only with automatic differentiation (AD).
 
 \subsection{AI-assisted scientific code development}
 
@@ -133,10 +132,6 @@ Making the pipeline end-to-end differentiable required several non-trivial engin
 
 Three design decisions required physicist input and could not have been made by the agent autonomously. Dark energy fluid perturbations (time-varying equation of state $w_0$--$w_a$) were added to the shared Einstein constraint equations at the physicist's direction. For galaxy power spectrum multipoles, the redshift-space distortion tree-level spectrum uses Gauss--Legendre quadrature over the line-of-sight angle $\mu$ with direction-dependent baryon acoustic oscillation damping $\Sigma^2_\mathrm{tot}(\mu)$, replacing an analytic Legendre projection that the agent had implemented but which was structurally incompatible with the anisotropic physics. An explicit ``no fudge factors'' rule, encoded in the development methodology, prevented the agent from shipping a scalar correction factor that passed all oracle tests but encoded no physical model. These interventions are analyzed in detail in \cref{sec:supervised}.
 
-\subsection{Implications for AI-assisted scientific software}
-
-The balance between these three categories---oracle-transcribed physics, autonomous engineering for differentiability, and physicist-directed corrections---suggests a practical division of labor for future AI-assisted scientific code development. The bulk of implementation work (transcribing equations from reference codes, implementing standard algorithms) is reliably handled by AI agents with oracle feedback. Engineering decisions specific to the target framework (here, \jax differentiability) are also within agent capability, provided the agent has access to relevant reference implementations (here, \discoeb for the PID controller and Rosenbrock solver). The irreducible human contribution is concentrated in a small number of high-impact decisions where the correct choice requires understanding the physics beyond what any oracle test can verify---recognizing architectural incompatibilities and rejecting numerically adequate but physically unmotivated solutions. This concentration suggests that physicist supervision can be sparse but must be available at critical junctures, and that the design of protocols for triggering human review (\cref{sec:supervised}) is as important as the capabilities of the agent itself.
-
 \subsection{Development methodology}
 
 The \clax CMB pipeline ($\sim$10,000 lines) was developed over $\sim$6 days across $\geq$100 Claude Code (Opus 4.6) agent sessions.
@@ -153,8 +148,7 @@ Both rules directly prevented specific failure modes documented in \cref{sec:sup
 
 \subsection{Landscape comparison}
 
-\Cref{tab:landscape} compares \clax against existing differentiable and non-differentiable cosmology codes.
-\clax is the first \jax code providing both CMB angular power spectra and one-loop galaxy power spectrum multipoles with end-to-end automatic differentiation on GPU.
+\Cref{tab:landscape} compares \clax against existing cosmology codes.
 
 \begin{table*}[t]
 \caption{Comparison of cosmological theory codes. ``AD'' = automatic differentiation. ``PT'' = one-loop perturbation theory for galaxy clustering. PyBird-JAX provides emulated (not exact) one-loop PT. \clax is the only code combining CMB $\Cl$, lensing, $\Pk$, and exact 1-loop PT with full AD on GPU.}
@@ -354,6 +348,14 @@ It did not prevent 33 sessions of exploration within the wrong architectural fra
 Agents excel at reading \class source code and transcribing equations faithfully; identifying which term disagrees via targeted comparison with oracle outputs; and adjusting coefficients and conventions.
 Agents fail at recognizing that an architectural assumption is inconsistent with the physics, and at detecting that a numerically adequate patch produces zero test failures but is not physics.
 \emph{Detecting physics errors that pass all tests requires knowledge of what the physics should look like}, which is a form of human supervision that oracle testing cannot replace.
+
+\subsection{Implications for future AI-assisted scientific software}
+
+The balance between oracle-transcribed physics ($\sim$90\% of bugs, fully autonomous), autonomous engineering for differentiability, and physicist-directed corrections ($\sim$10\%, requiring human judgment) suggests a practical division of labor for future AI-assisted scientific code development.
+The bulk of implementation work---transcribing equations from reference codes, implementing standard algorithms---is reliably handled by AI agents with oracle feedback.
+Engineering decisions specific to the target framework (here, \jax differentiability) are also within agent capability, provided the agent has access to relevant reference implementations (here, \discoeb for the adaptive step-size controller and Rosenbrock solver).
+The irreducible human contribution is concentrated in a small number of high-impact decisions where the correct choice requires understanding the physics beyond what any oracle test can verify.
+This concentration suggests that physicist supervision can be sparse but must be available at critical junctures, and that the design of protocols for triggering human review is as important as the capabilities of the agent itself.
 
 % ===========================================================================
 \section{Related Work}
