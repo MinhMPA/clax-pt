@@ -1,4 +1,4 @@
-\begin{thebibliography}{26}
+\begin{thebibliography}{27}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -166,6 +166,12 @@ Sletmoen, H.
   differentiable linear {Einstein}--{Boltzmann} solver.
 \newblock \emph{Astronomy \& Astrophysics}, 707:\penalty0 A128, 2026.
 \newblock \doi{10.1051/0004-6361/202557450}.
+
+\bibitem[Villaescusa-Navarro et~al.(2025)]{villaescusa2025}
+Villaescusa-Navarro, F. et~al.
+\newblock The {Denario} project: Deep knowledge {AI} agents for scientific
+  discovery.
+\newblock \emph{arXiv preprint arXiv:2510.26887}, 2025.
 
 \bibitem[Vlah et~al.(2015)Vlah, White, and Aviles]{vlah2015}
 Vlah, Z., White, M., and Aviles, A.

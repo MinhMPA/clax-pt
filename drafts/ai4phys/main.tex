@@ -377,7 +377,8 @@ Several differentiable emulators take a complementary approach: Capse.jl \citep{
 \claxpt computes the loop integrals and baryon acoustic oscillation peak resummation \citep{senatore2015, vlah2015} from first principles, preserving exact differentiability at the cost of higher per-evaluation time.
 
 \textbf{Agent-assisted scientific software.}
-Recent work has shown that LLM agents can complete extended scientific tasks autonomously \citep{carlini2026}, but most evaluations focus on syntactic correctness (compilation, test passage) rather than physical validity.
+Recent work has shown that LLM agents can complete extended scientific tasks autonomously \citep{carlini2026}, and multi-agent systems such as Denario \citep{villaescusa2025} can generate complete research manuscripts across multiple disciplines.
+However, most evaluations of agent-generated scientific output focus on syntactic correctness (compilation, test passage) or surface-level coherence rather than physical validity---as illustrated by the growing volume of fully autonomous AI-generated manuscripts.\footnote{\url{https://papers.parallelscience.org/}}
 Our work identifies semantic correctness---the requirement that a passing numerical patch has physical basis, not just calibration-point accuracy---as the key challenge distinguishing scientific software from general code generation.
 
 % ===========================================================================
