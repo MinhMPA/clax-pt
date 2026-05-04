@@ -316,12 +316,13 @@ We classify these into four types by their nature and whether autonomous resolut
 \textbf{Type~I: Convention and unit bugs.}
 Errors in translating \class conventions into \jax: wrong sign, missing numerical factor, incorrect unit conversion.
 A representative example surfaced during post-development improvement: the hydrogen number density $n_{H,0}$ in the thermodynamics module used the proton mass $m_p$ instead of the hydrogen atom mass $m_H$---a one-line typo that biased the reionization redshift $z_\mathrm{reio}$ and was initially misattributed to RECFAST limitations.
-\emph{Agents resolved all Type~I bugs autonomously} by reading the corresponding \class source code and correcting the factor.
+Another: the agent transcribed the tensor \emph{temperature} radial kernel from \class \texttt{transfer.c} (line 4241) instead of the tensor \emph{polarization} B-mode kernel (line 4263), producing $\Cl^{BB}$ ratios ranging from $0.4\times$ to $22\times$ vs.\ \class---yet this was listed as a ``known limitation'' for months before the correct kernel was identified.
+\emph{Agents resolved all Type~I bugs autonomously} once the discrepancy was flagged by oracle comparison.
 
 \textbf{Type~II: Algorithm implementation bugs.}
 Errors in the numerical algorithm itself: wrong grid type, incorrect matrix storage format, hard-coded variable values, or undersampled computational grids.
 For instance, the Halofit nonlinear module required $k$ up to $\sim$50~Mpc$^{-1}$ for its internal $\sigma(R)$ bisection; calling it with the perturbation grid truncated at $k_\mathrm{max} = 0.3$~Mpc$^{-1}$ produced silently wrong results.
-Similarly, the log-uniform $k$-grid undersampled Bessel oscillations at high $\ell$, degrading $\Cl^{TT}$ accuracy beyond $\ell > 1200$.
+Similarly, the log-uniform $k$-grid undersampled Bessel oscillations at high $\ell$, degrading $\Cl^{TT}$ accuracy beyond $\ell > 1200$ and causing $6$--$30\%$ trapezoidal-rule aliasing errors in $\Cl^{BB}$.
 \emph{Agents resolved all Type~II bugs autonomously}, typically by careful comparison of intermediate arrays against \class/\classpt at specific $(k, z)$ points.
 
 \textbf{Type~III: Architectural bugs.}
