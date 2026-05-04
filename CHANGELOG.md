@@ -5,6 +5,51 @@
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
 
+### May 3, 2026: Use hydrogen-atom mass (not proton mass) for `n_H_0` in z_reio inversion
+
+**Fixes a one-line unit bug in `clax/thermodynamics.py` that biased the
+`tau_reio` → `z_reio` inversion at fiducial Planck and propagated to
+EE l=20-30 as a ~1% systematic.**
+
+The `n_H_0` calculation inside `_find_z_reio` (line 710) used the proton
+mass `m_p` where it should have used the hydrogen atom mass `m_H`. CLASS
+uses `_m_H_ = 1.673575e-27 kg` at `thermodynamics.c:812`, and clax's
+RECFAST block at line 534 already used `m_H = 1.67353284e-27 kg` correctly
+— only the reionization-inversion site was off.
+
+`m_H / m_p = 1.000570`, so clax's `n_H_0` was 0.057% too large at this
+site → the bisection target `_tau_reio_for_zreio` overshot by 0.057% →
+the converged `z_reio` came out too low by 0.0033 in absolute redshift.
+That offset propagated as ~1% in `x_e` across the reionization transition
+(z=7-9), ~1% in `g(τ)` at the secondary visibility peak, and to the
+EE l=20-30 residual the README was attributing to "RECFAST visibility
+function bias".
+
+**Empirical impact at Planck 2018 fiducial:**
+
+| Quantity | Pre-fix | Post-fix | CLASS reference |
+|---|---|---|---|
+| `z_reio` (`tau_reio = 0.0544`) | 7.6885 | **7.6915** | 7.6918 |
+| `x_e(z=8)` | 0.2397 (-1.06%) | **0.2420 (-0.11%)** | 0.2423 |
+| `g(τ)` at z=8 vs CLASS | -1.00% | **-0.11%** | — |
+| `g(τ)` at z=1090 (recomb peak) | unchanged | unchanged | — |
+
+The fix closes 90% of the `z_reio` offset; the residual ~3e-4 is the
+2.5e-5-relative numerical difference between clax's atomic 1H-1 mass and
+CLASS's rounded `_m_H_`, well below any current accuracy target.
+
+**Changes:**
+
+- `clax/constants.py`: add `m_H_kg = 1.67353284e-27` with a comment
+  flagging that `m_p` is *not* the right choice for hydrogen number density.
+- `clax/thermodynamics.py:710`: replace local `_m_p` with `const.m_H_kg`
+  in the `n_H_0` formula used by `_find_z_reio`.
+
+The README "Known limitations" line claiming "EE l=20-30: ~0.2% from
+RECFAST visibility function bias" should be reassessed in a follow-up;
+empirically clax/RECFAST `x_e` agrees with HyRec to 0.09% at z=1090, so
+the residual was upstream of recombination, not in RECFAST itself.
+
 ### Apr 20, 2026: Rodas5 Rosenbrock solver + dark energy perturbations + accuracy fixes
 
 **Added an alternative Rosenbrock ODE solver (Rodas5) for the perturbation
