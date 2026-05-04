@@ -58,8 +58,8 @@
 Bayesian inference in cosmology are tackling increasingly high dimensional parameter spaces, driven by the need to marginalize over complex astrophysical uncertainties and instrumental systematics.
 Hgh-dimensional inference require many (expensive) simulations and remain challenging for simulation-based inference methods such as normalizing flows and diffusion models. Sampling-based methods---often relying on gradient-based Monte Carlo Markov chain (MCMC) sampling techniques, e.g., Hamiltonian Monte Carlo (HMC)---therefore remain the standard approach. HMC requires access to the gradient of the posterior with respect to model input parameters, hence differentiable theory codes. Meanwhile, cosmological analyses are also moving towards joint analyses of multiple data sets, e.g., those of the cosmic microwave background (CMB) and galaxy redshift surveys. However, no existing code provides both the full set of CMB angular power spectra and the galaxy power spectrum multipoles with exact automatic differentiation on GPU.
 We address this gap with \clax and \claxpt: \jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed via physicist-supervised, oracle-guided AI agents that iterate against reference data and source codes from \class and \classpt---autonomously resolving implementation bugs and escalating to human review when oracle feedback stalls.
-Across the development, agents autonomously resolved 38 of 40 documented bugs (95\%) without human input.
-The remaining 5\% required human physics judgment and fell into exactly two failure modes: \emph{architectural incoherence} (code structure incompatible with the target physics) and \emph{oracle-passing fudge factors} (a numerical patch satisfying all tests but encoding no physical model).
+Across development and post-development improvement, agents autonomously resolved $\sim$90\% of documented bugs without human input.
+The remaining $\sim$10\% required human physics judgment and fell into two failure modes: \emph{architectural incoherence} (code structure incompatible with the target physics) and \emph{oracle-passing fudge factors} (a numerical patch satisfying all tests but encoding no physical model).
 \clax achieves $< 0.2\%$ lensed CMB accuracy at $\ell \leq 2000$ and $< 0.6\%$ unlensed $\Cl^{TT}$ at $\ell \leq 1000$; \claxpt achieves $< 0.7\%$ galaxy power spectrum accuracy for monopole and quadrupole spectra and $< 1.5\%$ for hexadecapoles at $k < 0.3\;h/$Mpc.
 \jax automatic-differentiation gradients agree with fourth-order finite differences to $0.15\%$ on average.
 %The full pipeline runs at 34\,s/step on a single V100 GPU with HMC-ready accuracy.
@@ -315,24 +315,29 @@ We classify these into four types by their nature and whether autonomous resolut
 
 \textbf{Type~I: Convention and unit bugs.}
 Errors in translating \class conventions into \jax: wrong sign, missing numerical factor, incorrect unit conversion.
+A representative example surfaced during post-development improvement: the hydrogen number density $n_{H,0}$ in the thermodynamics module used the proton mass $m_p$ instead of the hydrogen atom mass $m_H$---a one-line typo that biased the reionization redshift $z_\mathrm{reio}$ and was initially misattributed to RECFAST limitations.
 \emph{Agents resolved all Type~I bugs autonomously} by reading the corresponding \class source code and correcting the factor.
 
 \textbf{Type~II: Algorithm implementation bugs.}
-Errors in the numerical algorithm itself: wrong grid type, incorrect matrix storage format, incomplete angular kernel functions.
+Errors in the numerical algorithm itself: wrong grid type, incorrect matrix storage format, hard-coded variable values, or undersampled computational grids.
+For instance, the Halofit nonlinear module required $k$ up to $\sim$50~Mpc$^{-1}$ for its internal $\sigma(R)$ bisection; calling it with the perturbation grid truncated at $k_\mathrm{max} = 0.3$~Mpc$^{-1}$ produced silently wrong results.
+Similarly, the log-uniform $k$-grid undersampled Bessel oscillations at high $\ell$, degrading $\Cl^{TT}$ accuracy beyond $\ell > 1200$.
 \emph{Agents resolved all Type~II bugs autonomously}, typically by careful comparison of intermediate arrays against \class/\classpt at specific $(k, z)$ points.
 
 \textbf{Type~III: Architectural bugs.}
 The computational structure assumed by the implementation is fundamentally incapable of representing the correct physics.
-One instance occurred: the analytic Legendre projection architecture assumed isotropic BAO damping, making it unable to handle anisotropic damping $\Sigma_\mathrm{tot}^2(\mu)$.
-\emph{This required human intervention.}
+Two instances occurred: (i) the analytic Legendre projection architecture assumed isotropic BAO damping, making it unable to handle anisotropic damping $\Sigma_\mathrm{tot}^2(\mu)$; and (ii) the massive-neutrino fluid approximation switch triggered solver divergence at mid-range $k$, requiring the human to diagnose that the switch itself---not its coefficients---was the problem.
+\emph{Both required human intervention.}
 
 \textbf{Type~IV: Physics judgment failures.}
 A numerical patch satisfies all oracle tests but encodes physically unmotivated behavior.
 One instance occurred: a scalar fudge factor $\alpha = 0.27$ passed all fiducial tests but has no physical derivation.
-\emph{This required human intervention.}
+A subtler variant emerged during post-development analysis: a \texttt{try/except} block intended to handle \jax tracing errors silently disabled a runtime check under \texttt{jit}, producing correct results at fiducial but masking edge-case failures.
+\emph{These required human intervention.}
 
-The resolution breakdown is: Types~I+II (38 bugs): 100\% autonomous; Types~III+IV (2 bugs): 0\% autonomous.
-Overall, 38/40 bugs (95\%) were resolved without human input.
+The resolution breakdown is: Types~I+II ($\sim$38 bugs): 100\% autonomous; Types~III+IV ($\sim$4 bugs): 0\% autonomous.
+Overall, $\sim$90\% of bugs were resolved without human input.
+Notably, post-development improvement sessions continued to surface new bugs in all four categories, suggesting that the taxonomy is not an artifact of the initial development sprint but a persistent feature of the human--agent collaboration.
 
 \subsection{Principles for human--agent collaboration}
 
@@ -342,6 +347,7 @@ We distill three principles from the empirical data:
 An oracle compares numerical values at a reference parameter point.
 It catches implementation errors (wrong sign, wrong coefficient) but not physics errors (wrong model, numerically compensated).
 A fudge factor with zero degrees of freedom at the calibration point will pass every oracle test at that point.
+Even \emph{human} diagnoses can be wrong: the $m_p$/$m_H$ typo described above was initially attributed to ``RECFAST visibility function bias'' in the project documentation, and the suggested fix (switching to HyRec recombination) would not have helped---the actual root cause was a one-line constant error.
 \emph{Defense}: test across diverse parameter space; test intermediate quantities; build auxiliary tests that check structural properties (e.g., that $P_\mathrm{tree}(k,\mu)$ has the correct anisotropy as a function of $\mu$), not just numerical values.
 
 \textbf{P2: Shared memory prevents re-exploration but not architectural loops.}
