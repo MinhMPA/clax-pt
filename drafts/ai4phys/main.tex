@@ -80,7 +80,7 @@ Using \class and \classpt as ground truth, we find a clear boundary: agents hand
 
 \paragraph{Contributions.}
 \begin{itemize}
-    \item \clax: a \jax reimplementation of the full \class CMB pipeline (background, thermodynamics, perturbations, transfer, lensing), achieving $< 0.1\%$ accuracy at $\ell \leq 2000$ with JIT-compiled GPU execution at 34\,s/step (V100, \texttt{fit\_cl} preset).
+    \item \clax: a \jax reimplementation of the full \class CMB pipeline (background, thermodynamics, perturbations, transfer, lensing), achieving $< 0.2\%$ lensed accuracy at $\ell \leq 2000$ with JIT-compiled GPU execution at 34\,s/step (V100, \texttt{fit\_cl} preset).
     \item \claxpt: a \jax reimplementation of \classpt's one-loop EFT power spectra with IR resummation and RSD multipoles, achieving $< 0.7\%$ accuracy for monopole and quadrupole spectra.
     \item Validated autodifferentiation gradients matching finite differences to $0.15\%$ across cosmological parameters.
     \item A landscape comparison against \discoeb, \abcmb, \class, and \classpt, showing that \clax is the first code combining CMB angular power spectra and one-loop galaxy power spectrum multipoles with full AD on GPU.
@@ -124,13 +124,11 @@ The entire pipeline is end-to-end differentiable: \texttt{jax.grad} propagates e
 \label{fig:pipeline}
 \end{figure*}
 
-The design choices underlying \clax and \claxpt can be organized by their origin---whether they were transcribed from oracle code, made autonomously by the agent, or directed by a human physicist---providing a useful lens for understanding the division of labor in AI-assisted scientific software development.
-
 The core physics follows \class and \classpt directly. For the CMB pipeline: hydrogen recombination \citep{seager1999, seager2000} and the full massive-neutrino Boltzmann hierarchy. For galaxy power spectrum multipoles: the one-loop integrals via the FFTLog algorithm \citep{simonovic2018, fang2017} and baryon acoustic oscillation peak resummation (correcting for long-wavelength displacement effects) \citep{senatore2015, vlah2015}. These choices were transcribed directly from the \class and \classpt source code by the AI agent.
 
 Making the pipeline end-to-end differentiable required several non-trivial engineering decisions that the agent made autonomously. Reverse-mode automatic differentiation through the stiff perturbation ordinary differential equation uses checkpointed adjoints \citep{kidger2021} for memory efficiency, with an adaptive step-size controller following \discoeb's filtered strategy \citep{hahn2023}. For the CMB pipeline, two implicit-differentiation wrappers were needed: a \texttt{custom\_vjp} on the shooting method ($\theta_s \to H_0$) and a \texttt{custom\_jvp} on the hydrogen Saha ionization equilibrium, replacing explicit gradient barriers with implicit-function-theorem tangents to restore nonzero parameter sensitivities around recombination. Post-recombination, a smooth relaxation damping replaces the hard approximation switch used by \class, ensuring gradient continuity.
 
-Three design decisions required physicist input and could not have been made by the agent autonomously. Dark energy fluid perturbations (time-varying equation of state $w_0$--$w_a$) were added to the shared Einstein constraint equations at the physicist's direction. For galaxy power spectrum multipoles, the redshift-space distortion tree-level spectrum uses Gauss--Legendre quadrature over the line-of-sight angle $\mu$ with direction-dependent baryon acoustic oscillation damping $\Sigma^2_\mathrm{tot}(\mu)$, replacing an analytic Legendre projection that the agent had implemented but which was structurally incompatible with the anisotropic physics. An explicit ``no fudge factors'' rule, encoded in the development methodology, prevented the agent from shipping a scalar correction factor that passed all oracle tests but encoded no physical model. These interventions are analyzed in detail in \cref{sec:supervised}.
+A small number of design decisions required physicist input and could not have been resolved by oracle feedback alone; these are analyzed in \cref{sec:supervised}.
 
 \subsection{Development methodology}
 
@@ -299,6 +297,8 @@ Combined with the 34\,s forward evaluation of \texttt{fit\_cl}, this makes gradi
 
 Over the full development of \clax and \claxpt, we documented 40 bugs: 26 in the CMB pipeline and 14 in the PT module.
 We classify these into four types by their nature and whether autonomous resolution was possible.
+
+Three specific design decisions required physicist input: (i) dark energy fluid perturbations (time-varying equation of state $w_0$--$w_a$) were added to the shared Einstein constraint equations; (ii) for galaxy power spectrum multipoles, the redshift-space distortion tree-level spectrum was redesigned to use Gauss--Legendre quadrature over the line-of-sight angle $\mu$ with direction-dependent baryon acoustic oscillation damping $\Sigma^2_\mathrm{tot}(\mu)$, replacing an analytic Legendre projection that was structurally incompatible with the anisotropic physics (Type~III); and (iii) an explicit ``no fudge factors'' rule prevented the agent from shipping a scalar correction that passed all oracle tests but encoded no physical model (Type~IV). These interventions map directly onto the bug types below.
 
 \textbf{Type~I: Convention and unit bugs.}
 Errors in translating \class conventions into \jax: wrong sign, missing numerical factor, incorrect unit conversion.
