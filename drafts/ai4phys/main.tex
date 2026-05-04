@@ -347,7 +347,7 @@ We distill three principles from the empirical data:
 An oracle compares numerical values at a reference parameter point.
 It catches implementation errors (wrong sign, wrong coefficient) but not physics errors (wrong model, numerically compensated).
 A fudge factor with zero degrees of freedom at the calibration point will pass every oracle test at that point.
-Even \emph{human} diagnoses can be wrong: the $m_p$/$m_H$ typo described above was initially attributed to ``RECFAST visibility function bias'' in the project documentation, and the suggested fix (switching to HyRec recombination) would not have helped---the actual root cause was a one-line constant error.
+Even agent-generated \emph{diagnoses} can be wrong: the $m_p$/$m_H$ typo described above was attributed by the agent to ``RECFAST visibility function bias'' in the project documentation, with a suggested fix of switching to HyRec recombination---neither the diagnosis nor the proposed fix was correct, and the actual root cause (a one-line constant error) was only found in a later investigation session.
 \emph{Defense}: test across diverse parameter space; test intermediate quantities; build auxiliary tests that check structural properties (e.g., that $P_\mathrm{tree}(k,\mu)$ has the correct anisotropy as a function of $\mu$), not just numerical values.
 
 \textbf{P2: Shared memory prevents re-exploration but not architectural loops.}
