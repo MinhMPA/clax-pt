@@ -56,8 +56,8 @@
 % ===========================================================================
 \begin{abstract}
 Bayesian inference in cosmology are tackling increasingly high dimensional parameter spaces, driven by the need to marginalize over complex astrophysical uncertainties and instrumental systematics.
-Hgh-dimensional inference require many (expensive) simulations and remain challenging for simulation-based inference methods such as normalizing flows and diffusion models. Sampling-based methods---often relying on gradient-based Monte Carlo Markov chain (MCMC) sampling techniques, e.g., Hamiltonian Monte Carlo (HMC)---therefore remain the standard approach. HMC requires access to the gradient of the posterior with respect to model input parameters, hence differentiable theory codes. Meanwhile, cosmological analyses are also moving towards joint analyses of multiple data sets, e.g., those of the cosmic microwave background (CMB) and galaxy redshift surveys. However, no existing code provides both the full set of CMB angular power spectra and the galaxy power spectrum multipoles with exact automatic differentiation on GPU.
-We address this gap with \clax and \claxpt: \jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed via physicist-supervised, oracle-guided AI agents that iterate against reference data and source codes from \class and \classpt---autonomously resolving implementation bugs and escalating to human review when oracle feedback stalls.
+High-dimensional inference require many (expensive) simulations and remain challenging for simulation-based inference methods such as normalizing flows and diffusion models. Sampling-based methods---often relying on gradient-based Monte Carlo Markov chain (MCMC) sampling techniques, e.g., Hamiltonian Monte Carlo (HMC)---therefore remain the standard approach. HMC requires access to the gradient of the posterior with respect to model input parameters, hence differentiable theory codes. Meanwhile, cosmological analyses are also moving towards joint analyses of multiple data sets, e.g., those of the cosmic microwave background (CMB) and galaxy redshift surveys. However, no existing code computes both CMB angular power spectra and the galaxy power spectrum multipoles from first principles while also provides exact automatic differentiation on GPU.
+We address this gap with \clax and \claxpt: \jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed via physicist-supervised, oracle-guided AI agents that iterate against reference data and source codes from \class and \classpt.
 Across development and post-development improvement, agents autonomously resolved $\sim$90\% of documented bugs without human input.
 The remaining $\sim$10\% required human physics judgment and fell into two failure modes: \emph{architectural incoherence} (code structure incompatible with the target physics) and \emph{oracle-passing fudge factors} (a numerical patch satisfying all tests but encoding no physical model).
 \clax achieves $< 0.2\%$ lensed CMB accuracy at $\ell \leq 2000$ and $< 0.6\%$ unlensed $\Cl^{TT}$ at $\ell \leq 1000$; \claxpt achieves $< 0.7\%$ galaxy power spectrum accuracy for monopole and quadrupole spectra and $< 1.5\%$ for hexadecapoles at $k < 0.3\;h/$Mpc.
@@ -190,14 +190,15 @@ Effort.jl & Julia & --- & --- & --- & emul. & \checkmark & --- \\
 \subsection{CMB pipeline accuracy}
 
 \Cref{tab:cmb_accuracy} summarizes CMB accuracy of \clax against \class at the Planck 2018 best-fit cosmology (\texttt{planck\_cl} preset).
-Background quantities match to $< 0.01\%$; thermodynamics to $< 0.1\%$.
+Background quantities match to $< 0.01\%$; thermodynamics (including $z_\mathrm{reio}$) to $< 0.1\%$ after the hydrogen-mass fix described in \cref{sec:supervised}.
 Unlensed temperature and polarization spectra are within $0.02\%$--$0.57\%$ across $\ell = 20$--$1000$.
+Primordial $\Cl^{BB}$ (tensor modes with $r_t = 0.1$) matches \class to sub-percent at $\ell \leq 200$ after the kernel fix described in \cref{sec:supervised}.
 The lensing potential spectrum $\Cl^{\phi\phi}$ agrees to $< 1\%$ across $\ell = 100$--$2500$.
 Lensed spectra at $\ell = 2000$ pass at $< 0.2\%$.
 Multi-cosmology validation across 10 parameter points ($\omega_b/\omega_\mathrm{cdm}$ $\pm 20\%$, $h \pm 10\%$, massive neutrinos 0.06--0.3~eV, $N_\mathrm{eff} = 2.0$--$4.0$) confirms sub-0.5\% accuracy throughout parameter space.
 
 \begin{table}[t]
-\caption{CMB accuracy (\clax vs.\ \class, \texttt{planck\_cl} preset, Planck 2018 fiducial).}
+\caption{CMB accuracy (\clax vs.\ \class, Planck 2018 fiducial). Post-fix values reflect the hydrogen-mass and BB-kernel corrections described in the text.}
 \label{tab:cmb_accuracy}
 \centering
 \small
@@ -206,9 +207,10 @@ Multi-cosmology validation across 10 parameter points ($\omega_b/\omega_\mathrm{
 Quantity & Max error \\
 \midrule
 $H(z)$, $D_A(z)$, $r_s$ & $< 0.01\%$ \\
-$x_e(z)$, $g(\tau)$ & $< 0.1\%$ \\
+$x_e(z\!=\!8)$, $g(\tau)$ & $0.11\%$ (post m$_H$ fix) \\
 $\Cl^{TT}$, $\ell = 20, 100, 500, 1000$ & 0.08\%, 0.02\%, 0.15\%, 0.57\% \\
-$\Cl^{EE}$, $\ell = 20, 100, 500, 1000$ & 0.21\%, 0.02\%, 0.15\%, 0.26\% \\
+$\Cl^{EE}$, $\ell = 20, 100, 500, 1000$ & $< 0.05\%$, 0.02\%, 0.15\%, 0.26\% \\
+$\Cl^{BB}$ (primordial), $\ell \leq 200$ & $< 1\%$ \\
 $\Cl^{\phi\phi}$, $\ell = 100$--$2500$ & $< 1\%$ \\
 Lensed $\Cl$, $\ell = 2000$ & $< 0.2\%$ \\
 Multi-cosmology (10 pts) & $< 0.5\%$ \\
@@ -389,9 +391,9 @@ Our work identifies semantic correctness---the requirement that a passing numeri
 \label{sec:conclusion}
 
 We have developed \clax and \claxpt---fully differentiable \jax reimplementations of the \class and \classpt Boltzmann codes---using oracle-guided agentic development.
-The codes achieve $< 0.2\%$ lensed CMB accuracy at $\ell \leq 2000$, $< 0.7\%$ galaxy power spectrum accuracy for monopole and quadrupole spectra, with automatic differentiation gradients verified to $0.15\%$ and GPU execution at 34\,s/step on V100.
-Empirically, AI agents resolved 95\% of implementation bugs autonomously.
-The remaining 5\% required human physics judgment: recognizing a structural mismatch between an architecture and its target physics, and detecting a numerically effective but physically unmotivated fudge factor.
+The codes achieve $< 0.2\%$ lensed CMB accuracy at $\ell \leq 2000$, sub-percent primordial $\Cl^{BB}$ at $\ell \leq 200$, and $< 0.7\%$ galaxy power spectrum accuracy for monopole and quadrupole spectra, with automatic differentiation gradients verified to $0.15\%$.
+Empirically, AI agents resolved $\sim$90\% of implementation bugs autonomously.
+The remaining $\sim$10\% required human physics judgment: recognizing structural mismatches between an architecture and its target physics, and detecting numerically effective but physically unmotivated patches.
 
 These findings suggest a practical framework for AI-assisted scientific code development: agents operate autonomously in unsupervised mode for implementation work, but human scientists remain in the loop as architectural and physical reviewers, intervening proactively when oracle feedback stalls or when a numerical patch lacks physical derivation.
 The codes will be made publicly available.
