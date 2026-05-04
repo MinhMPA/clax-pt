@@ -859,33 +859,52 @@ def compute_cls_all_fast(
 # Tensor B-mode (no Limber needed -- tensor spectra peak at low l)
 # ---------------------------------------------------------------------------
 
-def compute_cl_bb(tpt, params, bg, l_values):
-    """Compute unlensed C_l^BB from tensor perturbation source functions."""
-    tau_grid = tpt.tau_grid
-    k_grid = tpt.k_grid
-    tau_0 = bg.conformal_age
-    chi_grid = tau_0 - tau_grid
+def compute_cl_bb(tpt, params, bg, l_values, *, n_k_fine=2000):
+    """Compute unlensed C_l^BB from tensor perturbation source functions.
 
+    Uses the CLASS tensor B-polarization radial kernel
+    K_l^B(x) = 0.5 * (j_l'(x) + 2 * j_l(x) / x)
+    (cf. CLASS transfer.c:4263-4272 case TENSOR_POLARISATION_B, flat-space limit
+    K=0 where cscKgen=cotKgen=1/x and rescale_function=1).
+
+    The source_p(k, tau) is interpolated from the perturbation k-grid to a fine
+    log-uniform k-grid (n_k_fine modes) before the transfer integral, since the
+    Bessel-driven oscillation period in k is comparable to the spacing of the
+    perturbation k-grid at the BB recombination peak. Mirrors the n_k_fine
+    interpolation already used by ``compute_cls_all_fast`` for scalar T,E.
+    """
+    tau_grid = tpt.tau_grid
+    k_grid_coarse = tpt.k_grid
+    log_k_coarse = jnp.log(k_grid_coarse)
+    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    k_fine = jnp.exp(log_k_fine)
+
+    def interp_one_tau(itau):
+        return CubicSpline(log_k_coarse, tpt.source_p[:, itau]).evaluate(log_k_fine)
+    source_p_fine = jax.vmap(interp_one_tau)(jnp.arange(len(tau_grid))).T
+
+    chi_grid = bg.conformal_age - tau_grid
     dtau = jnp.diff(tau_grid)
     dtau_mid = jnp.concatenate([dtau[:1] / 2, (dtau[:-1] + dtau[1:]) / 2, dtau[-1:] / 2])
-    log_k = jnp.log(k_grid)
 
     def compute_cl_single_l(l):
         l_int = int(l)
-        prefactor = jnp.sqrt(l * (l + 1.0) * (l - 1.0) * (l + 2.0))
 
         def transfer_single_k(ik):
-            k = k_grid[ik]
+            k = k_fine[ik]
             x = k * chi_grid
-            jl = spherical_jl_backward(l_int, x)
             x_safe = jnp.where(jnp.abs(x) < 1e-30, 1e-30, x)
-            radial_B = jl / (x_safe * x_safe)
-            return prefactor * jnp.sum(tpt.source_p[ik, :] * radial_B * dtau_mid)
+            jl = spherical_jl_backward(l_int, x)
+            jlm1 = spherical_jl_backward(l_int - 1, x)
+            # j_l'(x) = j_{l-1}(x) - (l+1)/x * j_l(x)
+            jl_prime = jlm1 - (l_int + 1) / x_safe * jl
+            radial_B = 0.5 * (jl_prime + 2.0 / x_safe * jl)
+            return jnp.sum(source_p_fine[ik, :] * radial_B * dtau_mid)
 
-        B_l = jax.vmap(transfer_single_k)(jnp.arange(len(k_grid)))
-        P_T = primordial_tensor_pk(k_grid, params)
+        B_l = jax.vmap(transfer_single_k)(jnp.arange(n_k_fine))
+        P_T = primordial_tensor_pk(k_fine, params)
         integrand = P_T * B_l**2
-        dlnk = jnp.diff(log_k)
+        dlnk = jnp.diff(log_k_fine)
         return 4.0 * jnp.pi * jnp.sum(0.5 * (integrand[:-1] + integrand[1:]) * dlnk)
 
     cls = []

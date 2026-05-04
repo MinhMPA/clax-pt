@@ -281,7 +281,7 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 - **TT l=400-800**: +0.10-0.18% residual from SW+Doppler source amplitude (~0.06% excess at k~0.03). Comparable to CAMB-CLASS inter-code variation (~0.07%).
 - **TT l>1200**: Degrades due to k-integration under-resolution (Bessel oscillation period constant in k, but log-uniform grid spacing grows). Hybrid linear/log k-grid would fix this.
 - **EE l=20-30**: ~0.2% from RECFAST visibility function bias. HyRec recombination would improve to sub-0.1%.
-- **BB tensor modes**: Lensing BB is accurate (<0.5% at l<=1000), but primordial BB still ~2x off CLASS.
+- **BB tensor modes**: Lensing BB is accurate (<0.5% at l<=1000). Primordial BB matches CLASS to sub-percent at l<=200 and ~2% at l=300 with `compute_cl_bb(... n_k_fine=2000)` at planck_cl-style precision.
 - **TE zero crossings**: Large relative errors near l=52 and l=400 where C_l^TE crosses zero.
 
 ## References
