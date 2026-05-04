@@ -56,7 +56,7 @@
 % ===========================================================================
 \begin{abstract}
 Joint analyses of cosmic microwave background (CMB) and galaxy survey data increasingly rely on gradient-based sampling, yet no existing code computes both CMB angular power spectra and galaxy power spectrum multipoles from first principles with exact automatic differentiation on GPU.
-We present \clax and \claxpt---\jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed by physicist-supervised, oracle-guided AI agents that iterate against \class and \classpt reference data and source code.
+We present \clax and \claxpt---\jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed by physicist-supervised, oracle-guided AI agents that iterate against \class and \classpt reference outputs and source codes.
 Agents autonomously resolved ${\sim}90\%$ of documented bugs; the remaining ${\sim}10\%$ required human physics judgment, falling into two failure modes: \emph{architectural incoherence} (code structure incompatible with the target physics) and \emph{oracle-passing fudge factors} (a numerical patch satisfying all tests but encoding no physical model).
 \clax achieves ${<}\,0.2\%$ lensed CMB accuracy at $\ell \leq 2000$; \claxpt achieves ${<}\,0.7\%$ accuracy for galaxy power spectrum monopoles and quadrupoles at $k < 0.3\;h/$Mpc.
 Automatic-differentiation gradients agree with finite differences to $0.15\%$ on average.
@@ -75,7 +75,7 @@ Standard Boltzmann solvers for CMB angular power spectra, e.g., \class \citep{le
 Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the linear matter power spectrum $\Pk$ but not CMB angular power spectra or galaxy power spectrum multipoles; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and \textsc{SymBoltz.jl} \citep{sletmoen2026} provides a full Boltzmann solver in Julia but without GPU support.
 No existing code provides the full chain from cosmological parameters through CMB angular power spectra \emph{and} one-loop galaxy power spectrum multipoles, with end-to-end automatic differentiation on GPU.
 
-We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class \citep{lesgourgues2011} and \classpt \citep{chudaykin2021} pipelines---and the oracle-guided agentic methodology used to build them.
+We describe the development of \clax and \claxpt---fully differentiable \jax reimplementations of the \class \citep{lesgourgues2011} and \classpt \citep{chudaykin2021} pipelines---and the oracle-guided agentic methodology used to develop and validate them.
 Using \class and \classpt as ground truth, we find a clear boundary: agents handle implementation bugs (convention errors, algorithmic transcription, coefficient verification) autonomously and reliably, but fail at two classes of problem that require human physics judgment: (1) recognizing that an architecture is structurally incompatible with the intended physics, and (2) detecting that a numerically effective patch satisfies all oracle tests at the calibration point while encoding incorrect physics.
 
 \paragraph{Contributions.}
@@ -95,14 +95,14 @@ Using \class and \classpt as ground truth, we find a clear boundary: agents hand
 
 Galaxy surveys and CMB experiments measure the angular power spectrum $\Cl$ and the galaxy power spectrum $P_\mathrm{gg}(k, \ell)$, which depend on cosmological parameters $\boldsymbol{\theta}$ (density, dark matter density, Hubble constant, spectral index, etc.)\ through the Boltzmann equation---a coupled system of ODEs for photon, baryon, dark matter, and neutrino perturbations that must be integrated numerically.
 Both are expensive to approximate by finite differences and practical to compute exactly only with automatic differentiation (AD) for codes of this complexity.
-While concurrent work (\abcmb, \textsc{SymBoltz.jl}) provides AD for CMB angular power spectra, \clax is the first code to combine differentiable CMB $\Cl$ with one-loop galaxy power spectrum multipoles, enabling \texttt{jax.grad} through the full cosmological analysis pipeline for galaxy clustering.
+While concurrent work (\abcmb, \textsc{SymBoltz.jl}) provides AD for CMB angular power spectra, \clax and \claxpt are the first work to combine differentiable CMB $\Cl$ with one-loop galaxy power spectrum multipoles, forward-mode and reverse-mode AD through the full cosmological analysis pipelines for CMB and galaxy clustering data.
 
 \subsection{AI-assisted scientific code development}
 
 The oracle-based methodology we employ is inspired by the AI C compiler project \citep{carlini2026}, in which parallel Claude Code agents produced a Rust C compiler using GCC as an oracle.
 Key infrastructure includes: (i) a shared \texttt{CHANGELOG.md} updated after every session to prevent re-exploration of dead ends; (ii) test-first development where every module's tests are written against reference data before implementation; (iii) a \texttt{--fast} flag sampling 10\% of test cases to prevent ``time blindness''; and (iv) parallel agent teams using git worktrees to explore competing hypotheses independently.
 
-The critical challenge not addressed in the compiler setting is \emph{domain knowledge}: \class is not just a large codebase---it encodes decades of cosmological physics knowledge, conventions, and approximations that require physics expertise to interpret.
+The critical challenge not addressed in the compiler setting is \emph{domain knowledge}: \class and \classpt are not just a major codebase. Together they encode decades of cosmological modeling knowledge, conventions, and approximations that require expertise across multiple areas of physics---including general relativity, kinetic theory, statistical field theory, radiative processes, nonlinear gravitational dynamics, and effective field theory---to interpret correctly.
 This makes the boundary between supervised and unsupervised development especially important to characterize.
 
 % ===========================================================================
@@ -111,14 +111,8 @@ This makes the boundary between supervised and unsupervised development especial
 
 \subsection{Pipeline architecture}
 
-\clax implements a sequential pipeline of pure functions:
-\begin{equation*}
-\text{CosmoParams} \to \text{BG} \to \text{TH} \to \text{EB} \to \text{PR} \to \text{TR} \to \text{HR} \to \text{LE}
-\end{equation*}
-where BG is background cosmology, TH is thermodynamics/recombination, EB is the Einstein--Boltzmann perturbation hierarchy, PR is the primordial spectrum, TR is transfer functions, HR is harmonic ($\Cl$) integration, and LE is CMB lensing.
-\texttt{CosmoParams} fields are \jax-traced (for AD); \texttt{PrecisionParams} fields are static (control array shapes).
-No branching on traced values ensures compatibility with \texttt{jax.jit} and \texttt{jax.grad}.
-\Cref{fig:pipeline} shows the full pipeline architecture, including the two output branches (CMB angular power spectra and galaxy power spectrum multipoles).
+\clax implements a sequential pipeline of pure functions (\cref{fig:pipeline}): cosmological parameters are propagated through background expansion, hydrogen recombination, the full Einstein--Boltzmann perturbation hierarchy, and a primordial power spectrum, then split into two branches---line-of-sight integration and lensing for CMB angular power spectra, and one-loop perturbation theory for galaxy power spectrum multipoles.
+All cosmological parameters are \jax-traced for automatic differentiation; numerical precision settings are static.
 
 \begin{figure*}[t]
 \centering
