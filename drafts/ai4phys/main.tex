@@ -114,11 +114,11 @@ This makes the boundary between supervised and unsupervised development especial
 
 \subsection{Pipeline architecture}
 
-\clax implements a sequential pipeline of pure functions, each returning a frozen PyTree:
+\clax implements a sequential pipeline of pure functions:
 \begin{equation*}
 \text{CosmoParams} \to \text{BG} \to \text{TH} \to \text{EB} \to \text{PR} \to \text{TR} \to \text{HR} \to \text{LE}
 \end{equation*}
-where BG is background cosmology, TH is thermodynamics/recombination, EB is the Einstein--Boltzmann perturbation hierarchy, PR is the primordial spectrum, TR is transfer functions, HR is harmonic ($\Cl$) integration, and LE is CMB lensing via Wigner $d$-functions.
+where BG is background cosmology, TH is thermodynamics/recombination, EB is the Einstein--Boltzmann perturbation hierarchy, PR is the primordial spectrum, TR is transfer functions, HR is harmonic ($\Cl$) integration, and LE is CMB lensing.
 \texttt{CosmoParams} fields are \jax-traced (for AD); \texttt{PrecisionParams} fields are static (control array shapes).
 No branching on traced values ensures compatibility with \texttt{jax.jit} and \texttt{jax.grad}.
 \Cref{fig:pipeline} shows the full pipeline architecture, including the two output branches (CMB angular power spectra and galaxy power spectrum multipoles).
@@ -136,11 +136,11 @@ The entire pipeline is end-to-end differentiable: \texttt{jax.grad} propagates e
 
 The design choices underlying \clax and \claxpt can be organized by their origin---whether they were transcribed from oracle code, made autonomously by the agent, or directed by a human physicist---providing a useful lens for understanding the division of labor in AI-assisted scientific software development.
 
-The core physics follows \class and \classpt directly: RECFAST recombination matching \class's \texttt{wrap\_recfast.c}; the full ncdm Boltzmann hierarchy with 5 momentum bins and Gauss--Laguerre quadrature; FFTLog decomposition of the one-loop $P_{22}$ and $P_{13}$ integrals with precomputed $M_{22}/M_{13}$ kernel matrices \citep{fang2017}; and IR resummation via DST with odd/even spline mode removal \citep{senatore2015, vlah2015}. These choices were transcribed directly from the \class and \classpt source code by the AI agent.
+The core physics follows \class and \classpt directly: RECFAST recombination, the full massive-neutrino Boltzmann hierarchy, the one-loop power spectrum integrals via the FFTLog algorithm \citep{fang2017}, and BAO peak resummation (which corrects for long-wavelength displacement effects on the baryon acoustic oscillation feature) \citep{senatore2015, vlah2015}. These choices were transcribed directly from the \class and \classpt source code by the AI agent.
 
-Making the pipeline end-to-end differentiable required several non-trivial engineering decisions that the agent made autonomously. Reverse-mode AD through the stiff perturbation ODE uses \texttt{RecursiveCheckpointAdjoint} \citep{kidger2021} for memory efficiency. Two implicit-differentiation wrappers were needed: a \texttt{custom\_vjp} on the shooting method ($\theta_s \to H_0$) and a \texttt{custom\_jvp} on the hydrogen Saha equilibrium, replacing explicit \texttt{stop\_gradient} calls with implicit-function-theorem tangents to restore nonzero sensitivities around recombination. Post-recombination, a smooth RSA relaxation damping replaces the hard approximation switch used by \class, ensuring gradient continuity. The perturbation ODE step controller follows \discoeb's filtered PID strategy \citep{hahn2023}, weighting six key variables with $k$-dependent scaling.
+Making the pipeline end-to-end differentiable required several non-trivial engineering decisions that the agent made autonomously. Reverse-mode AD through the stiff perturbation ODE uses checkpointed adjoints \citep{kidger2021} for memory efficiency. Two implicit-differentiation wrappers were needed: a \texttt{custom\_vjp} on the shooting method ($\theta_s \to H_0$) and a \texttt{custom\_jvp} on the hydrogen Saha ionization equilibrium, replacing explicit gradient barriers with implicit-function-theorem tangents to restore nonzero parameter sensitivities around recombination. Post-recombination, a smooth relaxation damping replaces the hard approximation switch used by \class, ensuring gradient continuity. The perturbation ODE adaptive step-size controller follows \discoeb's filtered strategy \citep{hahn2023}, weighting six key variables with $k$-dependent scaling.
 
-Three design decisions required physicist input and could not have been made by the agent autonomously. The RSD tree-level power spectrum uses Gauss--Legendre quadrature over $\mu$ with anisotropic BAO damping $\Sigma^2_\mathrm{tot}(\mu)$, replacing an analytic Legendre projection that the agent had implemented but which was structurally incompatible with the anisotropic physics. Dark energy fluid perturbations (CPL $w_0$--$w_a$) were added to the Einstein constraint equations at the physicist's direction. An explicit ``no fudge factors'' rule, encoded in the development methodology, prevented the agent from shipping a scalar correction factor that passed all oracle tests but encoded no physical model. These interventions are analyzed in detail in \cref{sec:supervised}.
+Three design decisions required physicist input and could not have been made by the agent autonomously. The RSD tree-level power spectrum uses Gauss--Legendre quadrature over the line-of-sight angle $\mu$ with direction-dependent BAO damping $\Sigma^2_\mathrm{tot}(\mu)$, replacing an analytic Legendre projection that the agent had implemented but which was structurally incompatible with the anisotropic physics. Dark energy fluid perturbations (time-varying equation of state $w_0$--$w_a$) were added to the Einstein constraint equations at the physicist's direction. An explicit ``no fudge factors'' rule, encoded in the development methodology, prevented the agent from shipping a scalar correction factor that passed all oracle tests but encoded no physical model. These interventions are analyzed in detail in \cref{sec:supervised}.
 
 \subsection{Implications for AI-assisted scientific software}
 
@@ -270,7 +270,7 @@ $\omega_\mathrm{cdm}$ & $< 0.5\%$ & \checkmark \\
 \end{tabular}
 \end{table}
 
-Key technical ingredients enabling stable AD through the full pipeline include: (1) \texttt{RecursiveCheckpointAdjoint} for memory-efficient reverse-mode through the stiff perturbation ODE; (2) a \texttt{custom\_vjp} on the shooting method ($\theta_s \to H_0$) implementing implicit differentiation; and (3) a \texttt{custom\_jvp} on the hydrogen Saha equilibrium equation, replacing explicit \texttt{stop\_gradient} calls with implicit-function-theorem tangents to restore nonzero sensitivities around recombination.
+The key technical ingredients enabling stable AD are described in \cref{sec:methods}: checkpointed adjoints for the stiff ODE, and implicit-differentiation wrappers for the shooting method and ionization equilibrium.
 
 \subsection{Performance}
 
@@ -374,11 +374,11 @@ However, SymBoltz.jl operates in Julia without GPU support, and its reverse-mode
 \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy.
 \clax is the first \jax code to provide full CMB angular power spectra plus one-loop galaxy power spectrum multipoles with exact reverse-mode automatic differentiation and GPU execution.
 
-\textbf{One-loop perturbation theory and IR resummation.}
+\textbf{One-loop perturbation theory.}
 The effective field theory (EFT) of large-scale structure \citep{perko2016, damico2020} provides a systematic one-loop expansion for the galaxy power spectrum multipoles.
 \classpt \citep{chudaykin2021} is the standard implementation; \claxpt reproduces it exactly in differentiable \jax.
 Several differentiable emulators take a complementary approach: Capse.jl \citep{Bonici:2023xjk} emulates CMB angular power spectra, while PyBird-JAX \citep{Reeves:2025bxn} and Effort.jl \citep{Bonici:2025ltp} emulate one-loop galaxy power spectrum multipoles, all achieving sub-millisecond evaluation using neural networks but without computing the integrals directly.
-\claxpt computes the FFTLog integrals and IR resummation \citep{senatore2015, vlah2015} from first principles, preserving exact differentiability through the full computation at the cost of higher per-evaluation time.
+\claxpt computes the loop integrals and BAO peak resummation \citep{senatore2015, vlah2015} from first principles, preserving exact differentiability at the cost of higher per-evaluation time.
 
 \textbf{Agent-assisted scientific software.}
 Recent work has shown that LLM agents can complete extended scientific tasks autonomously \citep{carlini2026}, but most evaluations focus on syntactic correctness (compilation, test passage) rather than physical validity.
