@@ -1,4 +1,4 @@
-\begin{thebibliography}{24}
+\begin{thebibliography}{26}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -132,6 +132,18 @@ Reeves, A., Zhang, P., and Zheng, H.
   model-independent emulation of one-loop galaxy power spectra.
 \newblock \emph{JCAP}, 02:\penalty0 016, 2026.
 \newblock \doi{10.1088/1475-7516/2026/02/016}.
+
+\bibitem[Seager et~al.(1999)Seager, Sasselov, and Scott]{seager1999}
+Seager, S., Sasselov, D.~D., and Scott, D.
+\newblock A new calculation of the recombination epoch.
+\newblock \emph{ApJ}, 523:\penalty0 L1--L5, 1999.
+\newblock \doi{10.1086/312250}.
+
+\bibitem[Seager et~al.(2000)Seager, Sasselov, and Scott]{seager2000}
+Seager, S., Sasselov, D.~D., and Scott, D.
+\newblock How exactly did the universe become neutral?
+\newblock \emph{ApJS}, 128:\penalty0 407--430, 2000.
+\newblock \doi{10.1086/313388}.
 
 \bibitem[Senatore \& Zaldarriaga(2015)Senatore and Zaldarriaga]{senatore2015}
 Senatore, L. and Zaldarriaga, M.
