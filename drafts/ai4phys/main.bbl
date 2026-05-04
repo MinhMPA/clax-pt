@@ -1,4 +1,4 @@
-\begin{thebibliography}{23}
+\begin{thebibliography}{24}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -138,6 +138,15 @@ Senatore, L. and Zaldarriaga, M.
 \newblock The {IR}-resummed effective field theory of large scale structures.
 \newblock \emph{JCAP}, 2015\penalty0 (02):\penalty0 013, 2015.
 \newblock \doi{10.1088/1475-7516/2015/02/013}.
+
+\bibitem[Simonovi{\'c} et~al.(2018)Simonovi{\'c}, Baldauf, Zaldarriaga,
+  Carrasco, and Kollmeier]{simonovic2018}
+Simonovi{\'c}, M., Baldauf, T., Zaldarriaga, M., Carrasco, J.~J., and
+  Kollmeier, J.~A.
+\newblock Cosmological perturbation theory using the {FFTLog}: formalism and
+  connection to {QFT} loop integrals.
+\newblock \emph{JCAP}, 04:\penalty0 030, 2018.
+\newblock \doi{10.1088/1475-7516/2018/04/030}.
 
 \bibitem[Sletmoen(2026)]{sletmoen2026}
 Sletmoen, H.

@@ -127,7 +127,7 @@ The entire pipeline is end-to-end differentiable: \texttt{jax.grad} propagates e
 
 The design choices underlying \clax and \claxpt can be organized by their origin---whether they were transcribed from oracle code, made autonomously by the agent, or directed by a human physicist---providing a useful lens for understanding the division of labor in AI-assisted scientific software development.
 
-The core physics follows \class and \classpt directly: RECFAST recombination, the full massive-neutrino Boltzmann hierarchy, the one-loop power spectrum integrals via the FFTLog algorithm \citep{fang2017}, and baryon acoustic oscillation peak resummation (which corrects for long-wavelength displacement effects on the baryon acoustic oscillation feature) \citep{senatore2015, vlah2015}. These choices were transcribed directly from the \class and \classpt source code by the AI agent.
+The core physics follows \class and \classpt directly: hydrogen recombination, the full massive-neutrino Boltzmann hierarchy, the one-loop power spectrum integrals via the FFTLog algorithm \citep{simonovic2018, fang2017}, and baryon acoustic oscillation peak resummation (which corrects for long-wavelength displacement effects on the baryon acoustic oscillation feature) \citep{senatore2015, vlah2015}. These choices were transcribed directly from the \class and \classpt source code by the AI agent.
 
 Making the pipeline end-to-end differentiable required several non-trivial engineering decisions that the agent made autonomously. Reverse-mode automatic differentiation through the stiff perturbation ordinary differential equation uses checkpointed adjoints \citep{kidger2021} for memory efficiency. Two implicit-differentiation wrappers were needed: a \texttt{custom\_vjp} on the shooting method ($\theta_s \to H_0$) and a \texttt{custom\_jvp} on the hydrogen Saha ionization equilibrium, replacing explicit gradient barriers with implicit-function-theorem tangents to restore nonzero parameter sensitivities around recombination. Post-recombination, a smooth relaxation damping replaces the hard approximation switch used by \class, ensuring gradient continuity. The perturbation adaptive step-size controller follows \discoeb's filtered strategy \citep{hahn2023}, weighting six key variables with $k$-dependent scaling.
 
@@ -308,7 +308,7 @@ We classify these into four types by their nature and whether autonomous resolut
 
 \textbf{Type~I: Convention and unit bugs.}
 Errors in translating \class conventions into \jax: wrong sign, missing numerical factor, incorrect unit conversion.
-A representative example surfaced during post-development improvement: the hydrogen number density $n_{H,0}$ in the thermodynamics module used the proton mass $m_p$ instead of the hydrogen atom mass $m_H$---a one-line typo that biased the reionization redshift $z_\mathrm{reio}$ and was initially misattributed to RECFAST limitations.
+A representative example surfaced during post-development improvement: the hydrogen number density $n_{H,0}$ in the thermodynamics module used the proton mass $m_p$ instead of the hydrogen atom mass $m_H$---a one-line typo that biased the reionization redshift $z_\mathrm{reio}$ and was initially misattributed to limitations of the recombination solver.
 Another: the agent transcribed the tensor \emph{temperature} radial kernel from \class \texttt{transfer.c} (line 4241) instead of the tensor \emph{polarization} B-mode kernel (line 4263), producing $\Cl^{BB}$ ratios ranging from $0.4\times$ to $22\times$ vs.\ \class---yet this was listed as a ``known limitation'' for months before the correct kernel was identified.
 \emph{Agents resolved all Type~I bugs autonomously} once the discrepancy was flagged by oracle comparison.
 
@@ -341,7 +341,7 @@ We distill three principles from the empirical data:
 An oracle compares numerical values at a reference parameter point.
 It catches implementation errors (wrong sign, wrong coefficient) but not physics errors (wrong model, numerically compensated).
 A fudge factor with zero degrees of freedom at the calibration point will pass every oracle test at that point.
-Even agent-generated \emph{diagnoses} can be wrong: the $m_p$/$m_H$ typo described above was attributed by the agent to ``RECFAST visibility function bias'' in the project documentation, with a suggested fix of switching to HyRec recombination---neither the diagnosis nor the proposed fix was correct, and the actual root cause (a one-line constant error) was only found in a later investigation session.
+Even agent-generated \emph{diagnoses} can be wrong: the $m_p$/$m_H$ typo described above was attributed by the agent to ``recombination solver bias'' in the project documentation, with a suggested fix of switching to an alternative recombination code---neither the diagnosis nor the proposed fix was correct, and the actual root cause (a one-line constant error) was only found in a later investigation session.
 \emph{Defense}: test across diverse parameter space; test intermediate quantities; build auxiliary tests that check structural properties (e.g., that $P_\mathrm{tree}(k,\mu)$ has the correct anisotropy as a function of $\mu$), not just numerical values.
 
 \textbf{P2: Shared memory prevents re-exploration but not architectural loops.}
