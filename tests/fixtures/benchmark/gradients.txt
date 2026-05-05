@@ -35,7 +35,7 @@ COMPARISON
   AD grad:  28.34s  (1 backward pass)
   FD grad:  134.50s  (10 forward passes)
   Speedup:  4.7x  (AD vs FD)
-  Effective backward cost: 1.2x forward
+  Effective backward cost: 2.2x forward
 
 AD vs FD agreement:
   Param           AD            FD       |AD/FD-1|

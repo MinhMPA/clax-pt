@@ -22,7 +22,7 @@ Step 3 — multi-z scaling, z_list = [0.0, 0.38, 0.61, 1.0]
 Step 4 — AD gradient: d(sum P_gg) / d(omega_b)
   Gradient compile (first call): 89.34s
   median: 1.234s   range: [1.221, 1.249]
-  Backward/Forward ratio (full pipeline): 0.37x
+  Backward/Forward ratio (full pipeline): 3.0x
 
 Step 5 — accuracy regression vs reference_data/classpt_z0.38_fullrange.npz
   P_mm real: max rel err = 0.312%, mean = 0.041%
