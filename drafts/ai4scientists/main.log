@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  5 MAY 2026 14:26
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  5 MAY 2026 19:29
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -576,7 +576,7 @@ LaTeX Font Info:    Font shape `OML/ptm/m/n' in size <9> not available
 (Font)              Font shape `OML/cmm/m/it' tried instead on input line 46.
 
 Underfull \hbox (badness 10000) in paragraph at lines 52--53
-[]\OT1/ptm/m/n/10 (+20) The agent re-solved 11 autonomously---
+[]\OT1/ptm/m/n/10 (+20) The agent re-solved 10 autonomously---
  []
 
 
@@ -592,6 +592,9 @@ Underfull \hbox (badness 4995) in paragraph at lines 52--53
 
 
 
+Underfull \vbox (badness 1917) has occurred while \output is active []
+
+
 
 [1{/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{/usr/l
 ocal/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc}
@@ -599,9 +602,12 @@ ocal/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc}
 
 
 ]
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
 
 LaTeX Font Info:    Trying to load font information for OT1+pcr on input line 8
-6.
+8.
 (/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/ot1pcr.fd
 File: ot1pcr.fd 2001/06/04 font definitions for OT1/pcr.
 )
@@ -612,43 +618,66 @@ Package microtype Info: Loading generic protrusion settings for font family
 
 
 [2]
+<figures/fig2_bug_taxonomy.pdf, id=60, 526.66763pt x 374.4345pt>
+File: figures/fig2_bug_taxonomy.pdf Graphic file (type pdf)
+<use figures/fig2_bug_taxonomy.pdf>
+Package pdftex.def Info: figures/fig2_bug_taxonomy.pdf  used on input line 103.
+
+(pdftex.def)             Requested size: 234.8775pt x 166.98563pt.
+
+
+
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
+[3 <./figures/fig2_bug_taxonomy.pdf>]
+<figures/fig1_the_wall.pdf, id=124, 611.91525pt x 334.97565pt>
+File: figures/fig1_the_wall.pdf Graphic file (type pdf)
+<use figures/fig1_the_wall.pdf>
+Package pdftex.def Info: figures/fig1_the_wall.pdf  used on input line 132.
+(pdftex.def)             Requested size: 487.8225pt x 267.04549pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
-
-
-
-[3]
-Overfull \hbox (52.77788pt too wide) detected at line 133
-[][][][]\OML/cmm/m/it/10 P[]\OT1/cmr/m/n/10 (\OML/cmm/m/it/10 k; ^^V\OT1/cmr/m/
-n/10 ) = \OML/cmm/m/it/10 Z[]\OT1/cmr/m/n/10 (\OML/cmm/m/it/10 ^^V\OT1/cmr/m/n/
-10 ) [] \OML/cmm/m/it/10 ;
- []
 
 
 
 
 
 [4]
+
+
+
+[5 <./figures/fig1_the_wall.pdf>]
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
 
+Underfull \hbox (badness 1028) in paragraph at lines 202--203
+[]\OT1/ptm/m/n/10 (+20) The di-vi-sion of la-bor raises an un-avoid-able ques-t
+ion
+ []
+
+
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
-[5] (./main.bbl
+[6]
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
+
+(./main.bbl
 Underfull \hbox (badness 10000) in paragraph at lines 9--13
 \OT1/ptm/m/n/10 (+20) Tech-ni-cal Re-port, [][]$\OT1/pcr/m/n/10 http : / / anth
 ropic . com /
  []
 
 
+
+[7]
 Underfull \hbox (badness 3746) in paragraph at lines 57--62
 []\OT1/ptm/m/n/10 (+20) Sletmoen, H.  Sym-Boltz.jl: A symbolic-numeric,
  []
@@ -657,7 +686,7 @@ Underfull \hbox (badness 3746) in paragraph at lines 57--62
 
 
 
-[6
+[8
 
 ] (./main.aux)
  ***********
@@ -668,31 +697,42 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 16858 strings out of 473190
- 278234 string characters out of 5715801
- 753509 words of memory out of 5000000
- 39621 multiletter control sequences out of 15000+600000
- 593470 words of font info for 235 fonts, out of 8000000 for 9000
+ 16952 strings out of 473190
+ 279708 string characters out of 5715801
+ 752509 words of memory out of 5000000
+ 39656 multiletter control sequences out of 15000+600000
+ 599418 words of font info for 273 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,12n,79p,1228b,622s stack positions out of 10000i,1000n,20000p,200000b,200000s
-</usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb
-></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb>
-</usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></
-usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></us
-r/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/
-local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/loc
-al/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/
-texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/t
-exlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/tex
-live/2025/texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb></usr/local/texlive/202
-5/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2025/texmf-
-dist/fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fonts
-/type1/urw/times/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw
-/times/utmri8a.pfb>
-Output written on main.pdf (6 pages, 190045 bytes).
+ 75i,11n,79p,1744b,622s stack positions out of 10000i,1000n,20000p,200000b,200000s
+</usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb
+></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb>
+</usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx8.pfb></
+usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></u
+sr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></us
+r/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr
+/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/l
+ocal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/loc
+al/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local
+/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/t
+exlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/local/tex
+live/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texli
+ve/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive
+/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/20
+25/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2025/
+texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2025/tex
+mf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2025/texmf-
+dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2025/texmf-d
+ist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2025/texmf-dis
+t/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2025/texmf-dist/
+fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2025/texmf-dist/fo
+nts/type1/urw/courier/ucrb8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type
+1/urw/courier/ucrr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/ti
+mes/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmr8a
+.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
+Output written on main.pdf (8 pages, 740519 bytes).
 PDF statistics:
- 172 PDF objects out of 1000 (max. 8388607)
- 134 compressed objects within 2 object streams
- 34 named destinations out of 1000 (max. 500000)
- 52737 words of extra memory for PDF output out of 61914 (max. 10000000)
+ 319 PDF objects out of 1000 (max. 8388607)
+ 259 compressed objects within 3 object streams
+ 39 named destinations out of 1000 (max. 500000)
+ 60939 words of extra memory for PDF output out of 61914 (max. 10000000)
 
