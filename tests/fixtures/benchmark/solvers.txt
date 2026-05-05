@@ -1,0 +1,31 @@
+Platform: gpu ([CudaDevice(id=0)])
+JAX version: 0.10.0
+
+Computing background + thermodynamics (shared)...
+  conformal age = 14153.25
+
+--- kvaerno5 ---
+  n_k=89, rtol=0.0001, atol=0.0001
+  Time (median of 5): 13.09s
+  delta_m shape: (89,)
+  (reference for accuracy comparison)
+
+--- rodas5 ---
+  n_k=89, rtol=0.0001, atol=0.0001
+  Time (median of 5): 6.21s
+  delta_m shape: (89,)
+  vs kvaerno5: max=0.0872%, mean=0.0312%
+
+--- rosenbrock_batched ---
+  n_k=89, rtol=0.0001, atol=0.0001
+  Time (median of 5): 6.19s
+  delta_m shape: (89,)
+  vs kvaerno5: max=0.0872%, mean=0.0312%
+
+============================================================
+SUMMARY
+============================================================
+  Solver                    Median (s)    Speedup
+  kvaerno5                       13.09      1.00x
+  rodas5                          6.21      2.11x
+  rosenbrock_batched              6.19      2.11x

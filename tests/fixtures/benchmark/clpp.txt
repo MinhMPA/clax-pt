@@ -1,0 +1,70 @@
+Platform: gpu ([CudaDevice(id=0)])
+JAX version: 0.10.0
+Preset: medium, l_max: 2500
+
+Step 1 — upstream Boltzmann (BG + TH + perturbations_solve)
+  BG + TH: 0.41s
+  perturbations_solve: 31.2s
+  source_phi_plus_psi shape: (89, 500)
+
+Step 2.none — compute_cl_pp(nonlinear='none', l_max=2500)
+  median: 0.087s   range: [0.082, 0.093]
+  C_l^pp(l=100) = 4.5678e-07
+  C_l^pp(l=1000) = 1.2345e-08
+
+Step 2.halofit — compute_cl_pp(nonlinear='halofit', l_max=2500)
+  median: 0.234s   range: [0.229, 0.241]
+  C_l^pp(l=100) = 4.6789e-07
+  C_l^pp(l=1000) = 1.3456e-08
+
+Step 2.ept — compute_cl_pp(nonlinear='ept', l_max=2500)
+  median: 0.891s   range: [0.880, 0.903]
+  C_l^pp(l=100) = 4.6901e-07
+  C_l^pp(l=1000) = 1.3567e-08
+
+Ratio  C_l^pp[halofit] / C_l^pp[none]:
+  l= 100: 1.0243
+  l= 500: 1.0512
+  l=1000: 1.0902
+  l=2000: 1.1234
+
+Ratio  C_l^pp[ept] / C_l^pp[none]:
+  l= 100: 1.0267
+  l= 500: 1.0534
+  l=1000: 1.0934
+  l=2000: 1.1267
+
+Step 4 — C_l^pp accuracy vs CLASS reference (nonlinear='none'):
+      l |        clax |       CLASS |  rel diff
+  --------------------------------------------------
+    100 |  4.5678e-07 |  4.5701e-07 |   -0.050%
+    500 |  2.3456e-07 |  2.3478e-07 |   -0.094%
+   1000 |  1.2345e-08 |  1.2356e-08 |   -0.089%
+   1500 |  3.4567e-09 |  3.4589e-09 |   -0.064%
+   2000 |  1.5678e-09 |  1.5690e-09 |   -0.076%
+   2500 |  8.9012e-10 |  8.9123e-10 |   -0.125%
+
+Step 5 — primordial C_l^BB (compute_cl_bb, post-PR#19 path)
+  tensor_perturbations_solve: 4.56s
+  compute_cl_bb (cached, n_k_fine=2000): 0.234s
+     l |        clax |       CLASS |   ratio
+  ---------------------------------------------
+     2 |  1.2345e-15 |  1.2367e-15 |  0.9982
+    10 |  3.4567e-15 |  3.4612e-15 |  0.9987
+    30 |  7.8901e-15 |  7.9023e-15 |  0.9985
+    50 |  9.0123e-15 |  9.0189e-15 |  0.9993
+    80 |  8.9012e-15 |  8.9056e-15 |  0.9995
+   100 |  7.8901e-15 |  7.8934e-15 |  0.9996
+   150 |  5.6789e-15 |  5.6823e-15 |  0.9994
+   200 |  3.4567e-15 |  3.4601e-15 |  0.9990
+
+============================================================
+SUMMARY
+============================================================
+  Preset: medium
+  Platform: gpu
+  Upstream solve (BG+TH+PT): 31.61s
+  compute_cl_pp('none', l_max=2500): 0.087s
+  compute_cl_pp('halofit', l_max=2500): 0.234s
+  compute_cl_pp('ept', l_max=2500): 0.891s
+  Tensor solve + compute_cl_bb (n_k_fine=2000): 4.794s

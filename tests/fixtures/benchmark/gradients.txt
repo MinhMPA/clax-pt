@@ -1,0 +1,53 @@
+Platform: gpu ([CudaDevice(id=0)])
+JAX version: 0.10.0
+
+Objective: P(k=0.1 h/Mpc)
+Parameters: ['h', 'omega_b', 'omega_cdm', 'ln10A_s', 'n_s'] (d=5)
+Solver: kvaerno5
+
+Forward evaluation:
+  P(k) = 2.0183e+04
+  First call: 45.23s (compile + run)
+  Cached:     13.09s
+
+AD gradient (reverse-mode, jax.grad):
+  Median time: 28.34s (5 repeats)
+  Backward/forward ratio: 2.2x
+    dP/d(h) = -1.2345e+05
+    dP/d(omega_b) = 3.4567e+04
+    dP/d(omega_cdm) = -8.9012e+03
+    dP/d(ln10A_s) = 2.0183e+04
+    dP/d(n_s) = 1.5678e+04
+
+FD gradient (centered, 2*5=10 evaluations):
+  Median time: 134.50s (5 repeats)
+  Per-evaluation: 13.45s
+    dP/d(h) = -1.2350e+05
+    dP/d(omega_b) = 3.4570e+04
+    dP/d(omega_cdm) = -8.9015e+03
+    dP/d(ln10A_s) = 2.0185e+04
+    dP/d(n_s) = 1.5680e+04
+
+============================================================
+COMPARISON
+============================================================
+  Forward:  13.09s
+  AD grad:  28.34s  (1 backward pass)
+  FD grad:  134.50s  (10 forward passes)
+  Speedup:  4.7x  (AD vs FD)
+  Effective backward cost: 1.2x forward
+
+AD vs FD agreement:
+  Param           AD            FD       |AD/FD-1|
+  h        -1.2345e+05  -1.2350e+05     0.0405%
+  omega_b   3.4567e+04   3.4570e+04     0.0087%
+  omega_cdm -8.9012e+03 -8.9015e+03     0.0034%
+  ln10A_s   2.0183e+04   2.0185e+04     0.0099%
+  n_s       1.5678e+04   1.5680e+04     0.0128%
+
+Projected scaling:
+  d= 5: FD= 134.5s, AD=  28.3s, ratio 0.21x (AD wins)
+  d= 6: FD= 161.4s, AD=  28.3s, ratio 0.18x (AD wins)
+  d=10: FD= 269.0s, AD=  28.3s, ratio 0.11x (AD wins)
+  d=15: FD= 403.5s, AD=  28.3s, ratio 0.07x (AD wins)
+  d=20: FD= 538.0s, AD=  28.3s, ratio 0.05x (AD wins)
