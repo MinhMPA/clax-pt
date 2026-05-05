@@ -1,0 +1,69 @@
+\begin{thebibliography}{9}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Carlini(2026)]{carlini2026}
+Carlini, N.
+\newblock Coding agent builds a {C} compiler.
+\newblock Anthropic Technical Report,
+  \url{http://anthropic.com/research/coding-agent-c-compiler}, 2026.
+
+\bibitem[Chudaykin et~al.(2021)Chudaykin, Ivanov, Philcox, and
+  Simonovi{\'c}]{chudaykin2021}
+Chudaykin, A., Ivanov, M.~M., Philcox, O. H.~E., and Simonovi{\'c}, M.
+\newblock Nonlinear perturbation theory extension of the boltzmann code
+  {CLASS}.
+\newblock \emph{Phys. Rev. D}, 103:\penalty0 023507, 2021.
+\newblock \doi{10.1103/PhysRevD.103.023507}.
+\newblock \url{https://github.com/Michalychforever/CLASS-PT}.
+
+\bibitem[D'Amico et~al.(2020)]{damico2020}
+D'Amico, G. et~al.
+\newblock The cosmological analysis of the {SDSS/BOSS} data from the effective
+  field theory of large-scale structure.
+\newblock \emph{JCAP}, 2020\penalty0 (05):\penalty0 005, 2020.
+
+\bibitem[Fang et~al.(2017)Fang, Blazek, McEwen, and Hirata]{fang2017}
+Fang, X., Blazek, J.~A., McEwen, J.~E., and Hirata, C.~M.
+\newblock {FAST-PT II}: an algorithm to calculate convolution integrals of
+  general tensor quantities in cosmological perturbation theory.
+\newblock \emph{JCAP}, 2017\penalty0 (02):\penalty0 030, 2017.
+
+\bibitem[Perko et~al.(2016)Perko, Senatore, Jennings, and Wechsler]{perko2016}
+Perko, A., Senatore, L., Jennings, E., and Wechsler, R.~H.
+\newblock Biased tracers in redshift space in the {EFT} of large-scale
+  structure.
+\newblock \emph{arXiv preprint arXiv:1602.00674}, 2016.
+
+\bibitem[Senatore \& Zaldarriaga(2015)Senatore and Zaldarriaga]{senatore2015}
+Senatore, L. and Zaldarriaga, M.
+\newblock The {IR}-resummed effective field theory of large scale structures.
+\newblock \emph{JCAP}, 2015\penalty0 (02):\penalty0 013, 2015.
+\newblock \doi{10.1088/1475-7516/2015/02/013}.
+
+\bibitem[Simonovi{\'c} et~al.(2018)Simonovi{\'c}, Baldauf, Zaldarriaga,
+  Carrasco, and Kollmeier]{simonovic2018}
+Simonovi{\'c}, M., Baldauf, T., Zaldarriaga, M., Carrasco, J.~J., and
+  Kollmeier, J.~A.
+\newblock Cosmological perturbation theory using the {FFTLog}: formalism and
+  connection to {QFT} loop integrals.
+\newblock \emph{JCAP}, 04:\penalty0 030, 2018.
+\newblock \doi{10.1088/1475-7516/2018/04/030}.
+
+\bibitem[Sletmoen(2026)]{sletmoen2026}
+Sletmoen, H.
+\newblock {SymBoltz.jl}: A symbolic-numeric, approximation-free, and
+  differentiable linear {Einstein}--{Boltzmann} solver.
+\newblock \emph{Astronomy \& Astrophysics}, 707:\penalty0 A128, 2026.
+\newblock \doi{10.1051/0004-6361/202557450}.
+
+\bibitem[Villaescusa-Navarro et~al.(2025)]{villaescusa2025}
+Villaescusa-Navarro, F. et~al.
+\newblock The {Denario} project: Deep knowledge {AI} agents for scientific
+  discovery.
+\newblock \emph{arXiv preprint arXiv:2510.26887}, 2025.
+
+\end{thebibliography}
