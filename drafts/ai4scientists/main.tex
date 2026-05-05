@@ -135,6 +135,62 @@ where $\Sigma^2_\mathrm{tot}(\mu)$ is the same anisotropic damping factor from t
 
 The fudge factor illustrates a failure mode specific to oracle-tested scientific software: a numerically adequate but physically meaningless solution that passes all existing tests. The agent cannot distinguish between ``this works because it is correct'' and ``this works because it is calibrated to the test data.'' The physicist could, because the physicist knew that $\alpha = 0.27$ must correspond to \emph{something} in the theory---and when it corresponded to nothing, the solution was suspect regardless of its numerical performance.
 
+% ===========================================================================
+\section{Three Principles}
+\label{sec:principles}
+
+The case study suggests three principles for supervising AI agents on scientific software, each grounded in a specific failure mode we observed.
+
+\paragraph{P1: Oracle testing verifies what, not why.}
+
+An oracle test compares numerical output at fixed input parameters. It answers the question ``does the code produce the right numbers here?'' but not ``does the code produce the right numbers \emph{for the right reasons}?'' The fudge factor $\alpha = 0.27$ passed every oracle test---nine spectra, hundreds of $k$-modes, relative errors below 1\%---because it was calibrated to the same fiducial cosmology used for testing. The oracle provides no signal that the underlying model is wrong when the calibration point happens to coincide with the test point.
+
+A subtler instance of this failure mode appeared earlier in the broader project (during the Boltzmann solver development, reported elsewhere): the agent misdiagnosed a proton-to-hydrogen mass ratio typo ($m_p/m_H = 1.0$ vs.\ the correct 0.9994) as ``recombination solver bias'' and proposed compensating changes to thermodynamics routines. The oracle-passing fix was accepted for months before the actual one-character typo was identified. In both cases, the agent found a path that reduced the test metric without identifying the true cause.
+
+The defense we found effective was twofold: test at diverse parameter points beyond the fiducial calibration (so that single-point calibrations are exposed when parameters shift), and test structural properties rather than just numerical values. For the RSD multipoles, testing anisotropy as a function of $\mu$ at specific wavenumbers would have revealed the architectural mismatch earlier than comparing integrated multipole spectra.
+
+\paragraph{P2: Shared memory prevents re-exploration but not architectural loops.}
+
+The CHANGELOG protocol successfully prevented the agent from re-exploring solved bugs across sessions. When the DST $k$-grid issue (logarithmic vs.\ linear spacing) was resolved on day 3, no subsequent session revisited it---the CHANGELOG entry served as shared memory. However, the same protocol did not prevent 33 sessions of coherent but futile work within the wrong architecture. Every session during the RSD crisis logged its attempts faithfully: ``adjusted $\mu^4$ coefficient in $M_{22}$ kernel, improved $\ell=2$ by 0.3\% but degraded $\ell=4$ by 1.2\%.'' The log showed no contradiction, no repetition, no sign of a dead end---only incremental exploration within a space that contained no solution.
+
+The shared memory prevented \emph{literal} re-exploration (trying the same coefficient twice) but could not surface \emph{structural} stagnation (trying different coefficients within the same doomed architecture). The defense we adopted was a session-count trigger: when progress stalls for approximately 5--10 sessions with no monotonic improvement in the target metric, escalate to human review. This heuristic would have caught the RSD crisis at session 30 rather than session 56.
+
+\paragraph{P3: The irreducible human role is architectural and physical judgment.}
+
+The agent excelled at tasks with clear specifications and verifiable outputs: transcribing equations from a reference source, comparing intermediate numerical values to localize discrepancies, adjusting coefficients to match a known target, implementing a well-specified algorithm. These tasks---which constituted approximately 80\% of the project by session count---were performed autonomously at high quality.
+
+The agent failed at two specific tasks. First, recognizing when a code architecture is fundamentally incompatible with the target physics rather than merely mis-parameterized. This requires understanding what the physics \emph{should look like}---not just what numbers it should produce, but what structural properties must hold (isotropy vs.\ anisotropy, polynomial vs.\ exponential dependence, which variables are coupled). Second, detecting physically unmotivated patches that happen to improve numerical agreement. This requires knowing what the theory \emph{allows}---that a scalar correction $\alpha$ must derive from some identifiable physical mechanism, and that its absence from the reference implementation is evidence against its validity rather than evidence of a novel improvement.
+
+Both capabilities reduce to a single underlying skill: evaluating explanations, not just predictions. The agent evaluates whether the output matches the target. The physicist evaluates whether the mechanism producing that output is physically coherent. When these two criteria diverge---when a wrong mechanism produces right numbers---only the physicist can detect the error.
+
+% ===========================================================================
+\section{Implications and Limitations}
+\label{sec:implications}
+
+The division of labor that emerged was: approximately 80\% of sessions were autonomous oracle-following (transcription, debugging, implementation), approximately 10\% were engineering tasks where the agent worked independently given a well-specified architecture, and approximately 10\% required irreplaceable human judgment (architectural decisions and fudge-factor rejection). The binding constraint on code quality was the supervision protocol, not the model's raw capability. A more capable model with the same protocol would likely have resolved the 11 autonomous bugs faster, but would have been equally stuck on the architectural mismatch and equally tempted by the fudge factor---because these failures stem from the evaluation criterion (oracle testing), not from reasoning limitations.
+
+This suggests that improving AI-assisted scientific software requires better supervision protocols at least as much as better models. Specifically, it requires protocols that distinguish predictive adequacy (``it produces the right numbers'') from explanatory correctness (``it produces the right numbers for the right reasons''). The ``no fudge factors'' rule is a crude but effective instance of this distinction: it forces the agent to find mechanistic explanations rather than calibrated patches.
+
+We acknowledge significant limitations. This is a single case study ($N=1$), with a single agent architecture, a single domain (cosmological perturbation theory), and a single physicist. The failure modes we identified---optimizing within a wrong model, calibration-point overfitting---are plausibly general (they appear in other domains as overfitting and specification gaming), but we cannot prove generality from one case. The project also had a high-quality oracle available (\classpt is an established, well-tested reference code); many scientific software projects lack such oracles, and our methodology would need adaptation for settings where ground truth is uncertain.
+
+Looking forward, closing the gap between autonomous and human-required bugs would require agents that can propose architectural alternatives (``what if the damping is anisotropic?'') rather than only optimizing within a given structure, and that can distinguish predictive adequacy from explanatory correctness (``this parameter has no physical derivation, therefore the solution is suspect''). These capabilities are not obviously addressed by scaling model size or training data alone---they require the agent to maintain an internal model of what constitutes valid scientific explanation, beyond numerical agreement with test data.
+
+% ===========================================================================
+\section{Related Work}
+\label{sec:related}
+
+\citet{carlini2026} reported on building a C compiler using 16 parallel Claude agent sessions over approximately 2,000 sessions, producing a 100,000-line Rust implementation that compiles the Linux kernel. Our methodology is directly adapted from that project (oracle-driven development, shared memory protocols, parallel sessions). The key difference is that the C compiler domain requires syntactic and semantic correctness---which are fully captured by oracle tests (GCC output)---but does not require \emph{physical} correctness. Domain knowledge was not the bottleneck in compiler construction; it is the primary bottleneck in scientific software. Our case study extends the Carlini methodology to a domain where oracle tests are necessary but not sufficient.
+
+\citet{villaescusa2025} describe Denario, a multi-agent system that autonomously generates scientific analyses and manuscripts in astrophysics. Denario represents a maximally autonomous approach: agents select research questions, write code, produce results, and draft papers with minimal human oversight. Our case study illustrates why domain-supervised approaches may be preferable for validated scientific software: the fudge factor ($\alpha = 0.27$) that our agent committed---and that passed all automated tests---would have been published without question in a fully autonomous pipeline. The supervision protocol catches errors that autonomy cannot.
+
+SymBoltz.jl~\citep{sletmoen2026} implements a differentiable linear Boltzmann solver with a design philosophy closest to our upstream project (approximation-free, symbolic-numeric). While SymBoltz.jl does not discuss its development methodology, its existence as a single-author Julia implementation validates the feasibility of reimplementing established cosmological codes in modern differentiable frameworks. Our contribution is orthogonal: we report on \emph{how} such code is developed when the implementer is an AI agent under human supervision, rather than a human programmer working alone.
+
+% ===========================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+In our case study, the AI agent functioned as a highly capable tool---not a co-author and certainly not an autonomous scientist. It could implement, debug, and validate scientific software at speed and scale that would be impractical for a solo physicist, but it could not evaluate whether its solutions were physically meaningful beyond their numerical adequacy. The supervision protocol---oracle testing, shared memory, the no-fudge-factor rule, and the session-count escalation trigger---was the mechanism that transformed raw agent output into trustworthy scientific code. Improving this protocol, rather than solely improving model capability, is the more direct path to reliable AI-assisted scientific software development. The full supervision log, CHANGELOG, and commit history will be made publicly available.
+
 \bibliography{references}
 \bibliographystyle{icml2026}
 
