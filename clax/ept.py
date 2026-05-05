@@ -2015,15 +2015,19 @@ def compute_ept_from_clax(
 
     from clax.background import sound_horizon_drag
 
-    h = float(params.h)
+    h = params.h  # JAX scalar — keep traced so d(pk_h)/d(h) flows through h³ factor
+    # Concrete scalar for numpy IR resummation and compute_ept's h argument.
+    # stop_gradient is safe: rs_h and h_conc only enter damping/unit conversions,
+    # not the loop integrals that carry the gradient.
+    h_conc = float(jax.lax.stop_gradient(h))
     # Cosmology-consistent BAO sound horizon for IR resummation. Convention:
     # rs_h := r_s_drag * h, in Mpc (matches CLASS-PT pth->rs_d * h numerically;
     # see nonlinear_pt.c:5637 qint2 * rbao = k_h * rs_h_value).
-    rs_h_value = float(sound_horizon_drag(params)) * h
+    rs_h_value = float(jax.lax.stop_gradient(sound_horizon_drag(params))) * h_conc
 
     # EPT k-grid in h/Mpc → convert to Mpc⁻¹ for clax
-    k_h = ept_kgrid(prec)  # h/Mpc
-    k_mpc = k_h * h        # Mpc⁻¹ (clax internal units)
+    k_h = ept_kgrid(prec)  # h/Mpc, static numpy array
+    k_mpc = k_h * h_conc   # Mpc⁻¹; h_conc keeps k_mpc a plain numpy array
 
     # Get δ_m at each k, at redshift z, from perturbation result
     # Then P_lin(k) = 2π²/k³ × A_s × (k/k_pivot)^{n_s-1} × δ_m²
@@ -2051,10 +2055,19 @@ def compute_ept_from_clax(
     pk_mpc3 = 2.0 * jnp.pi**2 / k_arr ** 3 * prim * delta_m_ept ** 2
 
     # Convert to h-units: P_h = P * h³,  k_h = k / h
-    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³
+    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³ — h is JAX-traced here for d(pk_h)/d(h)
 
     # Growth rate f ≈ Ω_m(z)^0.55 (approximation; improve later)
-    f = float(bg.Omega_m_of_z(z)) ** 0.55 if hasattr(bg, "Omega_m_of_z") else 0.8
+    f = float(jax.lax.stop_gradient(bg.Omega_m_of_z(z))) ** 0.55 if hasattr(bg, "Omega_m_of_z") else 0.8
 
-    return compute_ept(jnp.array(pk_h), jnp.array(k_h), h=h, f=f, prec=prec,
-                        rs_h=rs_h_value)
+    # Pre-compute IR resummation with a concrete (stop_gradient) snapshot of pk_h so
+    # that compute_ept uses the _ir_precomputed path. In that path:
+    #   pk_w = pk_lin_h − pk_nw   (JAX-traced, depends on pk_h)
+    #   d(pk_resummed)/d(pk_lin_h) = exp(−Σ²k²) ≠ 0
+    # This lets jax.grad flow through pk_h → loop integrals → output spectra.
+    ir_pre = _ir_resummation_numpy(
+        np.array(jax.lax.stop_gradient(pk_h)), k_h, rs_h=rs_h_value, h=h_conc,
+    )
+
+    return compute_ept(pk_h, jnp.array(k_h), h=h_conc, f=f, prec=prec,
+                        rs_h=rs_h_value, _ir_precomputed=ir_pre)
