@@ -7,7 +7,7 @@
 
 ## Title
 
-Oracle Tests Are Not Enough: Lessons from Building Scientific Software with an AI Agent
+Physics Is All You Need: Lessons from Physicist-Supervised AI Development of Scientific Software
 
 ## TL;DR
 
