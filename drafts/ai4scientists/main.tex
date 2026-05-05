@@ -1,0 +1,97 @@
+%%%%%%%% AI Scientists @ ICML 2026 — position paper %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+\usepackage{icml2026}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usepackage{xspace}
+
+% Custom commands
+\newcommand{\claxpt}{\textsc{clax-pt}\xspace}
+\newcommand{\classpt}{\textsc{class-pt}\xspace}
+\newcommand{\jax}{\textsc{jax}\xspace}
+
+\icmltitlerunning{Oracle Tests Are Not Enough}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{Oracle Tests Are Not Enough: Lessons from Building \\
+    Scientific Software with an AI Agent}
+
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}
+    \icmlauthor{Minh Nguyen}{kavli}
+    \icmlauthor{Siddharth Mishra-Sharma}{anthropic}
+  \end{icmlauthorlist}
+
+  \icmlaffiliation{kavli}{Kavli IPMU, University of Tokyo, Kashiwa, Japan}
+  \icmlaffiliation{anthropic}{Anthropic, San Francisco, CA, USA}
+
+  \icmlcorrespondingauthor{Minh Nguyen}{nhat.minh.nguyen.111@gmail.com}
+
+  \icmlkeywords{AI-assisted development, scientific software, human-AI collaboration, supervision protocols}
+
+  \vskip 0.3in
+]
+
+\printAffiliationsAndNotice{}
+
+% ===========================================================================
+\begin{abstract}
+Are AI coding agents tools, co-authors, or autonomous scientists? We present a quantified case study: a physicist supervising an AI agent (Claude Code, Opus 4.6) over 12 days and 57 sessions to build a differentiable one-loop perturbation theory module for galaxy clustering in JAX (${\sim}2{,}100$ lines, validated to sub-percent accuracy against CLASS-PT). We documented 14 bugs and classified each by whether autonomous resolution was possible.
+
+The agent resolved 11 autonomously---convention errors, algorithm transcription, numerical coefficients---by iterating against oracle test suites. The three it could not all eluded oracle detection, and shared a common property: the agent treated symptom reduction as equivalent to root-cause resolution. It spent 33 of the 57 sessions tuning coefficients within a fundamentally wrong code architecture, unable to recognize the problem was structural rather than parametric. After the physicist directed a redesign, the agent then found a scalar correction by grid search that reduced error below 1\% across all test cases---but the value corresponds to no physical quantity and would silently produce wrong predictions at any other cosmology. The physicist diagnosed the fudge factor by asking a question the agent could not formulate: ``does this parameter correspond to anything in the reference code?''
+
+Three supervision practices, developed iteratively, we found critical for catching what oracle tests missed: testing against diverse cosmologies beyond the fiducial calibration; shared changelogs that surfaced stalled exploration across sessions; and an explicit rule against unphysical numerical patches. In our case study, the design of these supervision protocols---not model capability---determined whether the agent's output was trustworthy. Closing this gap would require agents that can propose architectural alternatives rather than optimizing within a given structure, and distinguish predictive adequacy from explanatory correctness---capabilities not addressed by scaling alone.
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+The ``AI Scientists'' workshop poses a direct question: are AI coding agents tools, co-authors, or autonomous founders of scientific knowledge? Most empirical evidence bearing on this question comes from either standardized benchmarks---where agents solve isolated coding tasks without domain validation~\citep{carlini2026}---or from fully autonomous multi-agent systems that generate manuscripts without sustained human oversight~\citep{villaescusa2025}. Neither setting captures the reality of scientific software development, where correctness is defined by agreement with physical law rather than by compilation or test passage, and where a single physicist works with an AI agent over weeks to produce validated code.
+
+We present a detailed case study of exactly this scenario. Over 12 days and 57 agent sessions, a physicist supervised an AI coding agent (Claude Code, powered by Opus 4.6) to build \claxpt, a differentiable one-loop perturbation theory module for galaxy clustering in \jax. The module computes nine output power spectra---matter and galaxy auto- and cross-spectra in real space and redshift-space multipoles---validated to sub-percent accuracy against the established reference code \classpt~\citep{chudaykin2021}. The resulting implementation comprises approximately 2,100 lines of code. The contribution of this paper is not the code itself (described in a companion paper) but the empirical supervision record: what the human did, what the agent did, and where the boundary between their roles became load-bearing.
+
+Our central claim is that the supervision protocol---not the model's capability---determined whether the agent's output was trustworthy scientific software. The agent autonomously resolved 11 of 14 documented bugs by iterating against oracle test suites. The remaining three bugs were invisible to oracle testing and required human physics judgment to diagnose. These three bugs consumed a disproportionate fraction of the project: 33 of 57 sessions were spent within a fundamentally wrong code architecture that the agent could not recognize as wrong because it passed local consistency checks. The physicist's interventions---an architectural redesign and the rejection of a physically unmotivated numerical patch---were the decisive acts that produced correct code.
+
+% ===========================================================================
+\section{The Project}
+\label{sec:project}
+
+\subsection{What Was Built}
+\label{sec:what}
+
+One-loop perturbation theory extends the linear matter power spectrum to mildly nonlinear scales by computing correction terms from second- and third-order density fields, producing predictions for galaxy clustering that are essential for extracting cosmological parameters from spectroscopic surveys~\citep{damico2020, perko2016}. \claxpt implements this calculation in \jax: it takes a linear power spectrum and cosmological parameters as input, evaluates one-loop integrals via FFTLog decomposition~\citep{simonovic2018, fang2017}, applies infrared resummation to resum large bulk flows~\citep{senatore2015}, and returns nine validated output spectra (matter, galaxy, and cross power spectra in real space, plus monopole, quadrupole, and hexadecapole for redshift-space distortions). The implementation is approximately 2,100 lines of \jax code, end-to-end differentiable, and validated to sub-percent accuracy against \classpt~\citep{chudaykin2021} across all nine spectra. Technical details are described in a companion paper.
+
+\subsection{The Supervision Protocol}
+\label{sec:protocol}
+
+Before any code was written, the physicist established a supervision protocol adapted from the methodology of Anthropic's C-compiler agent project~\citep{carlini2026}, which used 16 parallel agents over 2,000 sessions to build a compiler that successfully builds the Linux kernel. Four infrastructure elements structured every session:
+
+\begin{enumerate}
+\item \textbf{\classpt as oracle.} Every function was tested against reference data generated by the established Fortran implementation. Tests were written before code---the agent knew what the correct output looked like before attempting to produce it.
+
+\item \textbf{CHANGELOG as shared memory.} Because each agent session starts with no memory of previous sessions, a structured log recorded what was attempted, what failed, and what succeeded. This prevented later sessions from re-exploring dead ends (e.g., a DST grid bug that was solved on day 3 was never re-investigated).
+
+\item \textbf{A \texttt{--fast} flag for context-window hygiene.} Tests printed at most 10 lines on success and 20 on failure. Verbose diagnostics were written to log files. This discipline---drawn directly from \citet{carlini2026}---prevented the agent's finite context window from being consumed by noise.
+
+\item \textbf{Parallel agent sessions via git worktrees.} Multiple sessions explored competing hypotheses simultaneously. When a bug had multiple plausible causes, the physicist spawned parallel investigations rather than serializing them.
+\end{enumerate}
+
+Two rules proved critical beyond this infrastructure. First, ``no fudge factors'': if a test failed at 0.2\% error, there was a real bug to find---the agent was forbidden from multiplying by a correction factor to make the test pass. Second, ``test at multiple parameter points'': the oracle compared not just at the fiducial Planck 2018 cosmology but at varied cosmological parameters, to prevent solutions that were calibrated to a single point. The supervision protocol---not individual code edits---was the physicist's primary contribution to the project.
+
+\bibliography{references}
+\bibliographystyle{icml2026}
+
+\end{document}
+
