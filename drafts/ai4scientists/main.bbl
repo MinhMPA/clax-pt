@@ -1,4 +1,4 @@
-\begin{thebibliography}{9}
+\begin{thebibliography}{10}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -9,7 +9,7 @@
 Carlini, N.
 \newblock Coding agent builds a {C} compiler.
 \newblock Anthropic Technical Report,
-  \url{http://anthropic.com/research/coding-agent-c-compiler}, 2026.
+  \url{https://anthropic.com/research/coding-agent-c-compiler}, 2026.
 
 \bibitem[Chudaykin et~al.(2021)Chudaykin, Ivanov, Philcox, and
   Simonovi{\'c}]{chudaykin2021}
@@ -65,5 +65,12 @@ Villaescusa-Navarro, F. et~al.
 \newblock The {Denario} project: Deep knowledge {AI} agents for scientific
   discovery.
 \newblock \emph{arXiv preprint arXiv:2510.26887}, 2025.
+
+\bibitem[Vlah et~al.(2015)Vlah, White, and Aviles]{vlah2015}
+Vlah, Z., White, M., and Aviles, A.
+\newblock A {Vlasov-Poisson} approach to the large-scale structure, with
+  applications to the {EFT}.
+\newblock \emph{JCAP}, 2015\penalty0 (09):\penalty0 014, 2015.
+\newblock \doi{10.1088/1475-7516/2015/09/014}.
 
 \end{thebibliography}
