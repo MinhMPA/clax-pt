@@ -17,13 +17,15 @@
 \newlabel{sec:project@cref}{{[section][2][]2}{[1][2][]2}{}{}{}}
 \newlabel{sec:what}{{2.1}{2}{}{subsection.2.1}{}}
 \newlabel{sec:what@cref}{{[subsection][1][2]2.1}{[1][2][]2}{}{}{}}
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:accuracy}{{1}{2}{Accuracy of \claxpt vs.\ \classpt at Planck 2018 fiducial cosmology, $z=0.38$, $k < 0.3\;h/$Mpc. Hexadecapole uses $|\Delta |/\max (|\mathrm {ref}|)$ due to zero crossings}{table.caption.1}{}}
+\newlabel{tab:accuracy@cref}{{[table][1][]1}{[1][2][]2}{}{}{}}
 \newlabel{sec:protocol}{{2.2}{2}{}{subsection.2.2}{}}
 \newlabel{sec:protocol@cref}{{[subsection][2][2]2.2}{[1][2][]2}{}{}{}}
-\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{fig:taxonomy}{{1}{3}{Bug taxonomy for the \claxpt development. Ten issues were resolved autonomously by the agent iterating against oracle tests. Two were accelerated by the physicist's domain knowledge (unit bugs invisible to shape-based comparisons). Three required essential human physics judgment: an architectural redesign, a fudge-factor rejection, and identification of the correct physical formula}{figure.caption.1}{}}
+\newlabel{fig:taxonomy}{{1}{3}{Bug taxonomy for the \claxpt development. Ten issues were resolved autonomously by the agent iterating against oracle tests. Two were accelerated by the physicist's domain knowledge (unit bugs invisible to shape-based comparisons). Three required essential human physics judgment: an architectural redesign, a fudge-factor rejection, and identification of the correct physical formula}{figure.caption.2}{}}
 \newlabel{fig:taxonomy@cref}{{[figure][1][]1}{[1][3][]3}{}{}{}}
 \newlabel{sec:bugs}{{3}{3}{}{section.3}{}}
-\newlabel{sec:bugs@cref}{{[section][3][]3}{[1][2][]3}{}{}{}}
+\newlabel{sec:bugs@cref}{{[section][3][]3}{[1][3][]3}{}{}{}}
 \newlabel{sec:autonomous}{{3.1}{3}{}{subsection.3.1}{}}
 \newlabel{sec:autonomous@cref}{{[subsection][1][3]3.1}{[1][3][]3}{}{}{}}
 \newlabel{sec:wall}{{3.2}{3}{}{subsection.3.2}{}}
@@ -32,23 +34,23 @@
 \newlabel{sec:fudge@cref}{{[subsection][3][3]3.3}{[1][4][]4}{}{}{}}
 \newlabel{sec:principles}{{4}{4}{}{section.4}{}}
 \newlabel{sec:principles@cref}{{[section][4][]4}{[1][4][]4}{}{}{}}
-\newlabel{fig:wall}{{2}{5}{Accuracy convergence over 57 agent sessions. Blue: real-space matter power spectrum (autonomous, converges in ${\sim }10$ sessions). Red: worst redshift-space multipole (stuck at $8$--$86\%$ for ${\sim }33$ sessions). Vertical gold lines mark human interventions. The agent's error plateaued because the code architecture was structurally incompatible with anisotropic BAO damping---no coefficient adjustment within that architecture could make all multipoles pass simultaneously. After the physicist directed a Gauss--Legendre quadrature redesign, all multipoles passed immediately. A subsequent fudge factor ($\alpha = 0.27$, purple cross) passed all tests but was rejected by the physicist as physically unmotivated; the correct formula required zero tuned parameters}{figure.caption.2}{}}
+\newlabel{fig:wall}{{2}{5}{Accuracy convergence over 57 agent sessions. Blue: real-space matter power spectrum (autonomous, converges in ${\sim }10$ sessions). Red: worst redshift-space multipole (stuck at $8$--$86\%$ for ${\sim }33$ sessions). Vertical gold lines mark human interventions. The agent's error plateaued because the code architecture was structurally incompatible with anisotropic BAO damping---no coefficient adjustment within that architecture could make all multipoles pass simultaneously. After the physicist directed a Gauss--Legendre quadrature redesign, all multipoles passed immediately. A subsequent fudge factor ($\alpha = 0.27$, purple cross) passed all tests but was rejected by the physicist as physically unmotivated; the correct formula required zero tuned parameters}{figure.caption.3}{}}
 \newlabel{fig:wall@cref}{{[figure][2][]2}{[1][4][]5}{}{}{}}
 \newlabel{sec:implications}{{5}{6}{}{section.5}{}}
 \newlabel{sec:implications@cref}{{[section][5][]5}{[1][6][]6}{}{}{}}
-\newlabel{sec:governance}{{5.1}{6}{}{subsection.5.1}{}}
-\newlabel{sec:governance@cref}{{[subsection][1][5]5.1}{[1][6][]6}{}{}{}}
 \citation{villaescusa2025}
 \citation{carlini2026}
 \citation{villaescusa2025}
 \citation{sletmoen2026}
 \bibdata{references}
 \bibcite{carlini2026}{{1}{2026}{{Carlini}}{{}}}
-\bibcite{chudaykin2021}{{2}{2021}{{Chudaykin et~al.}}{{Chudaykin, Ivanov, Philcox, and Simonovi{\'c}}}}
+\newlabel{sec:governance}{{5.1}{7}{}{subsection.5.1}{}}
+\newlabel{sec:governance@cref}{{[subsection][1][5]5.1}{[1][6][]7}{}{}{}}
 \newlabel{sec:related}{{6}{7}{}{section.6}{}}
 \newlabel{sec:related@cref}{{[section][6][]6}{[1][7][]7}{}{}{}}
 \newlabel{sec:conclusion}{{7}{7}{}{section.7}{}}
 \newlabel{sec:conclusion@cref}{{[section][7][]7}{[1][7][]7}{}{}{}}
+\bibcite{chudaykin2021}{{2}{2021}{{Chudaykin et~al.}}{{Chudaykin, Ivanov, Philcox, and Simonovi{\'c}}}}
 \bibcite{damico2020}{{3}{2020}{{D'Amico et~al.}}{{}}}
 \bibcite{fang2017}{{4}{2017}{{Fang et~al.}}{{Fang, Blazek, McEwen, and Hirata}}}
 \bibcite{perko2016}{{5}{2016}{{Perko et~al.}}{{Perko, Senatore, Jennings, and Wechsler}}}

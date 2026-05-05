@@ -73,7 +73,25 @@ Our central claim is that the supervision protocol---not the model's capability-
 
 We compute predictions for how galaxies cluster in three-dimensional space. The calculation involves loop integrals (analogous to next-to-leading-order corrections in quantum field theory) that are expensive to evaluate and sensitive to subtle physical effects---bulk motions of matter and oscillation features imprinted by sound waves in the early universe. Getting these effects wrong by even 1\% can bias inferred cosmological parameters.
 
-One-loop perturbation theory (the next-to-leading-order correction beyond the linear approximation) extends the linear matter power spectrum to mildly nonlinear scales by computing correction terms from second- and third-order density fields, producing predictions for galaxy clustering that are essential for extracting cosmological parameters from spectroscopic surveys~\citep{damico2020, perko2016}. \claxpt implements this calculation in \jax: it takes a linear power spectrum and cosmological parameters as input, evaluates one-loop integrals via FFTLog decomposition (a fast algorithm that rewrites convolution integrals as sums of power laws, enabling analytic evaluation)~\citep{simonovic2018, fang2017}, and applies infrared resummation~\citep{senatore2015, vlah2015}. Infrared resummation corrects for the effect of large-scale bulk flows---coherent motions of matter on scales of hundreds of megaparsecs---which, if left unaccounted for, artificially smear the baryon acoustic oscillation (BAO) feature, an overdensity imprint left by primordial sound waves that serves as a standard ruler for measuring cosmic distances. The code returns nine validated output spectra (matter, galaxy, and cross power spectra in real space, plus monopole, quadrupole, and hexadecapole for redshift-space distortions). The implementation is approximately 2,100 lines of \jax code, end-to-end differentiable, and validated to sub-percent accuracy against \classpt~\citep{chudaykin2021} across all nine spectra (real-space $P_{mm}$, $P_{gg}$, $P_{gm}$ at 0.31\% maximum relative error; redshift-space monopoles at 0.59\%, quadrupoles at 0.89\%, hexadecapoles at 1.43\% using an absolute/maximum metric due to zero crossings). Technical details are described in a companion paper.
+One-loop perturbation theory (the next-to-leading-order correction beyond the linear approximation) extends the linear matter power spectrum to mildly nonlinear scales by computing correction terms from second- and third-order density fields, producing predictions for galaxy clustering that are essential for extracting cosmological parameters from spectroscopic surveys~\citep{damico2020, perko2016}. \claxpt implements this calculation in \jax: it takes a linear power spectrum and cosmological parameters as input, evaluates one-loop integrals via FFTLog decomposition (a fast algorithm that rewrites convolution integrals as sums of power laws, enabling analytic evaluation)~\citep{simonovic2018, fang2017}, and applies infrared resummation~\citep{senatore2015, vlah2015}. Infrared resummation corrects for the effect of large-scale bulk flows---coherent motions of matter on scales of hundreds of megaparsecs---which, if left unaccounted for, artificially smear the baryon acoustic oscillation (BAO) feature, an overdensity imprint left by primordial sound waves that serves as a standard ruler for measuring cosmic distances. The code returns nine validated output spectra (\cref{tab:accuracy}). The implementation is approximately 2,100 lines of \jax code, end-to-end differentiable, and validated to sub-percent accuracy against \classpt~\citep{chudaykin2021}. Technical details are described in a companion paper.
+
+\begin{table}[t]
+\caption{Accuracy of \claxpt vs.\ \classpt at Planck 2018 fiducial cosmology, $z=0.38$, $k < 0.3\;h/$Mpc. Hexadecapole uses $|\Delta|/\max(|\mathrm{ref}|)$ due to zero crossings.}
+\label{tab:accuracy}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Spectrum & Max error & Mean error \\
+\midrule
+$P_{mm}, P_{gg}, P_{gm}$ (real-space) & 0.31\% & 0.04\% \\
+Monopole ($\ell=0$) & 0.59\% & 0.40\% \\
+Quadrupole ($\ell=2$) & 0.89\% & 0.50\% \\
+Hexadecapole ($\ell=4$) & 1.43\% & 0.37\% \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{The Supervision Protocol}
 \label{sec:protocol}
