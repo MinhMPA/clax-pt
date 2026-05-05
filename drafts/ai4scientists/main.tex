@@ -90,6 +90,51 @@ Before any code was written, the physicist established a supervision protocol ad
 
 Two rules proved critical beyond this infrastructure. First, ``no fudge factors'': if a test failed at 0.2\% error, there was a real bug to find---the agent was forbidden from multiplying by a correction factor to make the test pass. Second, ``test at multiple parameter points'': the oracle compared not just at the fiducial Planck 2018 cosmology but at varied cosmological parameters, to prevent solutions that were calibrated to a single point. The supervision protocol---not individual code edits---was the physicist's primary contribution to the project.
 
+% ===========================================================================
+\section{Bug Taxonomy: The Autonomy Spectrum}
+\label{sec:bugs}
+
+We documented 14 bugs over 57 agent sessions and classified each by whether autonomous resolution was possible. The taxonomy that emerged is not a clean binary---it is a spectrum ranging from bugs the agent resolved in minutes to bugs that resisted weeks of autonomous effort and required human physics judgment to diagnose.
+
+\subsection{Autonomous Bugs (11 of 14)}
+\label{sec:autonomous}
+
+The agent resolved 11 bugs without human intervention by iterating against the oracle test suite. These fell into three categories. First, convention and unit errors: the FFTLog matrix $M_{22}$ required Hermitian rather than symmetric packing (bug 1), LAPACK column-major ordering differed from the row-major layout the agent initially produced (bug 2), and a spurious $h^3$ factor multiplied all bias functions (bug 5). Second, algorithm implementation errors: a discrete sine transform grid used linear rather than logarithmic spacing (bug 3), odd/even spline interpolation for BAO wiggle separation used the wrong parity assignment (bug 4), and three RSD kernel matrices were incomplete (bugs 7--9). Third, numerical coefficient errors in UV counterterms required matching specific rational prefactors from the 14,000-line Fortran reference source.
+
+In all 11 cases, the pattern was the same: the oracle test produced a clear numerical discrepancy, the agent compared intermediate quantities against reference data to localize the error, and the fix was a direct transcription correction. The agent's competence at this class of bug was high---given a well-specified oracle and access to the reference source code, it could systematically narrow the search space and converge on the correct implementation.
+
+\subsection{Case Study: The Accuracy Wall}
+\label{sec:wall}
+
+After the first 24 sessions resolved bugs 1--9, all three real-space power spectra passed at sub-percent accuracy. The six redshift-space distortion (RSD) multipoles---monopole, quadrupole, and hexadecapole for both matter and galaxies---did not. Errors ranged from 8\% to 86\% depending on the multipole and varied erratically as the agent adjusted individual terms.
+
+Over the next 33 sessions (sessions 24--56 of 57 total), the agent attempted to fix the RSD multipoles within the existing code architecture. This architecture computed analytic Legendre projections of the one-loop integrands: for each multipole $\ell$ and each component (velocity-velocity, velocity-density, density-density), a pre-derived kernel matrix encoded the angular projection. The approach is correct when the infrared resummation factor---the exponential damping that resums bulk flows at baryon acoustic oscillation (BAO) scales---is isotropic, meaning it depends only on wavenumber $k$ and not on the angle $\mu$ between the wavevector and the line of sight.
+
+The agent's attempts during these 33 sessions were coherent and methodical within this architecture. It adjusted rational kernel coefficients to match the reference source. It added missing angular terms. It swapped quadrature rules for the radial integrals. It compared intermediate matrix elements against the Fortran code term by term. Each fix improved one multipole while degrading another. The error surface was non-convex within this model: no combination of coefficient adjustments could make all six multipoles pass simultaneously, because the architecture itself was structurally incompatible with the physics.
+
+The physicist diagnosed the structural issue by recognizing what the agent could not: the BAO damping in redshift space is \emph{anisotropic}. Peculiar velocities along the line of sight enhance the displacement field, making the damping factor $\Sigma^2_\mathrm{tot}(\mu) = (1+f(2+f)\mu^2)\sigma^2_v + f^2\mu^2(\mu^2 - 1)\sigma^2_\mathrm{BAO}$ an explicit function of $\mu$. This $\mu$-dependent exponential cannot be absorbed into a polynomial kernel matrix---it couples to the RSD Kaiser factor $(1+f\mu^2)^2$ in a way that no finite set of pre-computed analytic projections can represent exactly.
+
+The physicist proposed a redesign: abandon per-multipole analytic kernels entirely, assemble the full anisotropic power spectrum $P(k,\mu)$ at each of $N$ Gauss--Legendre quadrature nodes in $\mu$, and integrate numerically against Legendre polynomials to extract multipoles. The agent implemented this redesign in a single session. All six RSD multipoles passed immediately, with errors dropping from 8--86\% to below 1\%.
+
+Why could the agent not find this itself? Two factors conspired. First, the \classpt reference source code that the agent was reading implements the non-Alcock--Paczy\'nski (non-AP) branch, which uses isotropic damping and analytic projections---exactly the architecture the agent had implemented. The correct formula exists in the AP branch, a different code path that the agent never consulted because the test configuration did not use AP corrections. Second, recognizing that the architecture is wrong (rather than merely mis-parameterized) requires understanding the physics of anisotropic BAO damping---specifically, that the $\mu$-dependence of $\Sigma^2_\mathrm{tot}$ makes the exponential non-polynomial in $\mu$. This is a judgment about physical structure, not a numerical comparison.
+
+\subsection{Case Study: The Fudge Factor}
+\label{sec:fudge}
+
+After the Gauss--Legendre redesign, seven of nine spectra passed. Two quadrupole spectra ($P_{mm,\ell=2}$ and $P_{gg,\ell=2}$) failed at BAO peak scales with errors of 1.4\% and 1.7\% respectively. The agent traced the discrepancy to the tree-level power spectrum, which uses the resummed form $P_\mathrm{tree}(k) = P_\mathrm{nw}(k) + e^{-\Sigma^2 k^2}(1 + \Sigma^2 k^2)\,P_\mathrm{w}(k)$, where $P_\mathrm{nw}$ and $P_\mathrm{w}$ are the no-wiggle and wiggle components, and $\Sigma^2$ is the BAO damping scale.
+
+The agent then grid-searched a scalar correction parameter $\alpha \in [0,1]$ multiplying the $(1+\Sigma^2 k^2)$ counter-term, and found that $\alpha = 0.27$ minimized the worst-case error to below 1\% across all nine spectra simultaneously. The agent committed this fix with a passing test suite.
+
+This solution is wrong, despite passing every oracle test. The value $\alpha = 0.27$ has no physical derivation. It is not a parameter in \classpt. It is not derived from any perturbation theory calculation. It is a numerical calibration to the fiducial Planck 2018 cosmology at a single redshift. Changing the baryon density $\omega_b$, the cold dark matter density $\omega_{cdm}$, or the effective redshift would shift the BAO peak amplitude, and $\alpha = 0.27$ would produce predictions that are wrong by an amount invisible to the existing test suite---because the test suite only checks the fiducial cosmology.
+
+The physicist diagnosed the fudge factor by asking a question the agent could not formulate: ``Does $\alpha = 0.27$ correspond to any parameter in the \classpt source code?'' The agent searched the reference implementation and confirmed: no such parameter exists. The physicist then pointed to an independent \jax implementation (\texttt{ps\_1loop\_jax}) that computes the same spectra without any scalar correction, using the formula
+\begin{equation}
+P_\mathrm{tree}(k,\mu) = Z_1^2(\mu)\left[P_\mathrm{nw}(k) + e^{-\Sigma^2_\mathrm{tot}(\mu)\,k^2}\left(1 + \Sigma^2_\mathrm{tot}(\mu)\,k^2\right)P_\mathrm{w}(k)\right],
+\end{equation}
+where $\Sigma^2_\mathrm{tot}(\mu)$ is the same anisotropic damping factor from the Gauss--Legendre loop, computed at each $\mu$-node. The fix was to move the tree-level computation inside the existing quadrature loop---three lines of code, replacing the committed fudge factor with the correct anisotropic formula. After this fix, all nine spectra passed with zero tuned parameters.
+
+The fudge factor illustrates a failure mode specific to oracle-tested scientific software: a numerically adequate but physically meaningless solution that passes all existing tests. The agent cannot distinguish between ``this works because it is correct'' and ``this works because it is calibrated to the test data.'' The physicist could, because the physicist knew that $\alpha = 0.27$ must correspond to \emph{something} in the theory---and when it corresponded to nothing, the solution was suspect regardless of its numerical performance.
+
 \bibliography{references}
 \bibliographystyle{icml2026}
 
