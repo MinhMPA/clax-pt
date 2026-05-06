@@ -2265,8 +2265,21 @@ def _matter_delta_m_single_k_impl(
     # so we integrate to the full ``bg.conformal_age``. The 0.999 safety
     # margin used elsewhere costs ~0.33% in ``P(k)`` via linear growth over
     # the missed ~14 Mpc; it is unnecessary for matter power and removed.
-    # ``stop_gradient`` keeps the t1 coordinate non-differentiable for AD.
-    tau_end = jax.lax.stop_gradient(bg.conformal_age)
+    #
+    # Why ``stop_gradient`` on the integration boundary, and the Taylor
+    # correction below: ``RecursiveCheckpointAdjoint`` + diffrax's
+    # ``PIDController`` cannot reverse-mode AD through a traced ``t1`` —
+    # the controller marks its accepted-step factor as ``nondifferentiable``
+    # and JAX raises ``RuntimeError: Unexpected tangent`` if anything in the
+    # adjoint solve depends on ``t1``. We therefore freeze ``t1`` for the
+    # solve, then reintroduce the
+    #     dδ_m/dτ_end · dτ_end/dparams
+    # contribution analytically via a first-order Taylor expansion around the
+    # frozen endpoint. The expansion is exact at fiducial params (where
+    # ``tau_traced − tau_frozen`` is identically zero), so ``jax.grad`` /
+    # ``jax.jvp`` evaluated at fiducial pick up the correct linear coefficient.
+    tau_traced = bg.conformal_age
+    tau_end = jax.lax.stop_gradient(tau_traced)
     y0 = _adiabatic_ic(k, tau_ini, bg, params, idx, n_eq, args_ncdm=args_ncdm)
     ode_args = (k, bg, th, params, idx, l_max_g, l_max_pol, l_max_ur,
                 ncdmfa_mode_code, ncdmfa_trigger,
@@ -2286,12 +2299,29 @@ def _matter_delta_m_single_k_impl(
         max_steps=prec.ode_max_steps,
         args=ode_args,
     )
-    return _extract_delta_m(
-        sol.ys[-1], k, tau_end, bg, idx,
-        q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
-        ncdmfa_mode_code=ncdmfa_mode_code,
-        ncdmfa_trigger=ncdmfa_trigger,
+    y_final = sol.ys[-1]
+
+    # Recover the dτ_end gradient sacrificed by ``stop_gradient`` above.
+    # δ_m(τ_traced) ≈ δ_m(τ_end) + (dδ_m/dτ)|_{τ_end} · (τ_traced − τ_end)
+    # where dy/dτ at the endpoint is the ODE RHS (carries full param-tracing
+    # via ode_args), and dδ_m/dτ also includes the explicit τ-dependence in
+    # ρ_b(τ), ρ_cdm(τ), ρ_ncdm(τ) inside ``_extract_delta_m``.
+    dy_dtau = _perturbation_rhs(tau_end, y_final, ode_args)
+
+    def _extract(y, tau):
+        return _extract_delta_m(
+            y, k, tau, bg, idx,
+            q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
+            ncdmfa_mode_code=ncdmfa_mode_code,
+            ncdmfa_trigger=ncdmfa_trigger,
+        )
+
+    delta_m_frozen, ddelta_m_dtau = jax.jvp(
+        _extract,
+        (y_final, tau_end),
+        (dy_dtau, jnp.ones_like(tau_end)),
     )
+    return delta_m_frozen + ddelta_m_dtau * (tau_traced - tau_end)
 
 
 _matter_delta_m_single_k_impl = functools.partial(jax.jit, static_argnums=(1, 4))(
