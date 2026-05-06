@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/clax-pt_logo.png" alt="clax-pt" width="360"/>
+  <img src="assets/clax-pt_logo.png" alt="clax-pt" width="100%"/>
 </p>
 
-# clax
+# clax-pt
 
 **A differentiable cosmological Boltzmann solver in JAX.**
 
@@ -12,7 +12,7 @@ This codebase was written entirely by [Claude Code](https://docs.anthropic.com/e
 
 ## Overview
 
-clax solves the coupled Einstein-Boltzmann equations for cosmological perturbations from first principles: background cosmology, hydrogen recombination, the full photon-baryon-neutrino Boltzmann hierarchy in synchronous gauge, line-of-sight integration for CMB angular power spectra, HaloFit for nonlinear matter power, gravitational lensing, and a shooting method for theta_s parametrization. The entire pipeline -- from cosmological parameters to P(k), C_l^TT/EE/TE/BB, and lensed C_l -- is end-to-end differentiable via JAX automatic differentiation.
+clax-pt solves the coupled Einstein-Boltzmann equations for cosmological perturbations from first principles: background cosmology, hydrogen recombination, the full photon-baryon-neutrino Boltzmann hierarchy in synchronous gauge, line-of-sight integration for CMB angular power spectra, HaloFit for nonlinear matter power, gravitational lensing, and a shooting method for theta_s parametrization. The entire pipeline -- from cosmological parameters to P(k), C_l^TT/EE/TE/BB, and lensed C_l -- is end-to-end differentiable via JAX automatic differentiation.
 
 The goal is a differentiable alternative to [CLASS](https://github.com/lesgourg/class_public) that enables gradient-based cosmological inference (HMC, variational methods) on CMB and large-scale structure data.
 
@@ -198,8 +198,8 @@ Requires Python >= 3.10.
 pip install jax jaxlib diffrax equinox jaxtyping
 
 # Clone and install
-git clone https://github.com/smsharma/clax.git
-cd clax
+git clone https://github.com/MinhMPA/clax-pt.git
+cd clax-pt
 pip install -e .
 
 # Run tests
@@ -238,7 +238,7 @@ CosmoParams --> background --> thermodynamics --> perturbations --> primordial
 ### Choosing an adjoint mode
 
 `PrecisionParams.ode_adjoint` controls Diffrax reverse-mode AD through the ODE solves.
-clax currently supports:
+clax-pt currently supports:
 
 - `"recursive_checkpoint"`: production default and recommended choice
 - `"direct"`: optional alternate reverse pass for diagnostics or environment-specific benchmarking
