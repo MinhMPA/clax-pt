@@ -1,4 +1,4 @@
-\begin{thebibliography}{10}
+\begin{thebibliography}{13}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -31,6 +31,25 @@ Fang, X., Blazek, J.~A., McEwen, J.~E., and Hirata, C.~M.
 \newblock {FAST-PT II}: an algorithm to calculate convolution integrals of
   general tensor quantities in cosmological perturbation theory.
 \newblock \emph{JCAP}, 2017\penalty0 (02):\penalty0 030, 2017.
+
+\bibitem[Jumper et~al.(2021)]{jumper2021}
+Jumper, J. et~al.
+\newblock Highly accurate protein structure prediction with {AlphaFold}.
+\newblock \emph{Nature}, 596:\penalty0 583--589, 2021.
+\newblock \doi{10.1038/s41586-021-03819-2}.
+
+\bibitem[Krakovna et~al.(2020)Krakovna, Uesato, Mikulik, Rahtz, Everitt, Kumar,
+  Koop, Lefrancq, and Legg]{krakovna2020}
+Krakovna, V., Uesato, J., Mikulik, V., Rahtz, M., Everitt, T., Kumar, R., Koop,
+  Z., Lefrancq, A., and Legg, S.
+\newblock Specification gaming: the flip side of {AI} ingenuity.
+\newblock DeepMind Blog, 2020.
+
+\bibitem[Merchant et~al.(2023)]{merchant2023}
+Merchant, A. et~al.
+\newblock Scaling deep learning for materials discovery.
+\newblock \emph{Nature}, 624:\penalty0 80--85, 2023.
+\newblock \doi{10.1038/s41586-023-06735-9}.
 
 \bibitem[Perko et~al.(2016)Perko, Senatore, Jennings, and Wechsler]{perko2016}
 Perko, A., Senatore, L., Jennings, E., and Wechsler, R.~H.
