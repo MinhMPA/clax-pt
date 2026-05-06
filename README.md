@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/clax-pt_logo.png" alt="clax-pt" width="360"/>
+</p>
+
 # clax
 
 **A differentiable cosmological Boltzmann solver in JAX.**
