@@ -9,6 +9,10 @@ are printed as side effects of jax.debug.print inside perturbations.py.
 Usage (from /lustre/work/n2minh/clax):
     python scripts/profile_ode_steps.py 2>&1 | tee profile_steps_out.txt
 """
+import os
+import sys
+sys.path.insert(0, ".")
+
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
