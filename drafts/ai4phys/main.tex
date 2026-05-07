@@ -56,11 +56,11 @@
 % ===========================================================================
 \begin{abstract}
 Joint analyses of cosmic microwave background (CMB) and galaxy survey data increasingly rely on gradient-based sampling, yet no existing code computes both CMB angular power spectra and galaxy power spectrum multipoles from first principles with exact automatic differentiation on GPU.
-We present \clax and \claxpt---\jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed by physicist-supervised, oracle-guided AI agents that iterate against \class and \classpt reference outputs and source codes.
-Agents autonomously resolved ${\sim}90\%$ of documented bugs; the remaining ${\sim}10\%$ required human physics judgment, falling into two failure modes: \emph{architectural incoherence} (code structure incompatible with the target physics) and \emph{oracle-passing fudge factors} (a numerical patch satisfying all tests but encoding no physical model).
-\clax achieves ${<}\,0.2\%$ lensed CMB accuracy at $\ell \leq 2000$; \claxpt achieves ${<}\,0.7\%$ accuracy for galaxy power spectrum monopoles and quadrupoles at $k < 0.3\;h/$Mpc.
-Automatic-differentiation gradients agree with finite differences to $0.15\%$ on average.
-We propose three principles for structuring physicist--agent collaboration in scientific software development and compare against concurrent differentiable codes \discoeb, \abcmb, and \textsc{SymBoltz.jl}.
+We address this gap with \clax and \claxpt---\jax reimplementations of the \class Boltzmann solver and its one-loop perturbation theory extension \classpt---developed by physicist-supervised AI agents iterating against \class and \classpt as oracles.
+The agents resolved roughly 90\% of the 40 documented bugs without human input.
+The remaining 10\% needed human physics judgment and clustered around two failure modes: code architectures structurally incompatible with the target physics, and oracle-passing fudge factors that match the reference at one cosmology but encode no physical model.
+\clax matches \class to ${<}\,0.2\%$ on lensed CMB at $\ell \leq 2000$; \claxpt matches \classpt to ${<}\,0.7\%$ on the galaxy power spectrum monopole and quadrupole at $k < 0.3\;h/$Mpc, with automatic-differentiation gradients agreeing with finite differences to $0.15\%$ on average.
+We extract three principles for physicist--agent collaboration in scientific code development and position our codes alongside concurrent differentiable Boltzmann solvers (\discoeb, \abcmb, \textsc{SymBoltz.jl}).
 \end{abstract}
 
 % ===========================================================================
@@ -69,7 +69,7 @@ We propose three principles for structuring physicist--agent collaboration in sc
 
 The standard model of cosmology is tested by comparing theoretical predictions against observations of the cosmic microwave background (CMB) angular power spectra from CMB experiments~\citep[e.g.,][]{Planck:2018vyg} and of the galaxy power spectrum multipoles from galaxy redshift surveys~\citep[e.g.,][]{DESI:2024jxi,DESI:2024hhd}.
 This comparison increasingly benefits from gradient-based inference: forecasts require likelihood derivatives, Hamiltonian Monte Carlo analyses require posterior derivatives.
-Gradient-based inference libraries such as \textsc{NumPyro} \citep{phan2019} and \textsc{BlackJAX} \citep{cabezas2024} but the missing ingredient is a differentiable cosmological forward model that can be passed to them.
+Gradient-based inference libraries such as \textsc{NumPyro} \citep{phan2019} and \textsc{BlackJAX} \citep{cabezas2024} provide the sampling machinery; what is missing is a differentiable cosmological forward model to feed them.
 
 Standard Boltzmann solvers for CMB angular power spectra, e.g., \class \citep{lesgourgues2011}, and one-loop perturbation theory codes for galaxy power spectrum multipoles, e.g., \classpt, are written in C (or Fortran), are not differentiable, and are not GPU-native.
 Several \jax implementations exist but cover only subsets of the problem: \discoeb \citep{hahn2023} solves the linear Einstein--Boltzmann equations to compute the linear matter power spectrum $\Pk$ but not CMB angular power spectra or galaxy power spectrum multipoles; \abcmb \citep{zhou2026} implements the CMB pipeline including lensing and massive neutrinos but does not include perturbation theory for galaxy surveys; \textsc{jax-cosmo} \citep{lemos2023} computes the nonlinear matter power spectrum via fitting formulae but does not solve the full Boltzmann hierarchy; and \textsc{SymBoltz.jl} \citep{sletmoen2026} provides a full Boltzmann solver in Julia but without GPU support.
@@ -330,7 +330,7 @@ Notably, post-development improvement sessions continued to surface new bugs in 
 
 \subsection{Principles for human--agent collaboration}
 
-We distill three principles from the empirical data:
+Three patterns recur across the bug record:
 
 \textbf{P1: Oracle testing verifies \emph{what}, not \emph{why}.}
 An oracle compares numerical values at a reference parameter point.
@@ -352,11 +352,11 @@ Agents fail at recognizing that an architectural assumption is inconsistent with
 
 \subsection{Implications for future AI-assisted scientific software}
 
-The balance between oracle-transcribed physics ($\sim$90\% of bugs, fully autonomous), autonomous engineering for differentiability, and physicist-directed corrections ($\sim$10\%, requiring human judgment) suggests a practical division of labor for future AI-assisted scientific code development.
-The bulk of implementation work---transcribing equations from reference codes, implementing standard algorithms---is reliably handled by AI agents with oracle feedback.
-Engineering decisions specific to the target framework (here, \jax differentiability) are also within agent capability, provided the agent has access to relevant reference implementations (here, \discoeb for the adaptive step-size controller and Rosenbrock solver).
-The irreducible human contribution is concentrated in a small number of high-impact decisions where the correct choice requires understanding the physics beyond what any oracle test can verify.
-This concentration suggests that physicist supervision can be sparse but must be available at critical junctures, and that the design of protocols for triggering human review is as important as the capabilities of the agent itself.
+The 90/10 split between autonomous and human-required bugs maps onto a workable division of labor.
+Agents reliably handle implementation work: transcribing equations from a reference code, fixing convention errors, finding the term that disagrees with the oracle.
+They also handle most of the framework-specific engineering---here, adapting standard algorithms to \jax and writing custom \texttt{vjp}/\texttt{jvp} rules for non-differentiable subroutines---provided that a relevant reference implementation exists (here, \discoeb supplied the adaptive step-size controller and Rosenbrock solver).
+Human input concentrates in a small number of high-stakes decisions where the right answer cannot be read off any oracle test: recognizing that an architecture is wrong, refusing a numerical patch that has no physical meaning, choosing which approximation to keep and which to drop.
+The implication is not that physicist supervision must be constant, but that the protocols for triggering it must be deliberately designed---and that getting those protocols right matters at least as much as the agent's raw capability.
 
 % ===========================================================================
 \section{Related Work}
@@ -385,13 +385,13 @@ Our work identifies semantic correctness---the requirement that a passing numeri
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have developed \clax and \claxpt---fully differentiable \jax reimplementations of the \class and \classpt Boltzmann codes---using oracle-guided agentic development.
-The codes achieve $< 0.2\%$ lensed CMB accuracy at $\ell \leq 2000$, sub-percent primordial $\Cl^{BB}$ at $\ell \leq 200$, and $< 0.7\%$ galaxy power spectrum accuracy for monopole and quadrupole spectra, with automatic differentiation gradients verified to $0.15\%$.
-Empirically, AI agents resolved $\sim$90\% of implementation bugs autonomously.
-The remaining $\sim$10\% required human physics judgment: recognizing structural mismatches between an architecture and its target physics, and detecting numerically effective but physically unmotivated patches.
+\clax and \claxpt provide the first \jax pipeline that propagates cosmological parameters through both CMB angular power spectra and one-loop galaxy power spectrum multipoles with exact reverse-mode automatic differentiation on GPU.
+The codes match \class to ${<}\,0.2\%$ on lensed CMB at $\ell \leq 2000$ and \classpt to ${<}\,0.7\%$ on galaxy multipoles, with AD gradients accurate to $0.15\%$ versus finite differences.
 
-These findings suggest a practical framework for AI-assisted scientific code development: agents operate autonomously in unsupervised mode for implementation work, but human scientists remain in the loop as architectural and physical reviewers, intervening proactively when oracle feedback stalls or when a numerical patch lacks physical derivation.
-The codes will be made publicly available.
+The development record is also informative.
+Agents resolved roughly 90\% of bugs against the oracle without human help; the remaining 10\% needed a physicist---to recognize a wrong architecture, or to refuse a numerical patch that passed every test but described no physics.
+For AI-assisted scientific software, the lesson is narrower than ``keep humans in the loop'': implementation can run unsupervised, but the protocol that decides \emph{when} to call the physicist back is what determines whether the resulting code is trustworthy.
+The codes and the development log will be made publicly available.
 
 % ===========================================================================
 \bibliography{references}
