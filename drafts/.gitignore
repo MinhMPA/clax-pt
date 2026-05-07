@@ -16,3 +16,6 @@
 
 # Review workspace
 review_results/
+
+# Paper-audit polish state
+.polish-state/
