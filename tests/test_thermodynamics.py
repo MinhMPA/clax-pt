@@ -148,3 +148,40 @@ class TestThermoGradients:
         assert rel < 0.01, (
             f"dkappa_dot_dloga(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
         )
+
+
+def test_find_z_reio_forward_mode_matches_fd():
+    """jax.jvp through z_reio(h) is finite and matches centred FD to <1%.
+
+    RED before converting _find_z_reio from custom_vjp to custom_jvp
+    (raises TypeError: can't apply forward-mode autodiff to a custom_vjp function).
+    GREEN after conversion.
+    """
+    import dataclasses
+
+    PREC_JVP = PrecisionParams(
+        bg_n_points=400, ncdm_bg_n_points=200, bg_tol=1e-8,
+        th_n_points=10000, th_z_max=5e3,
+        ode_adjoint="direct",
+    )
+    params = CosmoParams()
+
+    def z_reio_of_h(h):
+        p = dataclasses.replace(params, h=h)
+        bg_ = background_solve(p, PREC_JVP)
+        th_ = thermodynamics_solve(p, PREC_JVP, bg_)
+        return th_.z_reio
+
+    # Forward-mode AD
+    primal, tangent = jax.jvp(z_reio_of_h, (params.h,), (jnp.asarray(1.0),))
+    primal.block_until_ready()
+
+    assert jnp.isfinite(tangent), f"jvp returned non-finite tangent: {tangent}"
+
+    # Centred FD for ground truth
+    eps = 1e-3
+    fd = (z_reio_of_h(params.h + eps) - z_reio_of_h(params.h - eps)) / (2 * eps)
+    rel = abs(float(tangent) - float(fd)) / (abs(float(fd)) + 1e-30)
+    assert rel < 0.01, (
+        f"jvp(z_reio, h)={float(tangent):.6e}  FD={float(fd):.6e}  rel={rel:.2%}"
+    )
