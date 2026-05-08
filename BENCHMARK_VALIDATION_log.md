@@ -277,3 +277,87 @@ The `benchmark_gradients.py` failure is **not fixed**. This requires investigati
 | `38c7660` | `slurm: igpu V100 sbatch (validation + optional timing)` |
 | `219d0ff` | `fix: replace np.trapz with np.trapezoid for NumPy 2.0 compatibility` |
 | `8a2438b` | `fix: use stop_gradient + _ir_precomputed to enable EPT jax.grad` |
+| `62baaa2` | `fix(perturbations): recover dtau_end gradient via Taylor correction` |
+| `d221906` | `docs(plan): clax AD correctness — PR-A + PR-B implementation plan` |
+| `6c9d933` | `diags: AD investigation scripts (May 2026)` |
+| `845f17e` | `chore: add ODE step profiling instrumentation and sbatch` |
+| `9d1ce09` | `fix: add sys.path.insert(0, ".") to profile_ode_steps.py` |
+
+---
+
+## Task A2 — AD Correctness Verification (Job 5697) — INCONCLUSIVE
+
+**Date:** 2026-05-06
+**Script:** `slurm/verify-pk-grad-v100.sbatch`
+**Job:** 5697 on igpu01
+**Output:** `/lustre/work/n2minh/std/clax/benchmark/clax-pk-grad-verify.out.5697`
+
+### What happened
+
+The job ran on the **wrong branch**. The sbatch script attempted:
+```bash
+git fetch origin && git checkout fix/pk_tau_end && git pull origin fix/pk_tau_end
+```
+but igpu compute nodes have **no SSH key** — both `git fetch` and `git checkout` failed with `Permission denied (publickey)`. The job continued on the lustre clone's current branch (`benchmark/clax-pt @ 8a2438b`), which is **5 commits behind** the Taylor correction (`62baaa2`).
+
+The stderr confirms:
+```
+git@github.com: Permission denied (publickey).
+error: pathspec 'fix/pk_tau_end' did not match any file(s) known to git
+```
+
+### AD vs FD numbers (invalid — from unfixed code)
+
+Step 3 (rtol=1e-3):
+
+| Param | AD | FD | \|AD/FD-1\| | Status |
+|---|---|---|---|---|
+| h | -4,894 | -13,912 | **64.8%** | FAIL |
+| omega_b | -17,064 | -105,290 | **83.8%** | FAIL |
+| omega_cdm | +213,990 | +122,410 | **74.8%** | FAIL |
+| ln10A_s | +10,526 | +10,526 | 0.0% | PASS |
+| n_s | +7,296 | +7,296 | 0.0% | PASS |
+
+Step 4 (rtol=1e-7): same pattern (h 69.2%, omega_b 89.5%, omega_cdm 80.6%).
+
+These numbers **do not reflect PR #16's Taylor correction** — they are the pre-fix baseline.
+
+### pytest --fast (also from unfixed branch)
+
+One pre-existing failure: `TestMassiveNu.test_pk_at_k005` — `max_steps` exceeded. Unrelated to the gradient fix; the ODE profiling track (tasks 4-6) addresses it.
+
+### Root cause — compute nodes cannot `git fetch`
+
+igpu compute nodes have no SSH agent forwarding and no deployed SSH key. Any `git fetch/pull/checkout` to `github.com` fails. **Never include remote git operations in sbatch scripts.**
+
+### Fix for resubmission
+
+1. On the **login node**, pre-checkout the target branch in the lustre clone:
+   ```bash
+   cd /lustre/work/n2minh/clax
+   git fetch origin
+   git checkout fix/pk_tau_end
+   git pull origin fix/pk_tau_end
+   ```
+2. Edit `slurm/verify-pk-grad-v100.sbatch`: **delete lines 33-37** (the `git fetch / git checkout / git pull` block).
+3. Resubmit:
+   ```bash
+   sbatch slurm/verify-pk-grad-v100.sbatch
+   ```
+
+### Expected results after Taylor correction
+
+At rtol=1e-3: h ~6.4%, omega_b ~8.9%, omega_cdm ~4.8% (all < 15% threshold)
+At rtol=1e-7: all three < 1.5% threshold
+
+### Current handoff state (2026-05-08)
+
+| Item | State |
+|---|---|
+| Taylor correction (`62baaa2`) | Present on `benchmark/clax-pt` and `fix/pk_tau_end`; both home and lustre clones at `9d1ce09` |
+| `verify-pk-grad-v100.sbatch` | Has git-ops bug — remove lines 33-37 before resubmitting |
+| `test_pk_gradients.py::TestPkScalarDensityGradients` | Only on `fix/pk_tau_end`; not on `benchmark/clax-pt` |
+| `TestMassiveNu` max_steps failure | Pre-existing; ODE profiling tasks 4-6 pending |
+| Task A2 | **NEEDS RESUBMISSION** on correct branch |
+| Task A3 (CHANGELOG entry for PR #16) | Not started; do on `fix/pk_tau_end` |
+| Tasks B1-B14 (forward-mode AD) | Not started; branch off `fix/pk_tau_end` as `feat/forward-mode-ad` |
