@@ -42,6 +42,7 @@ from clax.thermodynamics import thermodynamics_solve
 from clax.perturbations import perturbations_solve_mpk
 from clax.transfer import compute_pk_from_perturbations
 from clax.harmonic import compute_cls_all, compute_cls_all_fast
+from clax.ept import compute_ept_from_clax
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +81,7 @@ def _time_call(fn, *args, **kwargs):
     """Run fn(*args, **kwargs), block until ready, return (result, elapsed_s)."""
     t0 = time.perf_counter()
     result = fn(*args, **kwargs)
-    jax.block_until_ready(result)
+    jax.block_until_ready(jax.tree_util.tree_leaves(result))
     t1 = time.perf_counter()
     return result, (t1 - t0)
 
@@ -105,7 +106,6 @@ def _pk_table(params, prec):
 
 def _ept_full(params, prec_clax):
     """Full forward pipeline through EPT components."""
-    from clax.ept import compute_ept_from_clax
     bg = background_solve(params, prec_clax)
     th = thermodynamics_solve(params, prec_clax, bg)
     pt = perturbations_solve_mpk(params, prec_clax, bg, th)
