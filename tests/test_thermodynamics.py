@@ -149,6 +149,42 @@ class TestThermoGradients:
             f"dkappa_dot_dloga(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
         )
 
+    def test_kappa_dot_gradient_matches_fd_for_omega_b(self):
+        """AD gradient of kappa_dot_of_loga must not blow up from Friedmann scan."""
+        ad, fd = _thermo_ad_fd_pair(
+            "omega_b", lambda th: th.kappa_dot_of_loga.evaluate(jnp.array(-8.0))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, (
+            f"kappa_dot(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
+    def test_exp_m_kappa_gradient_matches_fd_for_omega_b(self):
+        """AD gradient of exp_m_kappa_of_loga must match FD at loga=-8."""
+        ad, fd = _thermo_ad_fd_pair(
+            "omega_b", lambda th: th.exp_m_kappa_of_loga.evaluate(jnp.array(-8.0))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.05, (
+            f"exp_m_kappa(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
+    def test_g_gradient_matches_fd_for_omega_b(self):
+        """AD gradient of g_of_loga (visibility) must match FD at loga=-8.
+
+        Tests at loga=-8 (early universe, x_e~const, kappa~0) where the
+        n_H_0 rescaling approximation is exact. Near recombination (loga~-7)
+        the approximation has 10-30% error from d(xe)/d(omega_b), but remains
+        finite versus the current 10^8x blowup.
+        """
+        ad, fd = _thermo_ad_fd_pair(
+            "omega_b", lambda th: th.g_of_loga.evaluate(jnp.array(-8.0))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, (
+            f"g(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
 
 def test_find_z_reio_forward_mode_matches_fd():
     """jax.jvp through z_reio(h) is finite and matches centred FD to <1%.
