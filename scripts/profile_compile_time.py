@@ -220,7 +220,7 @@ def profile_ept(name, prec):
 
     def _scalar_ept(p):
         result = _ept_full(p, prec)
-        return jnp.sum(result.p22.mm)
+        return jnp.sum(result.Pk_loop)
 
     grad_fn = jax.jit(jax.grad(_scalar_ept))
 
