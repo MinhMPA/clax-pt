@@ -117,59 +117,49 @@ def _ept_full(params, prec_clax):
 # ---------------------------------------------------------------------------
 
 def profile_forward(name, prec):
-    """Time bg, th, pt, hr stages (compile vs warm). Stage-wise JIT.
+    """Time bg, th, pt, hr stages (compile vs warm). Stage-isolated JIT.
 
-    For each stage we build a jitted function that takes only CosmoParams
-    (PrecisionParams is closed over as a static), call it once with FIDUCIAL
-    (compile+run), then with FIDUCIAL2 (run only).
+    Each JIT function receives the *output of the prior stage* as an explicit
+    argument rather than recomputing it internally.  This ensures each timed
+    call traces and compiles only its own stage, so timings are marginal (not
+    cumulative).
+
+    Call sequence:
+        bg_jit(p)            -> bg result
+        th_jit(p, bg)        -> th result   (bg already live, not retraced)
+        pt_jit(p, bg, th)    -> pt result
+        hr_jit(pt, p, bg)    -> C_l result
     """
-    print(f"\n[FORWARD] {name}", flush=True)
+    print(f"\n{'='*60}\n[FORWARD] {name}", flush=True)
+
+    bg_jit = jax.jit(lambda p: background_solve(p, prec))
+    th_jit = jax.jit(lambda p, bg: thermodynamics_solve(p, prec, bg))
+    pt_jit = jax.jit(lambda p, bg, th: perturbations_solve_mpk(p, prec, bg, th))
 
     # --- bg ---
-    @jax.jit
-    def _bg_jit(p):
-        return background_solve(p, prec)
-
-    bg1, t = _time_call(_bg_jit, FIDUCIAL)
+    bg1, t = _time_call(bg_jit, FIDUCIAL)
     _emit("bg_c1", name, t)
-    bg2, t = _time_call(_bg_jit, FIDUCIAL2)
+    bg2, t = _time_call(bg_jit, FIDUCIAL2)
     _emit("bg_c2", name, t)
 
-    # --- th ---
-    @jax.jit
-    def _th_jit(p):
-        bg = background_solve(p, prec)
-        return thermodynamics_solve(p, prec, bg)
-
-    th1, t = _time_call(_th_jit, FIDUCIAL)
+    # --- th — takes (p, bg) so only thermodynamics_solve is traced ---
+    th1, t = _time_call(th_jit, FIDUCIAL, bg1)
     _emit("th_c1", name, t)
-    th2, t = _time_call(_th_jit, FIDUCIAL2)
+    th2, t = _time_call(th_jit, FIDUCIAL2, bg2)
     _emit("th_c2", name, t)
 
     # --- pt ---
-    @jax.jit
-    def _pt_jit(p):
-        bg = background_solve(p, prec)
-        th = thermodynamics_solve(p, prec, bg)
-        return perturbations_solve_mpk(p, prec, bg, th)
-
-    pt1, t = _time_call(_pt_jit, FIDUCIAL)
+    pt1, t = _time_call(pt_jit, FIDUCIAL, bg1, th1)
     _emit("pt_c1", name, t)
-    pt2, t = _time_call(_pt_jit, FIDUCIAL2)
+    pt2, t = _time_call(pt_jit, FIDUCIAL2, bg2, th2)
     _emit("pt_c2", name, t)
 
-    # --- hr (harmonic / C_l) ---
+    # --- hr (harmonic / C_l) — separate JIT; dispatch depends on prec ---
     try:
-        @jax.jit
-        def _hr_jit(p):
-            bg = background_solve(p, prec)
-            th = thermodynamics_solve(p, prec, bg)
-            pt = perturbations_solve_mpk(p, prec, bg, th)
-            return _cls(pt, p, bg, prec)
-
-        cls1, t = _time_call(_hr_jit, FIDUCIAL)
+        hr_jit = jax.jit(lambda pt, p, bg: _cls(pt, p, bg, prec))
+        cls1, t = _time_call(hr_jit, pt1, FIDUCIAL, bg1)
         _emit("hr_c1", name, t)
-        cls2, t = _time_call(_hr_jit, FIDUCIAL2)
+        cls2, t = _time_call(hr_jit, pt2, FIDUCIAL2, bg2)
         _emit("hr_c2", name, t)
     except Exception as e:
         print(f"[HR_SKIP] {name}: {e}", flush=True)
