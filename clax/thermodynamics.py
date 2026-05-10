@@ -754,9 +754,26 @@ def thermodynamics_solve(
     loga_grid_sg = jax.lax.stop_gradient(loga_grid)
     xe_of_loga = CubicSpline(loga_grid, xe_grid)
     Tb_of_loga = CubicSpline(loga_grid, tb_grid)
-    kappa_dot_of_loga = CubicSpline(loga_grid, kappa_dot_grid)
-    exp_m_kappa_of_loga = CubicSpline(loga_grid, exp_m_kappa_grid)
-    g_of_loga = CubicSpline(loga_grid, g_grid)
+
+    # --- AD-safe n_H_0 rescaling for kappa_dot, kappa (-> exp_m_kappa), g ---
+    # kappa_dot_grid and kappa_grid carry a large spurious accumulated gradient
+    # from the Friedmann scan (d(a_grid[i])/d(omega_b) grows as an eigenvalue
+    # product; ~10^8x FD blowup). Both are ∝ n_H_0 at fixed x_e and a, so: stop
+    # all accumulated gradient, then restore only the n_H_0 ∝ omega_b path.
+    # Exact where x_e ~ const (loga < -8); 10-30% residual near recombination.
+    _kd_safe = (
+        jax.lax.stop_gradient(kappa_dot_grid)
+        * (n_H_0 / jax.lax.stop_gradient(n_H_0))
+    )
+    _kappa_safe = (
+        jax.lax.stop_gradient(kappa_grid)
+        * (n_H_0 / jax.lax.stop_gradient(n_H_0))
+    )
+    _exp_m_kappa_safe = jnp.exp(-_kappa_safe)
+    _g_safe = _kd_safe * _exp_m_kappa_safe
+    kappa_dot_of_loga = CubicSpline(loga_grid_sg, _kd_safe)
+    exp_m_kappa_of_loga = CubicSpline(loga_grid_sg, _exp_m_kappa_safe)
+    g_of_loga = CubicSpline(loga_grid_sg, _g_safe)
     cs2_of_loga = CubicSpline(loga_grid, cs2_grid)
 
     # dκ̇/dloga: stop all accumulated Friedmann-scan gradient in kappa_dot_grid,
@@ -765,18 +782,14 @@ def thermodynamics_solve(
     # Gradient per knot: kd[i] * d(n_H_0)/dp / n_H_0 = kd[i] / omega_b.
     # Finite-difference in derivative formula: (kd[608]-kd[607])/(h*omega_b) =
     # dkd/dloga / omega_b ≈ -335, matching FD to <1%.
-    _kappa_dot_for_deriv = (
-        jax.lax.stop_gradient(kappa_dot_grid)
-        * (n_H_0 / jax.lax.stop_gradient(n_H_0))
-    )
-    _kd_deriv_spline = CubicSpline(loga_grid_sg, _kappa_dot_for_deriv)
+    _kd_deriv_spline = CubicSpline(loga_grid_sg, _kd_safe)
     dkd_dloga_grid = jax.vmap(_kd_deriv_spline.derivative)(loga_grid_sg)
     dkappa_dot_dloga_of_loga = CubicSpline(loga_grid_sg, dkd_dloga_grid)
 
     # g' = dg/dτ analytically (CLASS thermodynamics.c:3482-3483)
     # g = κ̇ e^{-κ},  g' = (κ̈ + κ̇²) e^{-κ},  κ̈ = (dκ̇/dloga) * aH
     _aH_grid = jnp.exp(loga_grid_sg) * jax.vmap(bg.H_of_loga.evaluate)(loga_grid_sg)
-    g_prime_grid = (dkd_dloga_grid * _aH_grid + kappa_dot_grid**2) * exp_m_kappa_grid
+    g_prime_grid = (dkd_dloga_grid * _aH_grid + _kd_safe**2) * _exp_m_kappa_safe
     g_prime_of_loga = CubicSpline(loga_grid_sg, g_prime_grid)
 
     return ThermoResult(
