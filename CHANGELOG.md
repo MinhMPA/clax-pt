@@ -1,9 +1,29 @@
 # clax Development Progress
 
-## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline
+## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline + forward-mode AD
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
-C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
+C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
+`jax.jvp` (forward-mode AD) now works through the full pipeline.**
+
+### May 10, 2026: Forward-mode AD + stable thermodynamics gradients (PR-B + PR-C)
+
+**Three AD fixes making `jax.jvp` work end-to-end:**
+
+**PR-B (`feat/forward-mode-ad`)** — Forward-mode through `z_reio` and `theta_s`:
+- Converted `_find_z_reio` from `custom_vjp` to `custom_jvp` with IFT rule:
+  `z_reio_dot = -F_dot / dF_dz` where `F = tau_reio_model(z_reio) - tau_reio_target`.
+- Fixed inf-inf NaN in He C_He tangent at z~15 (`He_Boltz=exp(~500)`):
+  reformulated `C_He = (inv_A + Λ) / (inv_A + Λ + R_up)`.
+- Converted `shoot_fn` to `custom_jvp` with IFT rule `dh/dθ_s = 1/(dθ_s/dh)`.
+  Also restores reverse-mode via JAX transposition — existing tests unchanged.
+
+**PR-C (`fix/thermo-remaining-gradients`)** — Stable `omega_b` gradients for splines:
+- n_H_0 rescaling for `kappa_dot_of_loga`, `exp_m_kappa_of_loga`, `g_of_loga`.
+  Stops the ~10^8× FD blowup from the Friedmann-scan eigenvalue accumulation.
+  Exact where x_e~const (loga<-8); 10-30% residual near recombination (still finite).
+
+**Test results:** 10/10 thermo, 7/7 shooting, all 5 new gradient tests GREEN.
 
 ### May 3, 2026: C_l^phiphi API consolidation + z-aware Halofit injection (BREAKING)
 
