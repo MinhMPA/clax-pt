@@ -119,6 +119,35 @@ def _thermo_ad_fd_pair(param_name, quantity_fn):
     return ad, fd
 
 
+def _thermo_jvp_fd_pair(param_name, quantity_fn, eps=1e-3):
+    """Return (jax.jvp tangent, centred-FD gradient) of quantity_fn w.r.t. param_name."""
+    import dataclasses
+    # Forward-mode needs a direct adjoint through background_solve
+    # (RecursiveCheckpointAdjoint is reverse-mode only).
+    prec = dataclasses.replace(PREC, ode_adjoint="direct")
+
+    base = CosmoParams()
+    p0 = float(getattr(base, param_name))
+
+    def forward(pval):
+        p = dataclasses.replace(base, **{param_name: pval})
+        bg_ = background_solve(p, prec)
+        th_ = thermodynamics_solve(p, prec, bg_)
+        return quantity_fn(th_)
+
+    _, tangent = jax.jvp(forward, (jnp.array(p0),), (jnp.array(1.0),))
+
+    p_hi = dataclasses.replace(base, **{param_name: p0 * (1 + eps)})
+    p_lo = dataclasses.replace(base, **{param_name: p0 * (1 - eps)})
+    bg_hi = background_solve(p_hi, prec)
+    bg_lo = background_solve(p_lo, prec)
+    th_hi = thermodynamics_solve(p_hi, prec, bg_hi)
+    th_lo = thermodynamics_solve(p_lo, prec, bg_lo)
+    fd = float((quantity_fn(th_hi) - quantity_fn(th_lo)) / (2 * p0 * eps))
+
+    return float(tangent), fd
+
+
 class TestThermoGradients:
     """Tests thermodynamics gradient behavior at the repaired opacity branches."""
 
@@ -221,3 +250,62 @@ def test_find_z_reio_forward_mode_matches_fd():
     assert rel < 0.01, (
         f"jvp(z_reio, h)={float(tangent):.6e}  FD={float(fd):.6e}  rel={rel:.2%}"
     )
+
+
+_XFAIL_JVP = pytest.mark.xfail(
+    strict=False,
+    raises=TypeError,
+    reason=(
+        "Full-pipeline jax.jvp blocked on this branch by two custom_vjp barriers: "
+        "(1) background_solve uses RecursiveCheckpointAdjoint; "
+        "(2) _find_z_reio still uses custom_vjp. "
+        "Tests will be GREEN after PR-B (feat/forward-mode-ad) is merged and "
+        "background_solve passes prec.ode_adjoint='direct' to solve_nonstiff."
+    ),
+)
+
+
+class TestThermoForwardModeAD:
+    """Forward-mode AD (jax.jvp) through kappa_dot, exp_m_kappa, g splines.
+
+    Complements TestThermoGradients (reverse-mode). Confirms that:
+    1. jax.jvp runs without TypeError through the n_H_0-rescaled splines
+    2. Tangents are finite (not 10^8x blown up)
+    3. Tangents match centred FD to < 1% at loga=-8 (where x_e~const, rescaling exact)
+
+    Marked xfail on this branch because the full pipeline forward-mode requires:
+    - PR-B: _find_z_reio converted from custom_vjp to custom_jvp (IFT rule)
+    - background_solve to pass prec.ode_adjoint to solve_nonstiff
+    The n_H_0 rescaling here (PR-C) is the remaining piece; xfail becomes xpass
+    once both upstream fixes are merged.
+    """
+
+    @_XFAIL_JVP
+    def test_kappa_dot_forward_mode_matches_fd(self):
+        """jax.jvp(kappa_dot, omega_b) is finite and matches FD to <1%."""
+        jvp_val, fd = _thermo_jvp_fd_pair(
+            "omega_b", lambda th: th.kappa_dot_of_loga.evaluate(jnp.array(-8.0))
+        )
+        assert jnp.isfinite(jvp_val), f"jvp(kappa_dot) non-finite: {jvp_val}"
+        rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, f"kappa_dot jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
+
+    @_XFAIL_JVP
+    def test_exp_m_kappa_forward_mode_matches_fd(self):
+        """jax.jvp(exp_m_kappa, omega_b) is finite and matches FD to <5%."""
+        jvp_val, fd = _thermo_jvp_fd_pair(
+            "omega_b", lambda th: th.exp_m_kappa_of_loga.evaluate(jnp.array(-8.0))
+        )
+        assert jnp.isfinite(jvp_val), f"jvp(exp_m_kappa) non-finite: {jvp_val}"
+        rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.05, f"exp_m_kappa jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
+
+    @_XFAIL_JVP
+    def test_g_forward_mode_matches_fd(self):
+        """jax.jvp(g, omega_b) is finite and matches FD to <1%."""
+        jvp_val, fd = _thermo_jvp_fd_pair(
+            "omega_b", lambda th: th.g_of_loga.evaluate(jnp.array(-8.0))
+        )
+        assert jnp.isfinite(jvp_val), f"jvp(g) non-finite: {jvp_val}"
+        rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, f"g jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
