@@ -12,14 +12,13 @@ Task B7: completed — branch pushed to origin/feat/forward-mode-ad
   BLOCKER: gh CLI not available on this node; PR must be opened manually.
   PR URL: https://github.com/MinhMPA/clax-pt/pull/new/feat/forward-mode-ad
   PR title: "fix: forward-mode AD for z_reio and shoot_fn"
-  PR body: see below in this file.
 
 ## PR-C (fix/thermo-remaining-gradients)
 
 Task C4: completed — 9c6af5f (RED tests: kappa_dot, exp_m_kappa, g gradient regressions)
 Task C5: completed — 0a29a6d (_kd_safe rescaling for kappa_dot_of_loga + g_prime_grid)
 Task C6: completed — 0a29a6d (_kappa_safe rescaling for exp_m_kappa_of_loga and g_of_loga)
-Task C7: in progress — regression gate running (bg+shoot+thermo, ~30-40 min)
+Task C7: in progress — regression gate running (bg+shoot+thermo); push + PR pending
   BLOCKER: gh CLI not available; PR must be opened manually after gate passes.
   PR base: fix/kd-dloga-gradient
   PR URL: https://github.com/MinhMPA/clax-pt/pull/new/fix/thermo-remaining-gradients
@@ -27,7 +26,9 @@ Task C7: in progress — regression gate running (bg+shoot+thermo, ~30-40 min)
 
 ---
 
-## PR body (PR-B, feat/forward-mode-ad)
+## PR bodies for manual creation
+
+### PR-B (feat/forward-mode-ad → main)
 
 Converts two custom_vjp functions to custom_jvp so jax.jvp works through the full pipeline:
 
@@ -40,9 +41,7 @@ Also includes dkappa_dot_dloga_of_loga stable-gradient fix from PR-A.
 
 Tests: test_thermodynamics.py 10/10, test_shooting.py 7/7.
 
----
-
-## PR body (PR-C, fix/thermo-remaining-gradients)
+### PR-C (fix/thermo-remaining-gradients → fix/kd-dloga-gradient)
 
 Builds on PR-A. Applies n_H_0 rescaling to three remaining splines that carry
 the accumulated Friedmann-scan gradient (~10^8x FD blowup):
