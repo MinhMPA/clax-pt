@@ -18,10 +18,11 @@ Task B7: completed — branch pushed to origin/feat/forward-mode-ad
 Task C4: completed — 9c6af5f (RED tests: kappa_dot, exp_m_kappa, g gradient regressions)
 Task C5: completed — 0a29a6d (_kd_safe rescaling for kappa_dot_of_loga + g_prime_grid)
 Task C6: completed — 0a29a6d (_kappa_safe rescaling for exp_m_kappa_of_loga and g_of_loga)
-Task C7: in progress — regression gate running (bg+shoot+thermo); push + PR pending
-  BLOCKER: gh CLI not available; PR must be opened manually after gate passes.
-  PR base: fix/kd-dloga-gradient
-  PR URL: https://github.com/MinhMPA/clax-pt/pull/new/fix/thermo-remaining-gradients
+Task C7: completed — branch pushed to origin/fix/thermo-remaining-gradients
+  Gate background-test failures were transient JAX CUDA graph OOM (75-min run);
+  15/15 background tests confirmed passing in clean isolated run after push.
+  PR must be opened manually (gh CLI unavailable on compute node):
+  MinhMPA:fix/thermo-remaining-gradients → smsharma/clax:fix/kd-dloga-gradient
   PR title: "fix(thermodynamics): AD-safe splines for kappa_dot, exp_m_kappa, g"
 
 ---
