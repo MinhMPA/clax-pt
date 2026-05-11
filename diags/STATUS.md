@@ -50,6 +50,13 @@ Task D-test-4: completed — bswg59lin — 1/1 TestShootingForwardModeAD GREEN o
 Task D-test-5: completed — blq88d375 — 7 passed / 1 failed (expected: ran without _PREC_JVP, old test snapshot)
   The failure (test_find_z_reio_forward_mode_matches_fd) is expected; confirmed GREEN in b7yit46ro.
 
+Task D-commit: completed — fa3f878 — all 5 files committed, branch pushed to origin/fix/ad-correctness-clax-pt
+  Branch URL: https://github.com/MinhMPA/clax-pt/tree/fix/ad-correctness-clax-pt
+  PR must be opened manually (gh CLI not authenticated on compute node):
+    URL: https://github.com/MinhMPA/clax-pt/pull/new/fix/ad-correctness-clax-pt
+    Base: benchmark/clax-pt  Head: fix/ad-correctness-clax-pt
+    Title: "fix(ad): port PR-A/B/C AD correctness fixes to benchmark/clax-pt"
+
 ### Key differences from main clax
 
 - clax-pt background.py DOES wire prec.ode_adjoint (line 628); ode_adjoint="direct"
