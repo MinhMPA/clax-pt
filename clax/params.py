@@ -226,6 +226,8 @@ class PrecisionParams:
         transfer function (Bessel period ~2.3e-4 Mpc^-1 vs k-spacing ~1.2e-4).
         ~900 k-modes total. Achieves sub-percent EE at l=12-100 and TT at
         l=20-150 (except l=100 at ~2%). ~10 min on V100 GPU.
+        - ode_max_steps=32768: V100 profiling (job 5865) shows max=16464 across
+          fiducial/high_omega_b/low_omega_b/high_omega_cdm; 32768 gives ~2x headroom.
         """
         return PrecisionParams(
             pt_k_max_cl=0.35,        # covers l~2500 via k*chi_star
@@ -236,7 +238,7 @@ class PrecisionParams:
             pt_l_max_ur=50,
             pt_ode_rtol=1e-6,
             pt_ode_atol=1e-11,
-            ode_max_steps=131072,
+            ode_max_steps=32768,     # profiled: max 16464 on V100 (job 5865); 2x headroom
         )
 
     @staticmethod

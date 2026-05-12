@@ -2020,7 +2020,6 @@ def _perturbations_solve_impl(
             max_steps=prec.ode_max_steps,
             args=ode_args,
         )
-        jax.debug.print("[STEPS] caller=pt_scalar num_steps={s}", s=sol.stats["num_steps"])
 
         def extract_at_tau(i):
             return save_sources(tau_grid[i], sol.ys[i], None)
@@ -2138,7 +2137,6 @@ def _solve_mpk_batched_rosenbrock(
             max_steps=prec.ode_max_steps,
             args=(f_single, k_batch),
         )
-        jax.debug.print("[STEPS] caller=pt_direct num_steps={s}", s=sol.stats["num_steps"])
         # sol.ys: (n_tau, batch_size, n_eq)
         # Extract delta_m for each (tau, k) pair.
         def extract_at_tau(i):
@@ -2217,7 +2215,6 @@ def _perturbations_solve_mpk_impl(
             max_steps=prec.ode_max_steps,
             args=ode_args,
         )
-        jax.debug.print("[STEPS] caller=pt_mpk num_steps={s}", s=sol.stats["num_steps"])
 
         def extract_at_tau(i):
             return save_delta_m(tau_grid[i], sol.ys[i], None)
@@ -2302,7 +2299,6 @@ def _matter_delta_m_single_k_impl(
         max_steps=prec.ode_max_steps,
         args=ode_args,
     )
-    jax.debug.print("[STEPS] caller=pt_matter_pk num_steps={s}", s=sol.stats["num_steps"])
     y_final = sol.ys[-1]
 
     # Recover the dτ_end gradient sacrificed by ``stop_gradient`` above.
@@ -2761,7 +2757,6 @@ def tensor_perturbations_solve(
             max_steps=prec.ode_max_steps,
             args=ode_args,
         )
-        jax.debug.print("[STEPS] caller=pt_tensor num_steps={s}", s=sol.stats["num_steps"])
 
         def extract_at_tau(i):
             y_i = sol.ys[i]
