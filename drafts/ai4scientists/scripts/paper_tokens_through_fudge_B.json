@@ -1,0 +1,52 @@
+{
+  "window": {
+    "start": "2026-04-02",
+    "end": "2026-04-09"
+  },
+  "sessions_in_window": 0,
+  "sessions_outside_window": 3,
+  "sessions_no_usage_data": 1,
+  "total_turns_in_window": 0,
+  "total_cost_usd": 0.0,
+  "intervention_heuristic": {
+    "sessions_flagged": 0,
+    "total_in_window": 0,
+    "rate": null,
+    "method": "regex on user-message text only; LOWER BOUND"
+  },
+  "by_model": {},
+  "pricing_warnings": [],
+  "pricing_source": "Anthropic pricing as of mid-2026 (USD/MTok). VERIFY before quoting.",
+  "pricing_table": {
+    "claude-opus-4-7": {
+      "input": 15.0,
+      "output": 75.0,
+      "cache_create": 18.75,
+      "cache_read": 1.5
+    },
+    "claude-opus-4-6": {
+      "input": 15.0,
+      "output": 75.0,
+      "cache_create": 18.75,
+      "cache_read": 1.5
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_create": 3.75,
+      "cache_read": 0.3
+    },
+    "claude-sonnet-4-5": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_create": 3.75,
+      "cache_read": 0.3
+    },
+    "claude-haiku-4-5-20251001": {
+      "input": 0.25,
+      "output": 1.25,
+      "cache_create": 0.3,
+      "cache_read": 0.025
+    }
+  }
+}
