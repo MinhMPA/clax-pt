@@ -3,17 +3,60 @@
 **Audit window.** 2026-03-29 00:00 JST (first `ept.py` commit `3a9b176`) →
 2026-04-09 23:59 JST (post-fudge-factor cleanup, last bring-up commits
 `ecb8f9e` and `f3dadc6`).
-**Machine.** macOS Darwin host (Mac that drafted the paper).
+**Machine.** macOS Darwin host. Confirmed *the* bring-up host (see §0.1).
 **Auditor.** Claude Opus 4.7 (1M context), 2026-05-20.
 
 ---
 
-## 0. Critical limitation up front
+## 0. Critical finding: right host, JSONLs rotated
 
-The audit prompt at `drafts/ai4scientists/scripts/paper-token-audit-prompt.md`
-states explicitly: *"The Mac that hosts main.tex was active 2026-04-15 →
-present (post-bring-up, paper-writing and cleanup phase)."* That is the
-machine this audit ran on. JSONL inventory at the time of audit:
+### 0.1 This is the bring-up host
+
+The audit prompt warned the wrong machine was likely. After exhaustive
+search, this machine is in fact the bring-up host. Evidence (none of which
+would survive on a different host):
+
+- `~/clax/.claude/worktrees/` contains **56 worktree directories** with file
+  mtimes spanning Apr 3 – Apr 15 2026, matching the bring-up phase. Example
+  rows: `amazing-euclid/` Apr 9 08:43, `beautiful-bouman/` Apr 3 18:28,
+  `dazzling-pare/` Apr 4 13:29, `peaceful-hertz/` (created during the
+  Apr 9 RSD cascade per its mtime).
+- `~/.claude/history.jsonl` has 8 entries with `project=/Users/nguyenmn/clax`
+  and JST timestamps inside the bring-up window — typed `/usage` slash
+  commands from session `9be2ffd1…` (Apr 1) and session `cac98dc9…`
+  (Apr 3 evening, 6 consecutive `/usage` invocations 18:20–18:49 JST).
+- `~/Library/Caches/claude-cli-nodejs/-Users-nguyenmn-clax/mcp-logs-*/`
+  has MCP transport logs dated 2026-03-30, 2026-03-31, 2026-04-01,
+  2026-04-03 — i.e. the Gmail / Google-Calendar MCP connectors were
+  active in clax sessions during the bring-up.
+- `~/.codex/sessions/2026/04/07/…`, `…/04/08/…`, `…/04/10/…`,
+  `…/04/13/…` hold Codex CLI sessions (different agent, not Claude Code)
+  whose `cwd` is `/Users/nguyenmn/Library/Mobile Documents/…/Mathematica`
+  or `/Users/nguyenmn/jaxPTPolyPol` or `/Users/nguyenmn/ps_1loop_jax-for-pfs`.
+  Keyword scan shows heavy "multipole", "ps_1loop", "RSD", "anisotropic",
+  "0.27", "CLASS-PT" content — i.e. the **parallel Mathematica-side theory
+  derivations** were happening on this machine in the same window.
+- `~/.claude.json` lists 9 clax project keys (the repo root + 8 worktrees).
+
+### 0.2 What's missing — and why
+
+Despite this being the bring-up host, the **Claude Code session JSONLs for
+the bring-up window have been deleted or rotated**:
+
+- `~/.claude/projects/-Users-nguyenmn-clax*/` contains only 4 JSONL files,
+  earliest timestamp 2026-04-23T15:22 (thirsty-johnson worktree). Sessions
+  from worktrees `amazing-euclid`, `beautiful-bouman`, …, `peaceful-hertz`
+  (54 of the 56 worktrees on disk) have no surviving JSONL.
+- All 5 `~/.claude.json.backup.*` files inspected show empty `history`
+  arrays for every clax project — i.e. the per-project Claude Code
+  history index was already empty at the earliest backup point on this
+  disk (May 20 10:38 onwards).
+- No tarballs or archives matching `*clax*` or bring-up dates were found
+  in `~`, `~/Downloads`, `~/Documents`, or `~/Library/Caches/`.
+- No Time Machine local snapshots predating 2026-05-19 are accessible
+  (`tmutil listlocalsnapshotdates` returns only May 19 onwards).
+
+Inventory of what is on `~/.claude/projects/` *now*:
 
 | project dir under `~/.claude/projects/`                            | first ts            | last ts             | turns |
 |--------------------------------------------------------------------|---------------------|---------------------|-------|
@@ -22,35 +65,73 @@ machine this audit ran on. JSONL inventory at the time of audit:
 | `-Users-nguyenmn-clax-drafts-ai4scientists/`                       | 2026-05-07T04:24:50 | 2026-05-20T01:40:47 | 50    |
 | `-Users-nguyenmn-clax/`                                            | 2026-05-20T01:26:13 | 2026-05-20T01:26:23 | 6     |
 
-The earliest clax-related JSONL on this disk is **2026-04-23**, fourteen days
-after the fudge-factor commit. The bring-up window (2026-03-29 → 2026-04-09)
-has **zero JSONL coverage on this machine**. The bring-up transcripts live on
-a different host that was not available at audit time.
+The earliest clax-related JSONL on this disk is **2026-04-23**, fourteen
+days after the fudge-factor commit. The bring-up window has **zero JSONL
+coverage** even though the bring-up happened here.
+
+### 0.3 What this means for the brief
+
+This is the **retention-gap** caveat the original brief listed as a known
+risk, now confirmed on the load-bearing machine. The conclusion is:
 
 This single fact bounds what can be recovered honestly:
 
 - **Part 1 (token/cost audit).** Both windows return 0 sessions; the script
-  output is the audit. The dollar figure is *not* recoverable here.
+  output is the audit. The dollar figure is *not* recoverable on this disk
+  because the per-session JSONLs holding `usage` token counts have been
+  deleted.
 - **Part 2 (day-by-day narrative).** Reconstructed from git log only. The
   brief's required "verbatim user message" for each day cannot be supplied;
-  the user-authored same-day supervision log is the next-best substitute and
-  is cited where it speaks to a given day.
+  the user-authored same-day `supervision.md` is the next-best substitute
+  and is cited where it speaks to a given day.
 - **Part 3 (fudge-factor 50-minute trail).** The literal Claude Code
   conversation between commits `0a632b6` (13:57:46 JST) and `bb065a9`
   (14:47:26 JST) is not on disk. The reconstruction below uses the
   contemporaneous user-authored `supervision.md` (committed 2026-04-09
   17:18 JST, **2.5 h after** the fudge-factor removal) plus the commit
   messages themselves. This is weaker evidence than the brief asked for —
-  `supervision.md` is a self-report, not a JSONL transcript — and is flagged
-  as such throughout.
+  `supervision.md` is a same-day self-report, not a JSONL transcript — and
+  is flagged as such throughout.
 - **Part 4 (bugs 1-12 provenance).** Attribution is taken from
   `supervision.md` and `report.md`; the "trigger quote" column is marked
-  "[JSONL unavailable on this machine]" for every row, because that is the
+  "[JSONL deleted from this host]" for every row, because that is the
   truthful answer.
 
 The four CSV/JSON artifacts produced by Part 1 are still committed alongside
-this report, because the "0 sessions in window" output is itself the
-load-bearing evidence that this is not the bring-up host.
+this report. The "0 sessions in window" output is itself the load-bearing
+evidence that the JSONLs have been rotated off this disk despite the
+bring-up having happened here.
+
+### 0.4 Surviving corroborating evidence on this disk
+
+Two channels survived the Claude Code JSONL rotation and are worth flagging
+for Reviewer 1, with the caveat that **neither is a Claude Code transcript**:
+
+1. **Codex CLI sessions** (`~/.codex/sessions/2026/04/{07,08,10,13}/…`).
+   These are OpenAI Codex CLI sessions used by the user in parallel for
+   Mathematica EFT derivations and reference-codebase navigation. cwd is
+   `…/Mathematica`, `…/jaxPTPolyPol`, or `…/ps_1loop_jax-for-pfs`, never
+   `~/clax`. Keyword counts (raw `grep -c`): the Apr 8 18:00 UTC session
+   alone contains 531 "multipole" hits, 146 "ps_1loop" hits, 268 "RSD",
+   6 "anisotropic", 6 "0.27", 33 "CLASS-PT". A user message at
+   2026-04-08T09:41:54Z in that session reads: *"Also apply these changes:
+   1. Call with a mu array so parallelization happens over both mu values
+   AND sectors / 2. Use BuildMultipoleTables which explicitly parallelizes
+   over mu samples"* — i.e. the user was driving μ-array parallelisation
+   of multipole assembly in Mathematica on the eve of the clax-pt GL
+   redesign documentation commit (`455e97f` Apr 8 13:25 JST). This
+   corroborates `supervision.md`'s attribution of the GL architectural
+   intervention to the user, from an independent on-disk source that was
+   not edited after Apr 13. It does **not** substitute for the missing
+   Claude Code JSONLs, and it cannot be folded into the
+   `count_paper_tokens.py` cost audit (different vendor pricing, different
+   tool).
+
+2. **MCP transport logs** (`~/Library/Caches/claude-cli-nodejs/-Users-…-clax/mcp-logs-*/`)
+   are dated 2026-03-30 / 03-31 / 04-01 / 04-03 — transport-layer JSONL
+   for Gmail and Google-Calendar MCP connectors invoked during clax
+   sessions. These carry no conversation text, only confirm session
+   activity. They are useful only as a presence-witness, not as content.
 
 ---
 
@@ -80,17 +161,26 @@ sessions_in_window: 0 / outside: 3 / no-usage: 1 / cost: $0.00
 ### Comparison to the paper's "57 sessions"
 
 Paper claim (`drafts/ai4scientists/main.tex`): 57 worktree sessions in the
-bring-up. This audit on this machine: **0 sessions in window**. The
-discrepancy is a **retention/host gap**, not a measurement gap — the script
-ran cleanly, found 0 sessions with timestamps before 2026-04-10 in any
-clax-named project directory, and exited. The brief's contingency for "57
-likely runs to 2026-04-12 PR-prep; this audit stops at 2026-04-09" is moot
-because the count would still be 0.
+bring-up. This audit on this machine: **0 sessions in window**.
 
-The "57 sessions" figure cited in the paper is internally consistent with
-`report.md` ("**~57 worktree sessions**" in the report header, committed
-2026-04-09 17:12 JST) and is presumably countable as JSONL files on the
-bring-up host. From this machine, that count cannot be verified or refuted.
+The discrepancy is a **retention gap** confirmed on the right host. The
+script ran cleanly, found 0 JSONLs with timestamps before 2026-04-10 in
+any clax-named project directory, and exited. There is, however,
+independent on-disk evidence that the session count was on the order of 57:
+
+- `~/clax/.claude/worktrees/` contains **56 worktree directories** with
+  bring-up-era mtimes. Each worktree is typically the workspace for one
+  Claude Code session (one feature/hypothesis per worktree).
+- `report.md` header (committed 2026-04-09 17:12 JST on `clax-pt`):
+  *"Period: March 28 – April 9, 2026 · 29 commits, 14 bugs, **~57 worktree
+  sessions**"* — same number cited in `main.tex`. This is the user's own
+  same-day count.
+
+Treat 57 ≈ 56 (worktrees on disk) as consistent, with the ≈1-session
+slack accounted for by sessions run from the main `~/clax` checkout
+rather than a worktree. **No usage/cost figure can be derived from this
+host** because the per-session JSONLs (which carry `message.usage`
+fields) have been rotated out.
 
 ### Pricing constants verification
 
@@ -116,16 +206,23 @@ for the actual window before quoting in the paper") makes the same caution.
 
 ### Caveats for paper
 
-- Retention/host gap: bring-up JSONLs are not on this machine; cost figure
-  cannot be quoted from this audit.
-- Multi-machine confound: at least three clax workspaces show up in the
-  project dirs (`clax`, `clax--claude-worktrees-thirsty-johnson-…`,
-  `clax--claude-worktrees-wonderful-easley-…`, `clax-drafts-ai4scientists`).
-  The earliest 4-23 worktree JSONLs are post-fudge cleanup. If the bring-up
-  machine is brought online, the audit should be re-run there and the four
-  artifacts in this directory should be overwritten with the real numbers.
-- Mid-window pricing shifts: not verified; assume PRICING table is correct
-  for 2026-04 unless Anthropic's published rates say otherwise.
+- **Retention gap on the bring-up host.** This is the right machine. The
+  Claude Code per-session JSONLs for 2026-03-29 → 2026-04-22 have been
+  deleted/rotated and are not recoverable from this disk (no tarballs,
+  no Time Machine snapshots predating May 19). Cost figure for the
+  bring-up window cannot be quoted from this audit.
+- **Multi-source attribution to keep separate.** The 56 worktrees +
+  `report.md` headers + 8 history.jsonl typed-command entries + MCP cache
+  logs together confirm that the bring-up sessions ran here. They do NOT
+  reconstruct the JSONL payload (token usage, conversation content).
+- **Codex sessions are not Claude Code sessions.** The user ran Codex CLI
+  in parallel for Mathematica derivations on Apr 7 / 8 / 10 / 13. Those
+  transcripts survived. Do not fold them into the "57 sessions" Claude
+  Code count or into the cost audit — different vendor, different tool,
+  different pricing.
+- **Mid-window pricing shifts:** PRICING table not verified against
+  Wayback archive of `anthropic.com/api/pricing` dated 2026-04-01. Cross-
+  check before quoting any dollar figure.
 
 ---
 
@@ -293,7 +390,8 @@ The "high" confidence is on the **label**, not on the verbatim message
 trail; the latter cannot be confirmed at high confidence because the JSONL
 is absent. If a reviewer presses on the verbatim trail, the answer is "the
 self-reported user quotes in `supervision.md` §8.2 are the best evidence on
-this machine; the JSONL trail must be retrieved from the bring-up host."
+this machine; the JSONL trail has been deleted from this host (the
+correct host) and is not recoverable."
 
 The candidate label *human-accelerated* is **inconsistent** with the on-disk
 evidence because the agent's diagnosis (0.27 minimises error) was the
@@ -309,8 +407,9 @@ scaffolding question; so the evidence on disk does not support that label.
 ## PART 4 — Earlier bug provenance (bugs 1–12)
 
 **Trigger quotes unavailable.** All trigger-quote cells read *"[JSONL
-unavailable on this machine]"* because no JSONLs from the 2026-03-29 →
-2026-04-09 window exist on this disk. Attribution is taken from
+deleted from this host]"* because the per-session Claude Code JSONLs
+for the 2026-03-29 → 2026-04-09 window have been rotated off this disk
+despite the bring-up running here (see §0.2). Attribution is taken from
 `supervision.md` and `report.md` (committed 2026-04-09 17:12 / 17:18 JST,
 both ≤2.5 h after the bring-up's last fix) plus the CHANGELOG bug-row
 text. Intervention labels follow mechanically from the supervision-log
@@ -318,18 +417,18 @@ phrasing.
 
 | #  | commit_sha   | session_id            | trigger_quote                          | speaker | intervention_label | confidence |
 |---:|:-------------|:----------------------|:---------------------------------------|:-------:|:-------------------|:----------:|
-|  1 | `af6d8df`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | AGENT*  | autonomous          | medium     |
-|  2 | `af6d8df` / `bb150f9` | [JSONL unavailable] | [JSONL unavailable on this machine] | AGENT* | autonomous (parallelised) | medium |
-|  3 | `ab5432d`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | AGENT*  | autonomous (parallelised) | medium |
-|  4 | `ab5432d`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | AGENT*  | autonomous (parallelised) | medium |
-|  5 | `fb8182a`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | USER†   | human-accelerated   | high†      |
-|  6 | `fb8182a`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | USER†   | human-accelerated   | high†      |
-|  7 | `fb8182a`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | USER†   | process-scaffolding-then-domain-hint | high† |
-|  8 | `fb8182a`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | USER†   | process-scaffolding-then-domain-hint | high† |
-|  9 | `fb8182a`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | USER†   | process-scaffolding-then-domain-hint | high† |
-| 10 | `02ec990`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | AGENT‡  | autonomous          | high‡      |
-| 11 | `02ec990`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | AGENT‡  | autonomous          | high‡      |
-| 12 | `02ec990`    | [JSONL unavailable]   | [JSONL unavailable on this machine]    | AGENT‡  | autonomous          | high‡      |
+|  1 | `af6d8df`    | [JSONL deleted]   | [JSONL deleted from this host]    | AGENT*  | autonomous          | medium     |
+|  2 | `af6d8df` / `bb150f9` | [JSONL deleted] | [JSONL deleted from this host] | AGENT* | autonomous (parallelised) | medium |
+|  3 | `ab5432d`    | [JSONL deleted]   | [JSONL deleted from this host]    | AGENT*  | autonomous (parallelised) | medium |
+|  4 | `ab5432d`    | [JSONL deleted]   | [JSONL deleted from this host]    | AGENT*  | autonomous (parallelised) | medium |
+|  5 | `fb8182a`    | [JSONL deleted]   | [JSONL deleted from this host]    | USER†   | human-accelerated   | high†      |
+|  6 | `fb8182a`    | [JSONL deleted]   | [JSONL deleted from this host]    | USER†   | human-accelerated   | high†      |
+|  7 | `fb8182a`    | [JSONL deleted]   | [JSONL deleted from this host]    | USER†   | process-scaffolding-then-domain-hint | high† |
+|  8 | `fb8182a`    | [JSONL deleted]   | [JSONL deleted from this host]    | USER†   | process-scaffolding-then-domain-hint | high† |
+|  9 | `fb8182a`    | [JSONL deleted]   | [JSONL deleted from this host]    | USER†   | process-scaffolding-then-domain-hint | high† |
+| 10 | `02ec990`    | [JSONL deleted]   | [JSONL deleted from this host]    | AGENT‡  | autonomous          | high‡      |
+| 11 | `02ec990`    | [JSONL deleted]   | [JSONL deleted from this host]    | AGENT‡  | autonomous          | high‡      |
+| 12 | `02ec990`    | [JSONL deleted]   | [JSONL deleted from this host]    | AGENT‡  | autonomous          | high‡      |
 
 **Attribution sources:**
 
@@ -375,9 +474,10 @@ Bugs 13–14 (the fudge-factor pair) are deliberately excluded per the brief
 - The fudge-factor 0.27 having been committed (`0a632b6`) and then removed
   on physical grounds 50 minutes later (`bb065a9`).
 
-**Cannot support from this machine:**
+**Cannot support from this disk (retention has elapsed):**
 
-- A dollar-figure cost for the bring-up (needs JSONLs from the bring-up host).
+- A dollar-figure cost for the bring-up. The per-session JSONLs that hold
+  `message.usage` blocks have been deleted from `~/.claude/projects/`.
 - A 33-of-57 supervision count using anything other than `supervision.md`'s
   own narrative (the script's keyword-heuristic intervention count is 0
   because the script saw 0 in-window sessions).
@@ -385,10 +485,14 @@ Bugs 13–14 (the fudge-factor pair) are deliberately excluded per the brief
   (Reviewer 1's load-bearing ask). The two user questions quoted in Part 3
   are from a same-day self-report, not from the JSONL.
 
-**Recommended next step.** Re-run this audit on the bring-up host (the
-machine that had the `~/.claude/projects/-Users-nguyenmn-clax*` JSONL set
-during 2026-03-29 → 2026-04-12), and overwrite the four artifacts in this
-directory with the real numbers. If those JSONLs have rolled off Claude
-Code's retention window on that host as well, the paper's audit trail
-collapses to `supervision.md` + `report.md` + git history, and that should
-be stated explicitly in the methods section rather than implied.
+**Recommended next step.** The bring-up JSONLs are gone from this host
+and there is no Time Machine snapshot or tarball that would let us
+recover them. The paper's audit trail therefore collapses to
+`supervision.md` + `report.md` + `CHANGELOG.md` + git history + the
+56-worktree on-disk count + the Codex parallel sessions, and this should
+be stated explicitly in the methods/appendix rather than implied. The
+"57 sessions" claim is corroborated by independent witness (worktree
+count = 56, plus `report.md`'s own header reading "~57 worktree
+sessions"); the "33 of 57" supervision claim is **not** independently
+corroborable from the disk and rests entirely on the user's same-day
+`supervision.md` attribution.
