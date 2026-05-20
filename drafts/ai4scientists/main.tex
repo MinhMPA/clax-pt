@@ -12,31 +12,32 @@
 \usepackage{amssymb}
 \usepackage[capitalize,noabbrev]{cleveref}
 \usepackage{xspace}
+\usepackage{orcidlink}
 
 % Custom commands
 \newcommand{\claxpt}{\textsc{clax-pt}\xspace}
 \newcommand{\classpt}{\textsc{class-pt}\xspace}
 \newcommand{\jax}{\textsc{jax}\xspace}
 
-\icmltitlerunning{Physics Is All You Need}
+\icmltitlerunning{Physics Is All You Need? A Case Study}
 
 \begin{document}
 
 \twocolumn[
-  \icmltitle{Physics Is All You Need: Lessons from Physicist-Supervised \\
+  \icmltitle{Physics Is All You Need? A Case Study in Physicist-Supervised \\
     AI Development of Scientific Software}
 
   \icmlsetsymbol{equal}{*}
 
   \begin{icmlauthorlist}
-    \icmlauthor{Minh Nguyen}{kavli}
-    \icmlauthor{Siddharth Mishra-Sharma}{anthropic}
+    \icmlauthor{Nhat-Minh Nguyen\,\orcidlink{0000-0002-2542-7233}}{kavli,cd3,icise}
   \end{icmlauthorlist}
 
-  \icmlaffiliation{kavli}{Kavli IPMU, University of Tokyo, Kashiwa, Japan}
-  \icmlaffiliation{anthropic}{Anthropic, San Francisco, CA, USA}
+  \icmlaffiliation{kavli}{Kavli IPMU (WPI), UTIAS, The University of Tokyo, 5-1-5 Kashiwanoha, Kashiwa, Chiba 277-8583, Japan}
+  \icmlaffiliation{cd3}{Center for Data-Driven Discovery, Kavli IPMU (WPI), UTIAS, The University of Tokyo, Kashiwa, Chiba 277-8583, Japan}
+  \icmlaffiliation{icise}{Institute For Interdisciplinary Research in Science and Education, ICISE, Quy Nhon, 55121, Vietnam}
 
-  \icmlcorrespondingauthor{Minh Nguyen}{nhat.minh.nguyen.111@gmail.com}
+  \icmlcorrespondingauthor{Nhat-Minh Nguyen}{nhat.minh.nguyen@ipmu.jp}
 
   \icmlkeywords{AI-assisted development, scientific software, human-AI collaboration, supervision protocols}
 
@@ -170,10 +171,13 @@ The fudge factor illustrates a failure mode specific to oracle-tested scientific
 The three human-essential interventions were thus: (i)~the Gauss--Legendre architectural redesign that unblocked all six redshift-space multipoles (\cref{sec:wall}), (ii)~the rejection of the fudge factor $\alpha=0.27$ as physically unmotivated, and (iii)~the identification of the correct anisotropic tree-level formula. Items (ii) and (iii) occurred in the same debugging episode but represent distinct cognitive acts: rejecting a wrong answer versus finding the right one.
 
 % ===========================================================================
-\section{Three Principles}
-\label{sec:principles}
+\section{Lessons and Limitations}
+\label{sec:lessons}
 
-The case study suggests three principles for supervising AI agents on scientific software, each grounded in a specific failure mode we observed.
+The case study suggests three patterns observed in this project, each grounded in a specific failure mode we encountered. We organize them around the failure mode and the supervision practice that emerged in response; we do not claim these are universal principles.
+
+\subsection{Managing Autonomy in Scientific Software}
+\label{sec:managing}
 
 \paragraph{P1: Oracle testing verifies what, not why.}
 
@@ -197,22 +201,8 @@ The agent failed at two specific tasks. First, recognizing when a code architect
 
 Both reduce to a single underlying skill that we term \emph{explanatory agency}: evaluating explanations, not just predictions. The agent evaluates whether the output matches the target. The physicist evaluates whether the mechanism producing that output is physically coherent. When these two criteria diverge---when a wrong mechanism produces right numbers---only the physicist can detect the error.
 
-% ===========================================================================
-\section{Implications and Limitations}
-\label{sec:implications}
-
-The division of labor that emerged (classified retrospectively by the supervising physicist from the CHANGELOG and git history without independent coding, with each session defined as a single Claude Code invocation typically lasting 15--45 minutes) was: approximately 80\% of sessions were autonomous oracle-following (transcription, debugging, implementation), approximately 10\% were engineering tasks where the agent worked independently given a well-specified architecture, and approximately 10\% required irreplaceable human judgment (architectural decisions and fudge-factor rejection). The binding constraint on code quality was the supervision protocol, not the model's raw capability.
-
-This suggests that improving AI-assisted scientific software requires better supervision protocols at least as much as better models. Specifically, it requires protocols that distinguish predictive adequacy from explanatory correctness. The ``no fudge factors'' rule is a crude but effective instance that forces mechanistic explanations rather than calibrated patches.
-
-We acknowledge significant limitations. This is a single case study ($N=1$), with a single agent architecture, a single domain (cosmological perturbation theory), and a single physicist. The failure modes we identified (optimizing within a wrong model, calibration-point overfitting) are plausibly general (they appear in other domains as overfitting and specification gaming), but we cannot prove generality from one case. The project also had a high-quality oracle available (\classpt is an established, well-tested reference code). Many scientific software projects lack such oracles, and our methodology would need adaptation for settings where ground truth is uncertain.
-
-Although our evidence is observational, the specificity of the failure modes permits qualitative counterfactual analysis that grounds the three principles in testable claims. Had the ``no fudge factors'' rule not been in place, the $\alpha=0.27$ correction would have shipped---it passed all nine spectra, was committed by the agent as the solution, and would have been invisible to any downstream consumer of the code. Had multi-cosmology testing been enforced from day one rather than added after the fudge factor was discovered, the calibration would have been caught sooner. $\alpha=0.27$ is fit to fiducial Planck 2018 parameters and would produce visibly wrong BAO amplitudes at $\omega_b \pm 20\%$. Had the session-count escalation trigger been formalized at 10 sessions rather than applied informally around session 50, the 33-session architectural loop would have been interrupted approximately 23 sessions earlier, saving roughly 40\% of the total project time.
-
-Looking forward, two concrete remediation paths could narrow the gap between autonomous and human-required bugs without requiring qualitative advances in reasoning. First, retrieval-augmented reasoning over the full reference codebase, including code paths the agent did not initially consult, could surface relevant physics without human guidance. In our case, the correct formula existed in a \classpt branch the agent never consulted (\cref{sec:wall}). A retrieval system indexing all branches would have surfaced it when the isotropic architecture failed to converge. Second, explicit ``physics audit'' prompting (systematically asking the agent whether every tuned parameter corresponds to a physical quantity in the reference theory) would operationalize the diagnostic question that caught the fudge factor. The physicist's intervention reduced to a single query (``does $\alpha=0.27$ appear anywhere in \classpt?''), which the agent answered correctly once asked but could not generate unprompted. Embedding such queries as mandatory checkpoints after any parameter introduction would convert an ad hoc human insight into a reproducible protocol step. Both paths are concrete, testable, and complementary to scaling: they address the evaluation gap rather than the reasoning gap.
-
-\subsection{Credit, Attribution, and Governance}
-\label{sec:governance}
+\subsection{Credit, Attribution, and Responsibility}
+\label{sec:credit}
 
 The division of labor raises an unavoidable question about credit. The agent performed approximately 80\% of sessions (implementation, debugging, transcription) while the physicist performed approximately 10\% but supplied 100\% of the decisive architectural and physical judgments. We argue that contribution weight should reflect \emph{irreplaceability}, not volume: the physicist's three interventions (the Gauss--Legendre redesign, the fudge-factor rejection, and identification of the correct anisotropic formula) were load-bearing in a way that the agent's 10 autonomous bug fixes were not. Any sufficiently capable coding agent could have resolved convention errors given an oracle test suite. No agent in this study could have diagnosed the architectural mismatch or rejected a passing-but-unphysical solution.
 
@@ -221,6 +211,11 @@ The analogy to graduate advising is instructive---and more uncomfortable for the
 The fudge factor ($\alpha = 0.27$) sharpens the liability question. Had this parameter shipped in a fully autonomous pipeline (analogous to Denario, \citealt{villaescusa2025}), it would have produced subtly wrong predictions at non-fiducial cosmologies, and the oracle test suite would not have caught it. Who bears responsibility: the model developer, the scientist who deployed the pipeline, or the institution that sanctioned its use? Current frameworks provide no clear answer, precisely because the error is not a software bug but a \emph{scientific} mistake that requires domain expertise to detect.
 
 We propose that AI-assisted scientific software should ship with a \textbf{supervision log} as provenance documentation, analogous to a lab notebook. The log records which decisions were human-directed (the architectural redesign) versus agent-proposed (the fudge factor), enabling post-hoc audit of the chain of responsibility. We will release ours alongside the code and CHANGELOG. Finally, we note a scalability concern: the supervision practices P1--P3 worked for one physicist and one agent because the physicist had sufficient domain expertise to enforce the ``no fudge factors'' rule. When thousands of laboratories deploy coding agents on scientific software, these practices must become institutional (embedded in review processes, CI pipelines, and reproducibility standards) rather than relying on the vigilance of individual supervisors.
+
+\subsection{What This Case Study Cannot Show}
+\label{sec:cannot}
+
+[PLACEHOLDER: body written in Task 2.6.]
 
 % ===========================================================================
 \section{Related Work}
@@ -242,8 +237,54 @@ Not all AI-for-science applications require this level of domain supervision. In
 
 In our case study, the AI agent functioned as a highly capable tool---not a co-author and certainly not an autonomous scientist. It could implement, debug, and validate scientific software at speed and scale impractical for a solo physicist, but it lacked the explanatory agency to judge whether its solutions were physically meaningful---whether they produced right numbers for the right reasons. The supervision protocol (oracle testing, shared memory, the no-fudge-factor rule, and the session-count escalation trigger) was the mechanism that transformed raw agent output into trustworthy scientific code. Improving this protocol, rather than solely improving model capability, is the more direct path to reliable AI-assisted scientific software development. The full supervision log, CHANGELOG, and commit history will be made publicly available.
 
+\section*{Acknowledgments}
+
+I am grateful to Siddharth Mishra-Sharma for sharing about his work and for his collaboration on \texttt{clax}, the building block of \claxpt. I thank Ben Horowitz and Kazuyuki Akitsu for helpful discussions. I acknowledge support from the Japan Foundation for Promotion of Astronomy Research Grant and the JSPS KAKENHI Grant Numbers 25K23373 and 26H00404. This work was supported by World Premier International Research Center Initiative (WPI Initiative), MEXT, Japan.
+
 \bibliography{references}
 \bibliographystyle{icml2026}
 
+\appendix
+
+\section{Issue-Level Classification}
+\label{app:bug-table}
+
+[PLACEHOLDER: populated in Task 4.1.]
+
 \end{document}
+
+% =====================================================================
+% MATERIAL EXTRACTED FOR REDISTRIBUTION (delete after Phase 2 complete)
+% =====================================================================
+% From former §5 intro paragraph (deleted in Task 1.3):
+%
+% Had multi-cosmology testing been enforced from day one rather than
+% added after the fudge factor was discovered, the calibration would
+% have been caught sooner. alpha=0.27 is fit to fiducial Planck 2018
+% parameters and would produce visibly wrong BAO amplitudes at
+% omega_b +/- 20%. [Multi-cosmo claim is FALSE per user clarification
+% in grilling; Task 2.4 rewrites the catch mechanism as the alpha=0
+% probe.]
+%
+% Looking forward, two concrete remediation paths could narrow the gap
+% between autonomous and human-required bugs without requiring qualitative
+% advances in reasoning. First, retrieval-augmented reasoning over the
+% full reference codebase, including code paths the agent did not
+% initially consult, could surface relevant physics without human
+% guidance. In our case, the correct formula existed in a CLASS-PT
+% branch the agent never consulted (sec:wall). A retrieval system
+% indexing all branches would have surfaced it when the isotropic
+% architecture failed to converge. Second, explicit ``physics audit''
+% prompting (systematically asking the agent whether every tuned
+% parameter corresponds to a physical quantity in the reference theory)
+% would operationalize the diagnostic question that caught the fudge
+% factor. The physicist's intervention reduced to a single query
+% (``does alpha=0.27 appear anywhere in CLASS-PT?''), which the agent
+% answered correctly once asked but could not generate unprompted.
+% Embedding such queries as mandatory checkpoints after any parameter
+% introduction would convert an ad hoc human insight into a
+% reproducible protocol step. Both paths are concrete, testable, and
+% complementary to scaling: they address the evaluation gap rather than
+% the reasoning gap.
+% [Source material for Task 2.6 (§4.3 four-paragraph body)]
 
