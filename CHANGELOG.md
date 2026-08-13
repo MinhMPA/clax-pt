@@ -1,5 +1,46 @@
 # clax Development Progress
 
+### Aug 13-14, 2026: Consolidation — benchmark/clax-pt merged into main (MinhMPA/clax-pt)
+
+PR #4 (`fix/ad-correctness-clax-pt`, rebased onto the branch tip) merged into
+`benchmark/clax-pt`, then `benchmark/clax-pt` merged into `main`. Fork `main`
+now carries the EPT module, the physics fixes (BB kernel, n_H_0 hydrogen mass,
+dtau_end Taylor correction), the PR-A/B/C AD-correctness ports, and the
+benchmark/HPC infrastructure.
+
+**Validation:** thermodynamics+shooting (the PR #4 delta) 25/25 on the rebased
+tip. Full `pytest tests/ --fast -x` on V100 (igpu, job 12514) fails at
+`test_multipoint.py::TestMassiveNu::test_pk_at_k005` — **pre-existing, NOT a
+consolidation regression**, see known issue below.
+
+**KNOWN ISSUE (pre-existing on main): massive-nu compute_pk solve grinds.**
+`compute_pk(CosmoParams(m_ncdm=0.15), prec, k=0.05)` with
+`ncdm_fluid_approximation="none"`, `ode_max_steps=262144` either exhausts max
+steps (warm suite run, job 12514) or runs >3 h without completing (cold
+single-test runs, jobs 12515/12519/12558). Established by bisection
+(jobs 12519, 12558, igpu V100s, Aug 13-14 2026):
+
+- Identical behavior on `origin/main`, `benchmark/clax-pt` tip, and the
+  consolidated tip — not introduced by any consolidation commit.
+- NOT the `18fd88d` endpoint change: reverting the mPk integration endpoint
+  to `0.999*conformal_age` in probe worktrees did not help (job 12558 tasks
+  2/3 grind identically).
+- NOT compile time: XLA compile of `_matter_delta_m_single_k_impl` is ~17 s
+  (JAX_LOG_COMPILES, job 12558); the wall time is inside the solve.
+- Python stack (jax/jaxlib 0.9.2, diffrax 0.7.2, equinox 0.13.6) unchanged
+  since 2026-04-12; the NVIDIA driver moved 575.57.08→580.159.03
+  (CUDA 12.9→13.0) after the April/May validations — main suspect, together
+  with the known marginal stiffness of the massive-nu "none" hierarchy
+  (cf. 9b4137d, which noted the step controller "shrinks the step
+  indefinitely" for fluid modes at mid-range k).
+- Failed approaches so far: raising max_steps is NOT the fix (262144 already);
+  endpoint revert is NOT the fix (tested).
+
+Next steps for the fix (post-consolidation): inspect diffrax solve stats
+(step acceptance/rejection trace) for the massive-nu case; compare a CPU run
+of the same solve (device-dependence isolates the driver hypothesis); check
+Kvaerno5 nonlinear-solver convergence at late tau.
+
 ### May 10-11, 2026: PR-D — AD correctness fixes ported to benchmark/clax-pt
 
 Branch: `fix/ad-correctness-clax-pt` → `benchmark/clax-pt` (MinhMPA/clax-pt).
