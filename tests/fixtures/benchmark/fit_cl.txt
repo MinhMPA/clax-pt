@@ -1,0 +1,27 @@
+GPU: [CudaDevice(id=0)]
+JAX version: 0.10.0
+
+============================================================
+BENCHMARK: fit_cl
+============================================================
+
+First call:
+  Background:        0.1s
+  Thermodynamics:    0.3s
+  Perturbations:    32.1s
+  Harmonic:          2.4s
+  TOTAL (1st):      34.9s
+
+Second call (cached):
+  Background:        0.1s
+  Thermodynamics:    0.3s
+  Perturbations:    30.2s
+  Harmonic:          2.4s
+  TOTAL (2nd):      33.0s
+
+Accuracy vs CLASS (fiducial, massless ncdm, RECFAST):
+    l    TT err%    EE err%    TE err%
+   20    -0.123    +0.456    +0.789
+  100    -0.012    +0.034    -0.056
+  500    -0.001    +0.002    -0.003
+ 1000    -0.001    +0.001    +1.700

@@ -260,6 +260,79 @@ def _halofit_modulator(
     return jnp.sqrt(jnp.maximum(R_at_pt, 0.0))
 
 
+def _ept_modulator(
+    pt: PerturbationResult,
+    params: CosmoParams,
+    bg: BackgroundResult,
+    th,
+) -> Float[Array, "Nk Ntau"]:
+    """Build sqrt(R(k, tau)) modulator for source-Limber EPT injection.
+
+    Computes ``R(k, z) = P_mm,1-loop(k, z) / P_lin(k, z)`` from the
+    one-loop EFTofLSS (clax-pt) at z=0, then growth-rescales to other
+    redshifts via the leading-order EFT scaling
+
+        R(k, z) - 1 = (R(k, 0) - 1) * [D(z) / D(0)]^2
+
+    where the loop term scales as ``D^4`` and the linear term as ``D^2``,
+    so the ratio minus one scales as ``D^2``.  Sufficient at ~1% for
+    ``k <= 0.3 h/Mpc``; subleading EFT counterterm time dependence is
+    neglected.
+
+    Returns ``sqrt(R(k, tau))`` of shape ``(Nk, Ntau)`` on the
+    ``pt.k_grid x pt.tau_grid`` lattice. The CLASS source-multiplication
+    recipe applies this directly to the lensing source.
+    """
+    from clax.ept import compute_ept_from_clax, pk_mm_real, ept_kgrid
+    from clax.transfer import compute_linear_matter_pk_from_perturbations
+    from clax.interpolation import CubicSpline
+
+    h = float(params.h)
+
+    # --- Run EPT once at z=0 (Mpc/h units inside, convert to Mpc^-1) ---
+    ept = compute_ept_from_clax(params, bg, pt, z=0.0)
+    pk_mm_h = pk_mm_real(ept)                  # (Mpc/h)^3 on EPT k-grid (h/Mpc)
+    k_h = ept_kgrid()                           # h/Mpc
+    k_ept_mpc = jnp.array(k_h) * h              # Mpc^-1
+    pk_mm_mpc = pk_mm_h / h**3                  # Mpc^3
+
+    # --- Restrict to overlap with pt.k_grid (compute_linear validates) ---
+    pt_k_min = float(pt.k_grid[0])
+    pt_k_max = float(pt.k_grid[-1])
+    in_range = (k_ept_mpc >= pt_k_min) & (k_ept_mpc <= pt_k_max)
+    k_eval = k_ept_mpc[in_range]
+    pk_nl_eval = pk_mm_mpc[in_range]
+
+    # P_lin(k_eval, z=0) on overlapping grid
+    pk_lin_eval = compute_linear_matter_pk_from_perturbations(
+        pt, bg, params, k_eval, z=0.0)
+
+    # R0(k) = P_NL/P_lin at z=0, defaulting to 1.0 outside overlap
+    R0_eval = jnp.where(pk_lin_eval > 0,
+                         pk_nl_eval / pk_lin_eval, 1.0)
+    R0_eval = jnp.clip(R0_eval, 0.0, 100.0)
+
+    # Spline R0(log k) onto pt.k_grid; outside the EPT-evaluated range, R0 = 1.
+    log_k_eval = jnp.log(k_eval)
+    log_k_pt = jnp.log(pt.k_grid)
+    R0_spline = CubicSpline(log_k_eval, R0_eval)
+    R0_pt = R0_spline.evaluate(log_k_pt)
+    R0_pt = jnp.where(
+        (pt.k_grid >= float(k_eval[0])) & (pt.k_grid <= float(k_eval[-1])),
+        R0_pt, 1.0)
+
+    # --- Growth-factor rescaling: R(k, tau) - 1 = (R0(k) - 1) * [D(tau)/D(0)]^2 ---
+    loga_at_tau = bg.loga_of_tau.evaluate(pt.tau_grid)
+    D_at_tau = bg.D_of_loga.evaluate(loga_at_tau)
+    D_at_0 = bg.D_of_loga.evaluate(jnp.zeros_like(loga_at_tau[:1]))[0]
+    D_ratio_sq = (D_at_tau / D_at_0) ** 2  # (Ntau,)
+
+    R_at_pt = 1.0 + (R0_pt[:, None] - 1.0) * D_ratio_sq[None, :]  # (Nk_pt, Ntau)
+    R_at_pt = jnp.clip(R_at_pt, 0.0, 100.0)
+
+    return jnp.sqrt(jnp.maximum(R_at_pt, 0.0))
+
+
 def compute_cl_pp(
     pt: PerturbationResult,
     params: CosmoParams,
@@ -284,10 +357,13 @@ def compute_cl_pp(
     Accuracy vs CLASS v3.3.4 (Planck 2018 LCDM): matches CLASS to <1% for
     ``l <= 2500`` (linear case), confirmed independently by CAMB.
 
-    Nonlinear corrections (``nonlinear="halofit"``) follow CLASS's
-    source-multiplication approach: ``S(k, tau) -> S(k, tau) *
-    sqrt(R(k, z(tau)))`` where ``R = P_NL/P_lin`` is computed on a (k, z)
-    grid via Halofit. See ``_halofit_modulator``.
+    Nonlinear corrections (``nonlinear="halofit"`` or ``"ept"``) follow
+    CLASS's source-multiplication approach: ``S(k, tau) -> S(k, tau) *
+    sqrt(R(k, z(tau)))`` where ``R = P_NL/P_lin``. For ``"halofit"`` the
+    ratio is computed on a (k, z) grid via the standard fitting formulae;
+    for ``"ept"`` the ratio is computed once via clax-pt one-loop EFTofLSS
+    at z=0 and growth-rescaled in time. See ``_halofit_modulator`` and
+    ``_ept_modulator``.
 
     Args:
         pt: perturbation results (must have source_phi_plus_psi)
@@ -299,21 +375,25 @@ def compute_cl_pp(
             - ``"none"``: linear matter power spectrum (default)
             - ``"halofit"``: Halofit (Smith 2003 + Takahashi 2012 + Bird
               2012), z-aware on-the-fly via 100-point z-grid +
-              log-log k-extension to k_max=10 Mpc^-1, mirroring CLASS's
+              log-log k-extension to k_max=20 Mpc^-1, mirroring CLASS's
               dedicated nonlinear k-grid. Residual vs CLASS Halofit
-              reference: <1.5% at all ℓ ≤ 2500 with
+              reference: <1% at all ℓ ≤ 2500 with
               ``pt.k_grid[-1] >= 5 Mpc^-1``. Narrower grids
               gracefully degrade to no NL correction (matching CLASS
               ``fourier.c:1706-1716``).
+            - ``"ept"``: clax-pt one-loop EFTofLSS at z=0 + leading-order
+              D^2 growth scaling. Documented residual of ~1% for
+              k <= 0.3 h/Mpc; subleading EFT counterterm time dependence
+              neglected.
             Anything else raises ``ValueError``.
 
     Returns:
         C_l^phiphi array of shape (l_max+1,), indexed by l (l=0,1 are zero)
     """
-    if nonlinear not in {"none", "halofit"}:
+    if nonlinear not in {"none", "halofit", "ept"}:
         raise ValueError(
             f"compute_cl_pp: unknown nonlinear={nonlinear!r}. "
-            f"Accepted values: 'none', 'halofit'.")
+            f"Accepted values: 'none', 'halofit', 'ept'.")
 
     # --- Section A: Setup (all JAX, no numpy) ---
     tau_grid = pt.tau_grid
@@ -341,6 +421,8 @@ def compute_cl_pp(
     # NL injection: S(k,tau) -> S(k,tau) * sqrt(R(k, z(tau)))
     if nonlinear == "halofit":
         S_transfer = S_transfer * _halofit_modulator(pt, params, bg, th)
+    elif nonlinear == "ept":
+        S_transfer = S_transfer * _ept_modulator(pt, params, bg, th)
 
     log_k = jnp.log(k_grid)
     dlnk = jnp.diff(log_k)

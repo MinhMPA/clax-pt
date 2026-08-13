@@ -134,6 +134,56 @@ class TestPkScalarGradients:
         )
 
 
+# Density-sector regression: ``compute_pk`` integrates the perturbation ODE to
+# ``bg.conformal_age``, which is wrapped in ``stop_gradient`` so AD compiles
+# (PIDController + RecursiveCheckpointAdjoint cannot reverse-mode through a
+# traced ``t1``). The single-mode path then re-applies the missing
+# ``dδ_m/dτ · dτ_end/dθ`` chain-rule term analytically. Without that Taylor
+# correction the stop_gradient drops ~70% of the gradient for h/omega_b/omega_cdm
+# (parameters that change ``conformal_age`` via H(z)) while leaving primordial
+# parameters (which never enter ``τ_end``) unaffected. This test catches a
+# regression in that correction; the 5% threshold accommodates the AD/FD
+# precision floor at the contract ``pt_ode_rtol=1e-6`` (empirically ~3% on
+# omega_b at k=3e-4, ~1% on h, <1% on omega_cdm; tightens to <1.5% at 1e-7
+# but full-precision sweeps make the test heavy). Without the Taylor fix
+# residuals were 65-84%, so this threshold fails loudly on regression.
+PK_GRAD_DENSITY_PARAMS = ("h", "omega_b", "omega_cdm")
+PK_GRAD_DENSITY_FD_STEPS = {
+    "h": 1.0e-3,
+    "omega_b": 1.0e-5,
+    "omega_cdm": 1.0e-3,
+}
+PK_GRAD_DENSITY_REL_TOL = 0.05
+
+
+class TestPkScalarDensityGradients:
+    """Regression: ``dP/dtheta`` for density-sector parameters survives the
+    ``stop_gradient(bg.conformal_age)`` boundary in the single-mode path."""
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("param_name", PK_GRAD_DENSITY_PARAMS)
+    def test_density_partial_matches_fd(self, param_name, fast_mode):
+        if fast_mode:
+            pytest.skip("density-sector regression runs in full mode only")
+        k_test = float(PK_GRAD_FULL_K[0])
+        prec = PK_GRAD_CONTRACT_PREC
+        grad_ad = float(
+            getattr(
+                jax.grad(lambda p: compute_pk_scalar_direct(p, prec, k_test))(FIDUCIAL_PARAMS),
+                param_name,
+            )
+        )
+        step = PK_GRAD_DENSITY_FD_STEPS[param_name]
+        grad_fd = _fd_partial(param_name, step, k_test, prec)
+        rel_err = abs(grad_ad - grad_fd) / (abs(grad_fd) + 1e-30)
+        assert rel_err < PK_GRAD_DENSITY_REL_TOL, (
+            f"dP/d{param_name} at k={k_test:.3g} Mpc^-1: AD={grad_ad:.6e} "
+            f"FD={grad_fd:.6e} rel_err={rel_err:.2%} >= {PK_GRAD_DENSITY_REL_TOL:.0%}. "
+            f"Likely regression in the τ_end Taylor correction inside "
+            f"_matter_delta_m_single_k_impl."
+        )
+
+
 class TestPkPublicTableGradients:
     """Tests public table-backed scalar ``P(k)`` partial derivatives."""
 

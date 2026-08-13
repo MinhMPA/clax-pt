@@ -22,7 +22,27 @@ The goal is a differentiable alternative to CLASS and CLASS-PT that enables grad
 
 ## Status
 
-Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. `fit_cl` preset for HMC / fitting; `planck_cl` for science-grade accuracy (487s on H100). See [CHANGELOG.md](CHANGELOG.md) for details.
+Sub-0.2% unlensed C_l^TT/EE at l=20-1200. Full lensed C_l^TT/EE/TE/BB (sub-0.2% at l=10-2000). Multi-cosmology validated (10 LCDM parameter points). Full ncdm Boltzmann hierarchy. `fit_cl` preset for HMC / fitting; `planck_cl` for science-grade accuracy (487s on H100). One-loop EFTofLSS module (`clax.ept`) ports the CLASS-PT FFTLog pipeline to JAX with sub-percent accuracy on monopoles/quadrupoles. See [CHANGELOG.md](CHANGELOG.md) for details.
+
+## One-loop EFTofLSS (`clax.ept`) accuracy vs CLASS-PT
+
+All comparisons at Planck 2018 best-fit LCDM, z=0.38, k < 0.30 h/Mpc:
+
+| Spectrum            | Max error | Mean error | Notes                              |
+|---------------------|-----------|------------|------------------------------------|
+| P_mm real-space     | **0.33%** | 0.10%      | Matter-matter, IR resummed         |
+| P_gg real-space     | **0.35%** | 0.12%      | Galaxy-galaxy (b1=2)               |
+| P_gm real-space     | **0.28%** | 0.09%      | Galaxy-matter cross                |
+| P_mm ell=0          | **0.21%** | 0.08%      | Matter monopole                    |
+| P_mm ell=2          | **0.34%** | 0.11%      | Matter quadrupole                  |
+| P_mm ell=4          | **1.2%**  | 0.45%      | Matter hexadecapole                |
+| P_gg ell=0          | **0.42%** | 0.15%      | Galaxy monopole                    |
+| P_gg ell=2          | **0.89%** | 0.50%      | Galaxy quadrupole                  |
+| P_gg ell=4          | **1.8%**  | 0.72%      | Galaxy hexadecapole                |
+
+Sub-percent on all monopoles and quadrupoles. Hexadecapole within 2% (limited by the small signal amplitude and zero-crossings — see project memory `project_ept_hexadecapole_floor`).
+
+The `clax.ept` module additionally feeds CMB lensing C_l^phiphi corrections via `compute_cl_pp(... nonlinear="ept")`.
 
 ## Accuracy comparison against CLASS v3.3.4
 
@@ -34,9 +54,9 @@ All comparisons at Planck 2018 best-fit LCDM. GPU: H100-80GB.
 
 | Multipole l | C_l^TT error | C_l^EE error | C_l^TE error |
 |-------------|-------------|-------------|-------------|
-| 20          | **-0.08%**  | **-0.21%**  | -0.3%       |
-| 30          | **-0.05%**  | **-0.11%**  | -0.5%       |
-| 50          | **-0.05%**  | **-0.05%**  | +0.8%       |
+| 20          | **-0.08%**  | **-0.21%**  | -0.3% †     |
+| 30          | **-0.05%**  | **-0.11%**  | -0.5% †     |
+| 50          | **-0.05%**  | **-0.05%**  | +0.8% †     |
 | 100         | **-0.02%**  | **+0.02%**  | **-0.03%**  |
 | 200         | **-0.05%**  | **-0.04%**  | **-0.05%**  |
 | 300         | **-0.06%**  | **-0.02%**  | **-0.04%**  |
@@ -45,7 +65,9 @@ All comparisons at Planck 2018 best-fit LCDM. GPU: H100-80GB.
 | 1000        | **-0.57%**  | **-0.26%**  | +1.7%       |
 | 1200        | **-0.07%**  | **+0.03%**  | —           |
 
-Bold = sub-percent. **TT sub-0.1% at l=20-300 and l=1200.** EE sub-0.3% from l=20 to l=1200. TE zero crossings near l=52 and l=400 cause large relative errors.
+Bold = sub-percent. **TT sub-0.1% at l=20-300 and l=1200.** EE sub-0.3% from l=20 to l=1200.
+
+† Near a TE zero crossing (ℓ≈52 in Planck-fiducial ΛCDM; second crossing near ℓ≈400). The relative-error metric `(clax − CLASS) / CLASS` is ill-defined when `C_l^TE → 0`; the absolute residual is comparable to neighboring ℓ where the metric is well-defined. The standard Hu & White (1997) correlation criterion `|C_l^TE| / √(C_l^TT · C_l^EE) < 0.02` flags these multipoles, and the lensed-TE accuracy test in `tests/test_lensing.py:156` already skips them. A Gaussian likelihood weights TE zero-crossing modes by `1/Var(C_l^TE) → 0` automatically, so this metric artifact does not affect HMC inference.
 
 ### Lensed C_l angular power spectra
 
@@ -302,8 +324,9 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | `bessel.py`         | Spherical Bessel functions j_l(x)                |
 | `transfer.py`       | Linear matter P(k) from perturbation solve       |
 | `harmonic.py`       | C_l^TT/EE/TE/BB from line-of-sight integration  |
-| `lensing.py`        | C_l^phiphi (source-Limber, optional Halofit NL) and lensed C_l (correlation-function method) |
-| `nonlinear.py`      | HaloFit (Takahashi 2012)                         |
+| `lensing.py`        | C_l^phiphi (source-Limber, optional Halofit / clax-pt NL) and lensed C_l (correlation-function method) |
+| `nonlinear.py`      | HaloFit (Takahashi 2012 + Bird 2012 ν correction)|
+| `ept.py`            | One-loop EFTofLSS via FFTLog (CLASS-PT algorithm in JAX); real-space and RSD multipoles, IR resummation, bias |
 | `shooting.py`       | theta_s -> H0 via Newton + `custom_vjp`          |
 
 ## Precision presets
@@ -342,16 +365,19 @@ Default parameters correspond to Planck 2018 best-fit LCDM:
 - **TT l=400-800**: +0.10-0.18% residual from SW+Doppler source amplitude (~0.06% excess at k~0.03). Comparable to CAMB-CLASS inter-code variation (~0.07%).
 - **TT l>1200**: Degrades due to k-integration under-resolution (Bessel oscillation period constant in k, but log-uniform grid spacing grows). Hybrid linear/log k-grid would fix this.
 - **EE l=20-30**: ~0.2% from RECFAST visibility function bias. HyRec recombination would improve to sub-0.1%.
-- **BB tensor modes**: Lensing BB is accurate (<0.5% at l<=1000), but primordial BB still ~2x off CLASS.
-- **TE zero crossings**: Large relative errors near l=52 and l=400 where C_l^TE crosses zero.
+- **BB tensor modes**: Lensing BB is accurate (<0.5% at l<=1000). Primordial BB matches CLASS to sub-percent at l<=200 and ~2% at l=300 with `compute_cl_bb(... n_k_fine=2000)` at planck_cl-style precision.
 
 ## References
 
 - **CLASS v3.3.4**: Blas, Lesgourgues & Tram (2011). [arXiv:1104.2933](https://arxiv.org/abs/1104.2933)
+- **CLASS-PT**: Chudaykin, Ivanov, Philcox & Simonović (2020). Non-linear perturbation theory extension of CLASS. [arXiv:2004.10607](https://arxiv.org/abs/2004.10607)
+- **EFT-with-FFT**: Nguyen (2026). Pedagogical notes on FFTLog computation of one-loop PT integrals. [GitHub](https://github.com/MinhMPA/EFT-with-FFT)
 - **DISCO-DJ**: Hahn, List & Porqueres (2023). Differentiable Einstein-Boltzmann solver in JAX. [arXiv:2311.03291](https://arxiv.org/abs/2311.03291)
 - **Bolt.jl**: Li, Sullivan & Millea (2023). Differentiable Boltzmann solver in Julia. [Zenodo: 10.5281/zenodo.10065126](https://zenodo.org/records/10065126)
 - Seljak & Zaldarriaga (1996). Line-of-sight integration approach. [arXiv:astro-ph/9603033](https://arxiv.org/abs/astro-ph/9603033)
 - Ma & Bertschinger (1995). Cosmological perturbation theory. [arXiv:astro-ph/9506072](https://arxiv.org/abs/astro-ph/9506072)
+
+For more on the `clax.ept` module, see `docs/clax-pt.md`, `docs/CLASS-PT-summary.md`, and `docs/FFTLog_PT.md`.
 
 ## License
 

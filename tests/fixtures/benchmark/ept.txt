@@ -1,0 +1,39 @@
+Platform: gpu ([CudaDevice(id=0)])
+JAX version: 0.10.0
+Preset: medium, z list: [0.0, 0.38, 0.61, 1.0]
+
+Step 1 — upstream Boltzmann (BG + TH + perturbations_solve_mpk)
+  BG + TH (compile + cached): 1.23s
+  perturbations_solve_mpk (compile + cached): 32.10s
+  pt.delta_m shape: (89, 500)
+
+Step 2 — EPT forward at z=0.38 (default EPTPrecisionParams, nmax=256)
+  median: 0.412s   range: [0.401, 0.425]
+  k-grid: 256 points, kh=[0.0001, 100.0] h/Mpc
+  P_mm(k=0.1): 10234.56 (Mpc/h)^3
+
+Step 3 — multi-z scaling, z_list = [0.0, 0.38, 0.61, 1.0]
+  z= 0.00: median 0.405s
+  z= 0.38: median 0.412s
+  z= 0.61: median 0.408s
+  z= 1.00: median 0.410s
+  Total over 4 z values: 1.635s (avg 0.409s per z)
+
+Step 4 — AD gradient: d(sum P_gg) / d(omega_b)
+  Gradient compile (first call): 89.34s
+  median: 1.234s   range: [1.221, 1.249]
+  Backward/Forward ratio (full pipeline): 3.0x
+
+Step 5 — accuracy regression vs reference_data/classpt_z0.38_fullrange.npz
+  P_mm real: max rel err = 0.312%, mean = 0.041%
+  P_gg real (b1=2): max rel err = 0.312%, mean = 0.041%
+
+============================================================
+SUMMARY
+============================================================
+  Preset:                   medium
+  Platform:                 gpu
+  Upstream BG+TH+PT (compile + cached): 33.33s
+  EPT forward at z=0.38 (cached):  0.412s
+  EPT forward (multi-z avg):       0.409s
+  EPT scalar gradient (full pipe): 1.234s

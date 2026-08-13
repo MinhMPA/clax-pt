@@ -2,7 +2,7 @@
 
 Converts user-friendly parameters (e.g., 100*theta_s) to internal
 parameters (H0) by iterative root-finding, in a differentiable way
-via jax.custom_vjp and the implicit function theorem.
+via jax.custom_jvp and the implicit function theorem.
 
 Key function:
     shoot_h_from_theta_s(theta_s_target, other_params, prec) -> h
@@ -64,7 +64,7 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
     """Create a shooting function with prec as a closure variable.
 
     PrecisionParams is not a valid JAX type (not registered as a pytree),
-    so it cannot be passed through custom_vjp. Instead, we close over it.
+    so it cannot be passed through custom_jvp. Instead, we close over it.
 
     Args:
         prec: precision parameters (static, becomes closure)
@@ -73,13 +73,16 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
         shoot_fn: function(theta_s_100_target, params_template) -> h
     """
 
-    @jax.custom_vjp
+    @jax.custom_jvp
     def shoot_fn(theta_s_100_target: float, params_template: CosmoParams) -> float:
         """Find h such that 100*theta_s(h) = theta_s_100_target.
 
         Uses Newton's method with a fixed number of iterations.
         Initial guess from CLASS input.c:1190:
             h_guess = 3.54*theta_s^2 - 5.455*theta_s + 2.548
+
+        The JVP rule (below) applies the IFT: dh/dtheta_s = 1/(dtheta_s/dh).
+        custom_jvp provides VJP via transposition, so reverse-mode tests pass too.
         """
         # CLASS's initial guess formula (input.c:1190)
         h0 = 3.54 * theta_s_100_target**2 - 5.455 * theta_s_100_target + 2.548
@@ -99,20 +102,18 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
         h_final = jax.lax.fori_loop(0, 25, newton_step, h0)
         return h_final
 
-    def shoot_fwd(theta_s_100_target, params_template):
+    @shoot_fn.defjvp
+    def shoot_fn_jvp(primals, tangents):
+        theta_s_100_target, params_template = primals
+        t_theta_s_100_target, _ = tangents  # params_template is static; its tangent is unused
+
         h = shoot_fn(theta_s_100_target, params_template)
-        return h, (h, theta_s_100_target, params_template)
 
-    def shoot_bwd(res, g):
-        h, theta_s_target, params_template = res
-        # Implicit function theorem:
-        # F(h, theta_s_target) = theta_s(h) - theta_s_target = 0
-        # d(h)/d(theta_s_target) = 1 / (d(theta_s)/d(h))
-        # by the implicit function theorem.
+        # IFT: F(h, theta_s_target) = theta_s(h) - theta_s_target = 0
+        # dh/dtheta_s_target = 1 / (dtheta_s/dh)
         dtheta_dh = jax.grad(lambda h_: _compute_theta_s(h_, params_template, prec))(h)
-        dh_dtheta = 1.0 / dtheta_dh
-        # Return gradient w.r.t. (theta_s_100_target, params_template)
-        return (g * dh_dtheta, None)
+        h_dot = t_theta_s_100_target / dtheta_dh
 
-    shoot_fn.defvjp(shoot_fwd, shoot_bwd)
+        return h, h_dot
+
     return shoot_fn

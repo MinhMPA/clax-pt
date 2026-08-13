@@ -148,3 +148,128 @@ class TestThermoGradients:
         assert rel < 0.01, (
             f"dkappa_dot_dloga(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
         )
+
+    def test_kappa_dot_gradient_matches_fd_for_omega_b(self):
+        """AD gradient of kappa_dot_of_loga must not blow up from Friedmann scan.
+
+        Without n_H_0 rescaling, the accumulated eigenvalue from the Friedmann
+        scan inflates this gradient ~10^8x above the FD value. With rescaling
+        the error should be <1%.
+        """
+        ad, fd = _thermo_ad_fd_pair(
+            "omega_b", lambda th: th.kappa_dot_of_loga.evaluate(jnp.array(-8.0))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, (
+            f"kappa_dot(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
+    def test_exp_m_kappa_gradient_matches_fd_for_omega_b(self):
+        """AD gradient of exp_m_kappa_of_loga matches FD at loga=-7 (recombination).
+
+        In clax-pt the exp_m_kappa gradient at loga=-8 underflows to ~0 (kappa~200,
+        exp(-200)~3e-87), so we probe at loga=-7.0 where exp_m_kappa~0.33.
+        The gradient is correct without n_H_0 rescaling at this point because
+        kappa is dominated by post-loga=-7 integration (not the blown-up early region).
+        """
+        ad, fd = _thermo_ad_fd_pair(
+            "omega_b", lambda th: th.exp_m_kappa_of_loga.evaluate(jnp.array(-7.0))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.05, (
+            f"exp_m_kappa(loga=-7) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
+    def test_g_gradient_matches_fd_for_omega_b(self):
+        """AD gradient of g_of_loga (visibility) matches FD at loga=-7 (recombination).
+
+        Same probe-point rationale as test_exp_m_kappa: loga=-7 is where exp_m_kappa
+        is non-trivially large (0.33) so the gradient is meaningful.
+        """
+        ad, fd = _thermo_ad_fd_pair(
+            "omega_b", lambda th: th.g_of_loga.evaluate(jnp.array(-7.0))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.05, (
+            f"g(loga=-7) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
+
+_PREC_JVP = PrecisionParams(
+    bg_n_points=400, ncdm_bg_n_points=200, bg_tol=1e-8,
+    th_n_points=10000, th_z_max=5e3,
+    ode_adjoint="direct",
+)
+
+
+def _thermo_jvp_fd_pair(param_name, quantity_fn):
+    """Return ``(jvp_tangent, fd)`` for one scalar thermodynamics quantity.
+
+    Uses ode_adjoint='direct' so jax.jvp can propagate through the background ODE.
+    """
+    params = CosmoParams()
+    step = PK_GRAD_PARAM_STEPS[param_name]
+    x0 = getattr(params, param_name)
+
+    def wrapped(x):
+        varied = params.replace(**{param_name: x})
+        bg = background_solve(varied, _PREC_JVP)
+        th = thermodynamics_solve(varied, _PREC_JVP, bg)
+        return quantity_fn(th)
+
+    _, tangent = jax.jvp(wrapped, (x0,), (jnp.array(1.0),))
+    fd = float((wrapped(x0 + step) - wrapped(x0 - step)) / (2.0 * step))
+    return float(tangent), fd
+
+
+def test_find_z_reio_forward_mode_matches_fd():
+    """jax.jvp through z_reio(omega_b) is finite and matches centred FD to <1%.
+
+    RED before converting _find_z_reio from custom_vjp to custom_jvp
+    (raises TypeError: can't apply forward-mode autodiff to a custom_vjp function).
+    GREEN after conversion.
+    """
+    jvp_val, fd = _thermo_jvp_fd_pair("omega_b", lambda th: th.z_reio)
+    assert jnp.isfinite(jvp_val), f"jvp returned non-finite tangent: {jvp_val}"
+    rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+    assert rel < 0.01, (
+        f"jvp(z_reio, omega_b)={jvp_val:.6e}  FD={fd:.6e}  rel={rel:.2%}"
+    )
+
+
+class TestThermoForwardModeAD:
+    """Forward-mode AD (jax.jvp) through kappa_dot, exp_m_kappa, g splines.
+
+    Complements TestThermoGradients (reverse-mode). Confirms:
+    1. jax.jvp runs without TypeError (no custom_vjp blocking; uses ode_adjoint='direct')
+    2. Tangents are finite (n_H_0 rescaling prevents ~10^12x blowup for kappa_dot)
+    3. Tangents match centred FD to <1% at loga=-8 for kappa_dot;
+       exp_m_kappa and g are tested at loga=-7.0 where their values are non-trivial.
+    """
+
+    def test_kappa_dot_forward_mode_matches_fd(self):
+        """jax.jvp(kappa_dot, omega_b) is finite and matches FD to <1%."""
+        jvp_val, fd = _thermo_jvp_fd_pair(
+            "omega_b", lambda th: th.kappa_dot_of_loga.evaluate(jnp.array(-8.0))
+        )
+        assert jnp.isfinite(jvp_val), f"jvp(kappa_dot) non-finite: {jvp_val}"
+        rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, f"kappa_dot jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
+
+    def test_exp_m_kappa_forward_mode_matches_fd(self):
+        """jax.jvp(exp_m_kappa, omega_b) is finite and matches FD to <5% at loga=-7."""
+        jvp_val, fd = _thermo_jvp_fd_pair(
+            "omega_b", lambda th: th.exp_m_kappa_of_loga.evaluate(jnp.array(-7.0))
+        )
+        assert jnp.isfinite(jvp_val), f"jvp(exp_m_kappa) non-finite: {jvp_val}"
+        rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.05, f"exp_m_kappa jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
+
+    def test_g_forward_mode_matches_fd(self):
+        """jax.jvp(g, omega_b) is finite and matches FD to <5% at loga=-7."""
+        jvp_val, fd = _thermo_jvp_fd_pair(
+            "omega_b", lambda th: th.g_of_loga.evaluate(jnp.array(-7.0))
+        )
+        assert jnp.isfinite(jvp_val), f"jvp(g) non-finite: {jvp_val}"
+        rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.05, f"g jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"

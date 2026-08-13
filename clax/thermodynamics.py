@@ -260,10 +260,14 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     pHe_s = (1.0 - jnp.exp(-tauHe_s_safe)) / tauHe_s_safe
     K_He = 1.0 / jnp.maximum(_A2P_s_He * pHe_s * 3.0 * n_1s_He, 1e-30)
 
-    # Peebles C_He with Boltzmann 2s-2p factor
-    He_Boltz = jnp.exp(jnp.minimum(_CDB_He2s2p / TM_safe, 500.0))
-    C_He = (1.0 + K_He * _Lambda_He * n_1s_He * He_Boltz) / jnp.maximum(
-        1.0 + K_He * (_Lambda_He + Rup_He) * n_1s_He * He_Boltz, 1e-30)
+    # Peebles C_He: reformulate to avoid inf-inf cancellation in JVP tangent at z~15.
+    # When He_Boltz = exp(CDB/T) >> 1 (z<20), the original form
+    #   (1 + K*L*n*B) / (1 + K*(L+R)*n*B)  →  inf/inf in the tangent.
+    # Stable form: let inv_A = 1/(K_He * n_1s_He * B_He).
+    # C_He = (inv_A + L) / (inv_A + L + R) stays finite as B_He→∞ (inv_A→0).
+    _B_He = jnp.exp(jnp.minimum(_CDB_He2s2p / TM_safe, 500.0))
+    _inv_A_He = 1.0 / jnp.maximum(K_He * n_1s_He * _B_He, 1e-30)
+    C_He = (_inv_A_He + _Lambda_He) / (_inv_A_He + _Lambda_He + Rup_He)
     C_He = jnp.where((xHe < 1e-15) | (xHe > 0.999), 1.0, C_He)
 
     dxHe_dlna = -(
@@ -706,8 +710,10 @@ def thermodynamics_solve(
     z_grid = 1.0 / a_grid - 1.0
     mu_H = 1.0 / (1.0 - Y_He)
     _bigH = 3.2407792902755102e-18  # H0=100 km/s/Mpc in s^-1
-    _m_p = 1.672621637e-27  # proton mass [kg], cf. CLASS thermodynamics.h:705
-    n_H_0 = 3.0 * (_bigH * params.h)**2 / (8.0 * math.pi * const.G_SI * _m_p * mu_H) * Omega_b
+    # n_H_0 = (1-Y_He) * rho_b / m_H, where the appropriate mass is the hydrogen
+    # atom mass (m_H), NOT the proton mass (m_p).  CLASS does the same at
+    # thermodynamics.c:812 using _m_H_ = 1.673575e-27 kg.
+    n_H_0 = 3.0 * (_bigH * params.h)**2 / (8.0 * math.pi * const.G_SI * const.m_H_kg * mu_H) * Omega_b
     # kappa_dot prefactor: kappa_dot(z) = xe * n_H_0 * (1+z)^2 * sigma_T * c/Mpc
     kd_prefactor = n_H_0 * (1.0 + z_grid)**2 * const.sigma_T * const.Mpc_over_m
     dtau_grid = jnp.diff(tau_grid)
@@ -728,6 +734,13 @@ def thermodynamics_solve(
     # --- Optical depth ---
     kappa_dot_grid = xe_grid * kd_prefactor
 
+    # n_H_0 rescaling for AD-safe splines: kappa_dot ∝ n_H_0 linearly.
+    # stop_gradient kills the accumulated Friedmann-scan eigenvalue (~10^12x blowup);
+    # the n_H_0 / sg(n_H_0) factor restores only the physically correct omega_b path.
+    _sg = jax.lax.stop_gradient
+    loga_grid_sg = _sg(loga_grid)
+    _kd_safe = _sg(kappa_dot_grid) * (n_H_0 / _sg(n_H_0))
+
     # κ = ∫_τ^τ_0 κ'(τ') dτ' (integrate backwards from today)
     kappa_integrand = 0.5 * (kappa_dot_grid[:-1] + kappa_dot_grid[1:]) * dtau_grid
     kappa_cumulative = jnp.cumsum(kappa_integrand[::-1])[::-1]
@@ -739,7 +752,8 @@ def thermodynamics_solve(
     # --- g' = dg/dτ analytically (CLASS thermodynamics.c:3482-3483) ---
     # g = κ̇ e^{-κ},  g' = (κ̈ + κ̇²) e^{-κ}
     # where κ̈ = d(κ̇)/dτ and dκ̇/dτ = (dκ̇/dloga) * aH.
-    dkd_dloga_grid = _first_derivative_table(loga_grid, kappa_dot_grid)
+    # Use _kd_safe for the stored dkd/dloga spline to avoid the Friedmann blowup.
+    dkd_dloga_grid = _first_derivative_table(loga_grid_sg, _kd_safe)
     # a'/a = aH at each grid point
     a_grid_loc = jnp.exp(loga_grid)
     H_grid_loc = jax.vmap(bg.H_of_loga.evaluate)(loga_grid)
@@ -760,8 +774,8 @@ def thermodynamics_solve(
     # Need to sort by loga (which is increasing as a increases)
     xe_of_loga = CubicSpline(loga_grid, xe_grid)
     Tb_of_loga = CubicSpline(loga_grid, tb_grid)
-    kappa_dot_of_loga = CubicSpline(loga_grid, kappa_dot_grid)
-    dkappa_dot_dloga_of_loga = CubicSpline(loga_grid, dkd_dloga_grid)
+    kappa_dot_of_loga = CubicSpline(loga_grid_sg, _kd_safe)
+    dkappa_dot_dloga_of_loga = CubicSpline(loga_grid_sg, dkd_dloga_grid)
     exp_m_kappa_of_loga = CubicSpline(loga_grid, exp_m_kappa_grid)
     g_of_loga = CubicSpline(loga_grid, g_grid)
     g_prime_of_loga = CubicSpline(loga_grid, g_prime_grid)
@@ -840,7 +854,7 @@ def _find_z_reio_impl(
     return 0.5 * (z_lo + z_hi)
 
 
-@jax.custom_vjp
+@jax.custom_jvp
 def _find_z_reio(
     tau_reio_target,
     xe_raw_grid,
@@ -849,84 +863,60 @@ def _find_z_reio(
     z_grid,
     Y_He,
 ):
-    """Differentiable ``z_reio`` solve with implicit backward pass.
+    """Differentiable ``z_reio`` solve with IFT-based JVP rule.
 
-    The primal calculation uses the robust bounded bisection in
-    ``_find_z_reio_impl``. The backward pass applies the implicit function
-    theorem to the scalar residual
+    The primal uses bounded bisection in ``_find_z_reio_impl``.
+    The JVP rule applies the implicit function theorem to
 
-        F(z_reio, inputs) = tau_reio_model(z_reio, inputs) - tau_reio_target.
+        F(z_reio, inputs) = tau_reio_model(z_reio, inputs) - tau_reio_target = 0
 
-    This preserves forward behavior while avoiding the zero AD sensitivity from
-    the discrete bisection branch updates.
+    giving  dz_reio = -dF/dinputs · dinputs / (dF/dz_reio).
+
+    custom_jvp provides VJP via automatic transposition so existing
+    reverse-mode gradient tests continue to pass unchanged.
     """
     return _find_z_reio_impl(
         tau_reio_target, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He
     )
 
 
-def _find_z_reio_fwd(
-    tau_reio_target,
-    xe_raw_grid,
-    kd_prefactor,
-    dtau_grid,
-    z_grid,
-    Y_He,
-):
+@_find_z_reio.defjvp
+def _find_z_reio_jvp(primals, tangents):
+    tau_reio_target, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He = primals
+    (
+        t_tau_reio_target, t_xe_raw_grid, t_kd_prefactor, t_dtau_grid, t_z_grid, t_Y_He
+    ) = tangents
+
     z_reio = _find_z_reio_impl(
         tau_reio_target, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He
     )
-    return z_reio, (
-        z_reio,
-        tau_reio_target,
-        xe_raw_grid,
-        kd_prefactor,
-        dtau_grid,
-        z_grid,
-        Y_He,
+
+    def residual(z_reio_cand, tau_t, xe_g, kd_p, dtau_g, z_g, y_he):
+        return (
+            _tau_reio_for_zreio(z_reio_cand, xe_g, kd_p, dtau_g, z_g, y_he)
+            - tau_t
+        )
+
+    dF_dz = jax.grad(residual, argnums=0)(
+        z_reio, tau_reio_target, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He
     )
-
-
-def _find_z_reio_bwd(res, g):
-    z_reio, tau_reio_target, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He = res
-
-    def residual_z(z_reio_cand):
-        return _tau_reio_for_zreio(
-            z_reio_cand, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He
-        ) - tau_reio_target
-
-    dF_dz = jax.grad(residual_z)(z_reio)
     dF_dz = jnp.where(
         jnp.abs(dF_dz) < 1e-12,
         jnp.where(dF_dz >= 0.0, 1e-12, -1e-12),
         dF_dz,
     )
 
-    def residual_inputs(
-        tau_reio_target_,
-        xe_raw_grid_,
-        kd_prefactor_,
-        dtau_grid_,
-        z_grid_,
-        Y_He_,
-    ):
-        return _tau_reio_for_zreio(
-            z_reio, xe_raw_grid_, kd_prefactor_, dtau_grid_, z_grid_, Y_He_
-        ) - tau_reio_target_
-
-    _, vjp_fn = jax.vjp(
-        residual_inputs,
-        tau_reio_target,
-        xe_raw_grid,
-        kd_prefactor,
-        dtau_grid,
-        z_grid,
-        Y_He,
+    # IFT: dz = -dF/dinputs · t_inputs / dF/dz
+    _, dF_dinputs = jax.jvp(
+        lambda tau_t, xe_g, kd_p, dtau_g, z_g, y_he: residual(
+            z_reio, tau_t, xe_g, kd_p, dtau_g, z_g, y_he
+        ),
+        (tau_reio_target, xe_raw_grid, kd_prefactor, dtau_grid, z_grid, Y_He),
+        (t_tau_reio_target, t_xe_raw_grid, t_kd_prefactor, t_dtau_grid, t_z_grid, t_Y_He),
     )
-    return vjp_fn(-g / dF_dz)
+    z_reio_dot = -dF_dinputs / dF_dz
 
-
-_find_z_reio.defvjp(_find_z_reio_fwd, _find_z_reio_bwd)
+    return z_reio, z_reio_dot
 
 
 def _estimate_z_reio(tau_reio_target):

@@ -93,12 +93,13 @@ class TestContract:
         with pytest.raises(ValueError, match="unknown nonlinear"):
             compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="bogus")
 
-    def test_ept_not_yet_supported(self, pipeline):
-        """``nonlinear='ept'`` is reserved for a follow-up PR (clax-pt)."""
+    def test_ept_accepted(self, pipeline):
+        """``nonlinear='ept'`` is now an accepted value (no ValueError)."""
         from clax.lensing import compute_cl_pp
         params, bg, th, pt = pipeline
-        with pytest.raises(ValueError, match="unknown nonlinear='ept'"):
-            compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="ept")
+        cl = compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="ept")
+        assert cl.shape == (11,)
+        assert float(cl[2]) > 0
 
 
 # -----------------------------------------------------------------------------
@@ -211,6 +212,53 @@ class TestHalofit:
 
     def test_no_boost_at_low_l(self, cl_pair):
         """NL/linear ratio is ~1 at l<=50 (Halofit irrelevant on largest scales)."""
+        cl_lin, cl_nl = cl_pair
+        for l_val in [10, 30, 50]:
+            ratio = cl_nl[l_val] / cl_lin[l_val]
+            print(f"  l={l_val}: NL/lin = {ratio:.4f}")
+            assert abs(ratio - 1.0) < 0.02, (
+                f"l={l_val}: NL/lin={ratio:.4f}, expected ~1 at low l")
+
+
+class TestEPT:
+    """Smoke tests for ``nonlinear='ept'`` (clax-pt one-loop EFT injection).
+
+    The EPT path runs one ``compute_ept_from_clax`` at z=0 and growth-
+    rescales to other redshifts via leading-order D^2 scaling. Quantitative
+    accuracy vs CLASS-PT is documented in the EPT module.
+    """
+
+    @pytest.fixture(scope="class")
+    def cl_pair(self, pipeline):
+        from clax.lensing import compute_cl_pp
+        params, bg, th, pt = pipeline
+        cl_lin = np.array(compute_cl_pp(pt, params, bg, th, l_max=2000,
+                                         nonlinear="none"))
+        cl_nl = np.array(compute_cl_pp(pt, params, bg, th, l_max=2000,
+                                        nonlinear="ept"))
+        return cl_lin, cl_nl
+
+    def test_positive(self, cl_pair):
+        """EPT C_l^pp is positive."""
+        _, cl_nl = cl_pair
+        assert np.all(cl_nl[2:] > 0), "C_l^pp EPT must be positive for l>=2"
+
+    def test_finite(self, cl_pair):
+        """EPT C_l^pp is finite."""
+        _, cl_nl = cl_pair
+        assert np.all(np.isfinite(cl_nl)), "C_l^pp EPT has non-finite entries"
+
+    def test_nl_boost_at_high_l(self, cl_pair):
+        """NL/linear ratio is >1 at l>=500 (1-loop contribution positive)."""
+        cl_lin, cl_nl = cl_pair
+        for l_val in [500, 1000, 1500, 2000]:
+            ratio = cl_nl[l_val] / cl_lin[l_val]
+            print(f"  l={l_val}: NL/lin = {ratio:.4f}")
+            assert ratio > 1.001, (
+                f"l={l_val}: NL/lin={ratio:.4f}, expected > 1.001")
+
+    def test_no_boost_at_low_l(self, cl_pair):
+        """NL/linear ratio is ~1 at l<=50 (1-loop irrelevant on largest scales)."""
         cl_lin, cl_nl = cl_pair
         for l_val in [10, 30, 50]:
             ratio = cl_nl[l_val] / cl_lin[l_val]
