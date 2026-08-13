@@ -1,5 +1,31 @@
 # clax Development Progress
 
+### May 10-11, 2026: PR-D — AD correctness fixes ported to benchmark/clax-pt
+
+Branch: `fix/ad-correctness-clax-pt` → `benchmark/clax-pt` (MinhMPA/clax-pt).
+PR must be opened manually (gh CLI not authenticated on compute node):
+  https://github.com/MinhMPA/clax-pt/pull/new/fix/ad-correctness-clax-pt
+
+Ports four AD-correctness fixes from main clax (PR-A/B/C):
+
+1. **C_He stable JVP form** (`thermodynamics.py`): `C_He = (inv_A+L)/(inv_A+L+R)` avoids
+   inf-inf cancellation in forward-mode tangent at z~15 (He recombination tail).
+
+2. **n_H_0 rescaling** (`thermodynamics.py`): `_kd_safe = sg(kd)*(n_H_0/sg(n_H_0))`
+   stops accumulated Friedmann-scan eigenvalue (~10^12x blowup) for kappa_dot and
+   dkd_dloga splines. clax-pt adaptation: also applied to `_first_derivative_table`
+   (finite-difference derivative, not CubicSpline.derivative as in main clax).
+
+3. **`_find_z_reio` custom_vjp -> custom_jvp** (`thermodynamics.py`): IFT JVP rule.
+   clax-pt difference: JVP tests need no xfail since background.py wires prec.ode_adjoint.
+
+4. **`shoot_fn` custom_vjp -> custom_jvp** (`shooting.py`): IFT JVP rule.
+   VJP via automatic transposition; existing reverse-mode gradient tests unchanged.
+
+New tests: TestThermoGradients (kappa_dot, exp_m_kappa, g), TestThermoForwardModeAD (3),
+  test_find_z_reio_forward_mode_matches_fd, TestShootingForwardModeAD.
+Results: **24/24 passed** (thermodynamics 16/16 + shooting 8/8) on V100-32GB.
+
 ### May 4, 2026: README — TE accuracy: flag zero-crossing rows; remove misleading "Known limitation"
 
 The unlensed-`C_l^TE` accuracy table reported `(clax − CLASS) / CLASS` at every
