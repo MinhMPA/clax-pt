@@ -44,6 +44,53 @@ k-grid PR.
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
 
+### May 4, 2026: Primordial BB sub-percent — fix BB radial kernel + add fine-k interpolation
+
+**`clax/harmonic.py:compute_cl_bb` had two compounding bugs that produced
+clax/CLASS C_l^BB ratios anywhere in [0.4×, 22×] depending on l. Both are
+fixed; primordial BB now matches CLASS sub-percent at l<=200, ~2% at l=300.**
+
+**Bug 1 — wrong radial kernel.** The function used
+`sqrt[l(l-1)(l+1)(l+2)] * j_l(x)/x^2`, which is CLASS's
+`TENSOR_TEMPERATURE_2` kernel (`transfer.c:4241-4249`), not the BB kernel.
+Replaced with the CLASS `TENSOR_POLARISATION_B` kernel
+(`transfer.c:4263-4272`, flat-space limit):
+
+    K_l^B(x) = 0.5 * (j_l'(x) + 2 * j_l(x) / x)
+
+using the recurrence `j_l'(x) = j_{l-1}(x) - (l+1)/x * j_l(x)` together with
+the existing `spherical_jl_backward` for both `j_l` and `j_{l-1}`.
+
+**Bug 2 — k-grid undersampling for BB integration.** `compute_cl_bb`
+integrated `P_T(k) * |B_l(k)|^2` over the raw 160-mode perturbation k-grid.
+The Bessel-driven oscillation period at the BB recombination peak
+(k ~ 0.005-0.05 Mpc^-1, x = k * chi_rec ~ l) is comparable to the
+log-uniform k-mode spacing, so adjacent modes can sample opposing peaks of
+`|B_l(k)|^2` and produce trapezoidal-rule errors of 6-30% with sign that
+flips with l. Added cubic-spline interpolation of `source_p` from the
+perturbation k-grid to a fine log-uniform k-grid (`n_k_fine=2000` default),
+mirroring `compute_cls_all_fast` for scalar T,E.
+
+**Validation (`tests/test_tensor.py::TestClBB::test_cl_bb_vs_class`):** ratio
+band tightened from `[0.05, 20.0]` to `[0.95, 1.05]` at l=2,10. At
+production precision (l_max_g=30, 40 k/decade, rtol=1e-6, n_k_fine=2000),
+clax/CLASS BB ratios across l=2,10,30,50,80,100,150,200,300:
+
+| l | ratio |
+|---|-------|
+| 2   | 0.998 |
+| 10  | 0.994 |
+| 30  | 0.996 |
+| 50  | 1.000 |
+| 80  | 1.001 |
+| 100 | 1.001 |
+| 150 | 1.002 |
+| 200 | 1.008 |
+| 300 | 1.018 |
+
+**API:** `compute_cl_bb` now takes an additional keyword-only `n_k_fine=2000`
+argument. Existing positional callers `compute_cl_bb(tpt, params, bg, l_values)`
+work unchanged.
 ### May 3, 2026: Use hydrogen-atom mass (not proton mass) for `n_H_0` in z_reio inversion
 
 **Fixes a one-line unit bug in `clax/thermodynamics.py` that biased the
