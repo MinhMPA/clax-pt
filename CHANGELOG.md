@@ -1,5 +1,44 @@
 # clax Development Progress
 
+### May 4, 2026: README — TE accuracy: flag zero-crossing rows; remove misleading "Known limitation"
+
+The unlensed-`C_l^TE` accuracy table reported `(clax − CLASS) / CLASS` at every
+multipole, including ℓ values near the two ΛCDM TE zero crossings (ℓ≈52, ℓ≈400).
+Near a zero crossing the denominator goes to ~0, so the relative number blows up
+even when the absolute residual matches neighboring ℓ. This was being framed in
+the "Known limitations" section as a real shortcoming, when it is purely a metric
+artifact — the underlying `C_l^TE` matches CLASS as well as TT/EE do.
+
+**Changes:**
+
+1. **README accuracy table:** added a `†` marker on the three rows clearly
+   inside the first zero-crossing region (ℓ=20, 30, 50) and a footnote that
+   states the relative-error metric is ill-defined there, points at the Hu &
+   White (1997) correlation criterion `|C_l^TE| / √(C_l^TT · C_l^EE) < 0.02`,
+   and notes that a Gaussian likelihood weights these modes by
+   `1/Var(C_l^TE) → 0` automatically.
+
+2. **README "Known limitations":** removed the "TE zero crossings" bullet — it
+   was not a physics limitation, only a presentation issue. The remaining
+   limitations in that section (speed, TT ℓ=400-800, TT ℓ>1200, EE ℓ=20-30,
+   primordial BB) are all genuine outstanding items.
+
+**Note on tests:** the existing unlensed-TE accuracy tests in
+`tests/test_harmonic.py::TestClTE` only probe ℓ=100 and ℓ=200, neither of which
+is near a zero crossing, so no test changes are needed. The lensed-TE test
+`tests/test_lensing.py::TestLensCls::test_lensed_te_accuracy` already skips
+zero-crossing ℓ via the same correlation criterion (`corr < 0.02`) — that
+convention is now also documented in the README.
+
+This change is documentation-only; no clax module code is modified.
+
+The ℓ=1000 TE entry (+1.7%) is **not** a zero-crossing artifact — it is a real
+residual driven by k-grid under-resolution at high ℓ (same root cause as the TT
+ℓ>1200 known limitation), to be addressed separately by a hybrid linear/log
+k-grid PR.
+
+---
+
 ## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
@@ -72,6 +111,97 @@ along with `clax.lens_cls`.
 
 **Migration:** pre-1.0, hard break — no deprecation shims. Replace all
 calls to the removed implementations with `compute_cl_pp(... nonlinear=...)`.
+### May 4, 2026: Primordial BB sub-percent — fix BB radial kernel + add fine-k interpolation
+
+**`clax/harmonic.py:compute_cl_bb` had two compounding bugs that produced
+clax/CLASS C_l^BB ratios anywhere in [0.4×, 22×] depending on l. Both are
+fixed; primordial BB now matches CLASS sub-percent at l<=200, ~2% at l=300.**
+
+**Bug 1 — wrong radial kernel.** The function used
+`sqrt[l(l-1)(l+1)(l+2)] * j_l(x)/x^2`, which is CLASS's
+`TENSOR_TEMPERATURE_2` kernel (`transfer.c:4241-4249`), not the BB kernel.
+Replaced with the CLASS `TENSOR_POLARISATION_B` kernel
+(`transfer.c:4263-4272`, flat-space limit):
+
+    K_l^B(x) = 0.5 * (j_l'(x) + 2 * j_l(x) / x)
+
+using the recurrence `j_l'(x) = j_{l-1}(x) - (l+1)/x * j_l(x)` together with
+the existing `spherical_jl_backward` for both `j_l` and `j_{l-1}`.
+
+**Bug 2 — k-grid undersampling for BB integration.** `compute_cl_bb`
+integrated `P_T(k) * |B_l(k)|^2` over the raw 160-mode perturbation k-grid.
+The Bessel-driven oscillation period at the BB recombination peak
+(k ~ 0.005-0.05 Mpc^-1, x = k * chi_rec ~ l) is comparable to the
+log-uniform k-mode spacing, so adjacent modes can sample opposing peaks of
+`|B_l(k)|^2` and produce trapezoidal-rule errors of 6-30% with sign that
+flips with l. Added cubic-spline interpolation of `source_p` from the
+perturbation k-grid to a fine log-uniform k-grid (`n_k_fine=2000` default),
+mirroring `compute_cls_all_fast` for scalar T,E.
+
+**Validation (`tests/test_tensor.py::TestClBB::test_cl_bb_vs_class`):** ratio
+band tightened from `[0.05, 20.0]` to `[0.95, 1.05]` at l=2,10. At
+production precision (l_max_g=30, 40 k/decade, rtol=1e-6, n_k_fine=2000),
+clax/CLASS BB ratios across l=2,10,30,50,80,100,150,200,300:
+
+| l | ratio |
+|---|-------|
+| 2   | 0.998 |
+| 10  | 0.994 |
+| 30  | 0.996 |
+| 50  | 1.000 |
+| 80  | 1.001 |
+| 100 | 1.001 |
+| 150 | 1.002 |
+| 200 | 1.008 |
+| 300 | 1.018 |
+
+**API:** `compute_cl_bb` now takes an additional keyword-only `n_k_fine=2000`
+argument. Existing positional callers `compute_cl_bb(tpt, params, bg, l_values)`
+work unchanged.
+### May 3, 2026: Use hydrogen-atom mass (not proton mass) for `n_H_0` in z_reio inversion
+
+**Fixes a one-line unit bug in `clax/thermodynamics.py` that biased the
+`tau_reio` → `z_reio` inversion at fiducial Planck and propagated to
+EE l=20-30 as a ~1% systematic.**
+
+The `n_H_0` calculation inside `_find_z_reio` (line 710) used the proton
+mass `m_p` where it should have used the hydrogen atom mass `m_H`. CLASS
+uses `_m_H_ = 1.673575e-27 kg` at `thermodynamics.c:812`, and clax's
+RECFAST block at line 534 already used `m_H = 1.67353284e-27 kg` correctly
+— only the reionization-inversion site was off.
+
+`m_H / m_p = 1.000570`, so clax's `n_H_0` was 0.057% too large at this
+site → the bisection target `_tau_reio_for_zreio` overshot by 0.057% →
+the converged `z_reio` came out too low by 0.0033 in absolute redshift.
+That offset propagated as ~1% in `x_e` across the reionization transition
+(z=7-9), ~1% in `g(τ)` at the secondary visibility peak, and to the
+EE l=20-30 residual the README was attributing to "RECFAST visibility
+function bias".
+
+**Empirical impact at Planck 2018 fiducial:**
+
+| Quantity | Pre-fix | Post-fix | CLASS reference |
+|---|---|---|---|
+| `z_reio` (`tau_reio = 0.0544`) | 7.6885 | **7.6915** | 7.6918 |
+| `x_e(z=8)` | 0.2397 (-1.06%) | **0.2420 (-0.11%)** | 0.2423 |
+| `g(τ)` at z=8 vs CLASS | -1.00% | **-0.11%** | — |
+| `g(τ)` at z=1090 (recomb peak) | unchanged | unchanged | — |
+
+The fix closes 90% of the `z_reio` offset; the residual ~3e-4 is the
+2.5e-5-relative numerical difference between clax's atomic 1H-1 mass and
+CLASS's rounded `_m_H_`, well below any current accuracy target.
+
+**Changes:**
+
+- `clax/constants.py`: add `m_H_kg = 1.67353284e-27` with a comment
+  flagging that `m_p` is *not* the right choice for hydrogen number density.
+- `clax/thermodynamics.py:710`: replace local `_m_p` with `const.m_H_kg`
+  in the `n_H_0` formula used by `_find_z_reio`.
+
+The README "Known limitations" line claiming "EE l=20-30: ~0.2% from
+RECFAST visibility function bias" should be reassessed in a follow-up;
+empirically clax/RECFAST `x_e` agrees with HyRec to 0.09% at z=1090, so
+the residual was upstream of recombination, not in RECFAST itself.
 
 ### Apr 20, 2026: Rodas5 Rosenbrock solver + dark energy perturbations + accuracy fixes
 
