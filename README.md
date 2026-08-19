@@ -55,6 +55,40 @@ Full spin-2 correlation function lensing with Cgl2 corrections, 12 Wigner d-func
 
 Lensing algorithm sub-0.2% at all l=10-2000 for TT and EE (tested with CLASS unlensed+pp as input).
 
+### Lensing potential C_l^phiphi
+
+`clax.compute_cl_pp(pt, params, bg, th, l_max, *, nonlinear="none")` uses
+the source-based Limber kernel (CLASS `transfer.c` + `harmonic.c`):
+
+With `pt_k_max_cl >= 5.0 Mpc^-1` (required for Halofit's σ(R) bisection),
+measured residuals at the default cosmology:
+
+Absolute |C_l^phiphi_clax / C_l^phiphi_CLASS - 1| at the default cosmology:
+
+| Multipole l | nonlinear="none" | nonlinear="halofit" | NL/lin ratio agreement |
+|-------------|-----------------:|--------------------:|-----------------------:|
+| 100         | 0.18%            | 0.16%               | 0.02%                  |
+| 200         | 0.14%            | 0.10%               | 0.05%                  |
+| 500         | 0.23%            | 0.15%               | 0.09%                  |
+| 1000        | 0.12%            | 0.08%               | 0.04%                  |
+| 1500        | 0.49%            | 0.61%               | 0.11%                  |
+| 2000        | 0.71%            | 0.76%               | 0.05%                  |
+| 2500        | 0.39%            | 1.16%               | 0.76%                  |
+
+Both nonlinear modes share the same source-Limber kernel, so they track
+each other closely — the absolute Halofit residual is dominated by the
+common linear-kernel systematic, with a small extra contribution from the
+R(k, z) accuracy that the third column isolates. Halofit injection
+multiplies the lensing source by sqrt(R(k, z(τ))) where R = P_NL/P_lin
+is computed on a 100-point z-grid via `vmap(compute_pk_nonlinear)` with
+log-log k-extension to k_max=20 Mpc^-1 (CLASS itself uses a dedicated
+nonlinear k-grid that extends past the perturbation k-range; the
+extension provides the equivalent coverage). Sub-percent absolute
+residual across all ℓ ≤ 2000; ~1% at ℓ=2500 where linear-kernel and
+R-residual systematics add constructively. Narrower k-grids
+(`pt_k_max_cl < 5`) gracefully degrade to no NL correction (R = 1, per
+CLASS `fourier.c:1706-1716`).
+
 ### Multi-cosmology validation
 
 Validated at 10 LCDM parameter variations (omega_b, omega_cdm, h, n_s, tau_reio at +/-20%):
@@ -133,6 +167,16 @@ th = clax.thermodynamics_solve(params, prec, bg)
 pt = perturbations_solve(params, prec, bg, th)
 cl_tt = compute_cl_tt_interp(pt, params, bg, [30, 100, 200])
 cl_ee = compute_cl_ee_interp(pt, params, bg, [30, 100, 200])
+
+# CMB lensing potential C_l^phiphi (linear or Halofit-corrected)
+cl_pp_lin = clax.compute_cl_pp(pt, params, bg, th, l_max=2500)
+cl_pp_nl  = clax.compute_cl_pp(pt, params, bg, th, l_max=2500,
+                                nonlinear="halofit")
+
+# Lens the unlensed CMB spectra
+cl_tt_lensed, cl_ee_lensed, cl_te_lensed, cl_bb_lensed = clax.lens_cls(
+    cl_tt_unlensed, cl_ee_unlensed, cl_te_unlensed, cl_bb_unlensed,
+    cl_pp_nl, l_max=2500)
 ```
 
 ## Installation
@@ -243,7 +287,7 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | `bessel.py`         | Spherical Bessel functions j_l(x)                |
 | `transfer.py`       | Linear matter P(k) from perturbation solve       |
 | `harmonic.py`       | C_l^TT/EE/TE/BB from line-of-sight integration  |
-| `lensing.py`        | Correlation-function lensing method              |
+| `lensing.py`        | C_l^phiphi (source-Limber, optional Halofit NL) and lensed C_l (correlation-function method) |
 | `nonlinear.py`      | HaloFit (Takahashi 2012)                         |
 | `shooting.py`       | theta_s -> H0 via Newton + `custom_vjp`          |
 

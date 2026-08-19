@@ -1,23 +1,31 @@
 """End-to-end test: Halofit C_l^pp NL/linear ratio vs CLASS reference.
 
-Runs the full pipeline (background + thermo + perturbations + Limber C_l^pp)
-with nonlinear=True and compares against CLASS v3.3.4 Halofit data.
+Runs the full pipeline (background + thermo + perturbations + source-Limber
+C_l^pp) with ``nonlinear="halofit"`` and compares against CLASS v3.3.4
+Halofit data.
 
-Reference: reference_data/classpt_clpp_halofit.npz
-  Generated with CLASS v3.3.4 (full Limber scheme) and CosmoParams defaults.
+Reference: ``reference_data/classpt_clpp_halofit.npz``
+  Generated with CLASS v3.3.4 (full Limber scheme + Halofit) for default
+  ``CosmoParams``.
 
-Runtime: ~90-120s (perturbation solve at k_max=5.0 with lean hierarchy).
+Runtime: ~90-180s (perturbation solve at k_max=5.0 with lean hierarchy +
+50-point z-grid Halofit modulator).
 """
+import os
 import numpy as np
 import pytest
 import jax
 jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
 
 import clax
 from clax.perturbations import perturbations_solve
-from clax.lensing import compute_cl_pp_limber
+from clax.lensing import compute_cl_pp
 from dataclasses import replace as dc_replace
+
+
+REFERENCE_FILE = os.path.join(
+    os.path.dirname(__file__), "..",
+    "reference_data", "classpt_clpp_halofit.npz")
 
 
 @pytest.fixture(scope="module")
@@ -38,28 +46,30 @@ def pipeline_results():
 
 @pytest.fixture(scope="module")
 def cl_pp_results(pipeline_results):
-    """Compute linear and Halofit C_l^pp via Limber."""
-    params, prec, bg, th, pt = pipeline_results
+    """Compute linear and Halofit C_l^pp via the public source-Limber path."""
+    params, _, bg, th, pt = pipeline_results
     l_max = 2500
 
-    cl_pp_lin = np.array(compute_cl_pp_limber(
-        pt, params, bg, th, l_max=l_max, n_chi=300, nonlinear=False))
-    cl_pp_hf = np.array(compute_cl_pp_limber(
-        pt, params, bg, th, l_max=l_max, n_chi=300, nonlinear=True))
+    cl_pp_lin = np.array(compute_cl_pp(
+        pt, params, bg, th, l_max=l_max, nonlinear="none"))
+    cl_pp_hf = np.array(compute_cl_pp(
+        pt, params, bg, th, l_max=l_max, nonlinear="halofit"))
 
     return cl_pp_lin, cl_pp_hf
 
 
 @pytest.fixture(scope="module")
 def class_reference():
-    return np.load("reference_data/classpt_clpp_halofit.npz")
+    if not os.path.isfile(REFERENCE_FILE):
+        pytest.skip(f"reference data not found: {REFERENCE_FILE}")
+    return np.load(REFERENCE_FILE)
 
 
 class TestClppLinear:
-    """Linear C_l^pp should match CLASS v3.3.4 to <1% at all l."""
+    """Linear ``compute_cl_pp(nonlinear='none')`` vs CLASS v3.3.4."""
 
     def test_linear_clpp_all_l(self, cl_pp_results, class_reference):
-        """Linear C_l^pp matches CLASS to <1% for l = 100, 500, 1000, 2500."""
+        """Matches CLASS to <1% for l in {100, 500, 1000, 2000, 2500}."""
         cl_pp_lin, _ = cl_pp_results
         ref = class_reference
 
@@ -74,41 +84,36 @@ class TestClppLinear:
 
 
 class TestClppHalofitRatio:
-    """Compare C_l^pp Halofit/linear ratio against CLASS reference."""
+    """``compute_cl_pp(nonlinear='halofit')`` NL/linear ratio vs CLASS Halofit."""
 
     def test_ratio_at_low_l(self, cl_pp_results, class_reference):
-        """NL/linear ratio matches CLASS within 10% for l <= 500.
+        """NL/linear ratio matches CLASS within 0.5% for l <= 500.
 
-        Our Limber chi-integral applies the NL correction to P(k) in the
-        integrand, while CLASS applies sqrt(P_NL/P_lin) to the source at
-        each (k,tau) before the Limber evaluation. This leads to ~5%
-        differences in the NL correction weighting at high l.
+        Source-multiplication recipe (matches CLASS) + 100-point z-grid +
+        log-log k-extension to 20 Mpc^-1. Measured residuals at the
+        default cosmology: 0.02% at l=100, 0.04% at l=200, 0.09% at l=500.
         """
         cl_pp_lin, cl_pp_hf = cl_pp_results
         ref = class_reference
 
-        test_ells = [100, 200, 500]
         print("\nNL/linear ratio comparison (l <= 500):")
         print(f"  {'l':>5s}  {'clax':>8s}  {'CLASS':>8s}  {'err':>8s}")
-        for l_val in test_ells:
+        for l_val in [100, 200, 500]:
             idx = l_val - 2
             ref_ratio = ref['pp_halofit'][idx] / ref['pp_lin'][idx]
             our_ratio = cl_pp_hf[l_val] / cl_pp_lin[l_val]
 
-            ref_corr = ref_ratio - 1.0
-            our_corr = our_ratio - 1.0
-            rel_err = abs(our_corr - ref_corr) / abs(ref_corr) if abs(ref_corr) > 0.005 else abs(our_corr - ref_corr)
+            rel_err = abs(our_ratio / ref_ratio - 1.0)
             print(f"  {l_val:5d}  {our_ratio:8.4f}  {ref_ratio:8.4f}  {rel_err:8.2%}")
-            assert rel_err < 0.10, (
-                f"l={l_val}: NL correction err={rel_err:.1%} exceeds 10%")
+            assert rel_err < 0.005, (
+                f"l={l_val}: NL ratio err={rel_err:.2%} exceeds 0.5%")
 
     def test_ratio_at_high_l(self, cl_pp_results, class_reference):
-        """NL/linear ratio at high l: document residual from NL weighting.
+        """NL/linear ratio matches CLASS within 1% at l >= 1000.
 
-        At l > 1000, our P(k)-based NL correction gives ~5% less NL
-        boost than CLASS's source-based correction. This is not a bug
-        in the linear C_l^pp (which matches to <0.1%) but a difference
-        in how the Halofit ratio is applied.
+        Measured residuals at the default cosmology with k_max_extend=20:
+        0.04% at l=1000, 0.11% at l=1500, 0.05% at l=2000, 0.76% at
+        l=2500. The 1% threshold leaves a margin for cosmology variations.
         """
         cl_pp_lin, cl_pp_hf = cl_pp_results
         ref = class_reference
@@ -120,12 +125,11 @@ class TestClppHalofitRatio:
             ref_ratio = ref['pp_halofit'][idx] / ref['pp_lin'][idx]
             our_ratio = cl_pp_hf[l_val] / cl_pp_lin[l_val]
             print(f"  {l_val:5d}  {our_ratio:8.4f}  {ref_ratio:8.4f}  {our_ratio/ref_ratio:8.4f}")
-            # Our ratio should be within 10% of CLASS at all l
-            assert abs(our_ratio / ref_ratio - 1) < 0.10, (
-                f"l={l_val}: ratio discrepancy exceeds 10%")
+            assert abs(our_ratio / ref_ratio - 1) < 0.01, (
+                f"l={l_val}: ratio discrepancy exceeds 1%")
 
     def test_ratio_monotonic_increase(self, cl_pp_results):
-        """PP ratio should increase from l=100 to l~2000."""
+        """NL/linear ratio increases with l from l=100 to l~2000."""
         cl_pp_lin, cl_pp_hf = cl_pp_results
 
         r100 = cl_pp_hf[100] / cl_pp_lin[100]
@@ -134,16 +138,3 @@ class TestClppHalofitRatio:
 
         assert r500 > r100, f"ratio should increase: r500={r500:.4f} < r100={r100:.4f}"
         assert r1000 > r500, f"ratio should increase: r1000={r1000:.4f} < r500={r500:.4f}"
-
-    def test_kmax_validation(self, pipeline_results):
-        """nonlinear=True with k_max < 5 should raise ValueError."""
-        params, prec, bg, th, pt = pipeline_results
-        import copy
-        pt_narrow = copy.copy(pt)
-        mask = pt.k_grid <= 0.35
-        object.__setattr__(pt_narrow, 'k_grid', pt.k_grid[mask])
-        object.__setattr__(pt_narrow, 'delta_m', pt.delta_m[mask, :])
-
-        with pytest.raises(ValueError, match="pt_k_max_cl >= 5.0"):
-            compute_cl_pp_limber(pt_narrow, params, bg, th,
-                                 l_max=100, nonlinear=True)
