@@ -97,13 +97,22 @@ Validated at 10 LCDM parameter variations (omega_b, omega_cdm, h, n_s, tau_reio 
 
 ### Matter power spectrum P(k)
 
-| k [Mpc^-1] | clax / CLASS | Error |
-|-------------|------------------|-------|
-| 0.001       | 0.970            | 3.0%  |
-| 0.010       | 0.986            | 1.4%  |
-| 0.050       | 0.984            | 1.6%  |
-| 0.100       | 1.013            | 1.3%  |
-| 0.300       | 0.966            | 3.5%  |
+Single-mode `compute_pk(params, prec, k)` at `PrecisionParams.planck_fast()`
+(60 k/decade, l_max=50, ncdm_q_size=5, rtol=1e-6) vs CLASS v3.3.4
+linear `pk_lin(k, z=0)` at default Planck 2018 LCDM:
+
+| k [Mpc^-1] | clax / CLASS | Error    |
+|------------|--------------|----------|
+| 0.003      | 0.9983       | -0.17%   |
+| 0.010      | 1.0025       | +0.25%   |
+| 0.050      | 1.0004       | +0.04%   |
+| 0.100      | 1.0007       | +0.07%   |
+| 0.300      | 0.9997       | -0.03%   |
+| 1.000      | 0.9980       | -0.20%   |
+
+Median |error| ≈ 0.07%, worst-case 0.25%. Underlying perturbation evolution
+(δ_cdm and δ_b at synchronous gauge) matches CLASS to <0.05% — most of any
+remaining residual is from photon-hierarchy and IC corrections at next order.
 
 ### Pipeline accuracy
 

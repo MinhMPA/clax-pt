@@ -1769,7 +1769,7 @@ def _k_grid(prec: PrecisionParams) -> Float[Array, "Nk"]:
     return jnp.logspace(math.log10(prec.pt_k_min), math.log10(prec.pt_k_max_cl), n_k)
 
 
-def _perturbation_solve_setup(params, prec, bg, th, *, n_tau_override=None):
+def _perturbation_solve_setup(params, prec, bg, th, *, n_tau_override=None, tau_max_factor=0.999):
     """Shared setup for the full-source and mPk perturbation solve paths.
 
     Computes the index layout, ncdm quadrature, k-grid, tau-grid, tau_ini,
@@ -1781,6 +1781,12 @@ def _perturbation_solve_setup(params, prec, bg, th, *, n_tau_override=None):
         bg: background result
         th: thermodynamics result
         n_tau_override: if given, override the save-grid size (used by mpk)
+        tau_max_factor: multiplicative safety margin on ``bg.conformal_age``
+            for the integration upper limit. Default 0.999 was a defensive
+            choice for the source-function/C_l path. The matter-power paths
+            (single-k ``compute_pk`` and table ``compute_pk_table``) override
+            this to 1.0 because the ~14 Mpc gap missed by 0.999 contributes
+            ~0.33% to ``P(k)`` via linear growth.
 
     Returns:
         Tuple of (idx, n_eq, k_grid, tau_grid, tau_ini, n_tau,
@@ -1824,7 +1830,7 @@ def _perturbation_solve_setup(params, prec, bg, th, *, n_tau_override=None):
 
     n_tau = n_tau_override if n_tau_override is not None else prec.pt_tau_n_points
     tau_min = jnp.maximum(bg.tau_table[0] * 1.1, tau_ini * 1.01)
-    tau_max = bg.conformal_age * 0.999
+    tau_max = bg.conformal_age * tau_max_factor
     tau_star = th.tau_star
     tau_grid = _make_tau_grid(tau_min, tau_max, tau_star, n_tau)
 
@@ -2172,7 +2178,10 @@ def _perturbations_solve_mpk_impl(
     (idx, n_eq, k_grid, tau_grid, tau_ini, n_tau, tau_max,
      ncdmfa_mode_code, ncdmfa_trigger, args_ncdm,
      l_max_g, l_max_pol, l_max_ur, l_max_ncdm) = _perturbation_solve_setup(
-        params, prec, bg, th, n_tau_override=_mpk_tau_n_points(prec))
+        params, prec, bg, th,
+        n_tau_override=_mpk_tau_n_points(prec),
+        tau_max_factor=1.0,
+    )
     q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm = args_ncdm
     n_k = len(k_grid)
 
@@ -2248,15 +2257,29 @@ def _matter_delta_m_single_k_impl(
     (idx, n_eq, _k_grid_unused, _tau_grid_unused, _tau_ini_batch, _n_tau, _tau_max,
      ncdmfa_mode_code, ncdmfa_trigger, args_ncdm,
      l_max_g, l_max_pol, l_max_ur, l_max_ncdm) = _perturbation_solve_setup(
-        params, prec, bg, th)
+        params, prec, bg, th, tau_max_factor=1.0)
     q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm = args_ncdm
 
     tau_ini = jnp.minimum(jnp.array(0.5), 0.01 / k)
-    # ``compute_pk()`` is a fixed-redshift observable evaluated at ``z=0``.
-    # Freezing the solver boundary avoids spurious density-parameter gradients
-    # from the moving ``t1`` coordinate while keeping the primal evaluation at
-    # the correct late-time state for each parameter set.
-    tau_end = jax.lax.stop_gradient(bg.conformal_age * 0.999)
+    # ``compute_pk()`` is a fixed-redshift observable evaluated at ``z=0``,
+    # so we integrate to the full ``bg.conformal_age``. The 0.999 safety
+    # margin used elsewhere costs ~0.33% in ``P(k)`` via linear growth over
+    # the missed ~14 Mpc; it is unnecessary for matter power and removed.
+    #
+    # Why ``stop_gradient`` on the integration boundary, and the Taylor
+    # correction below: ``RecursiveCheckpointAdjoint`` + diffrax's
+    # ``PIDController`` cannot reverse-mode AD through a traced ``t1`` —
+    # the controller marks its accepted-step factor as ``nondifferentiable``
+    # and JAX raises ``RuntimeError: Unexpected tangent`` if anything in the
+    # adjoint solve depends on ``t1``. We therefore freeze ``t1`` for the
+    # solve, then reintroduce the
+    #     dδ_m/dτ_end · dτ_end/dparams
+    # contribution analytically via a first-order Taylor expansion around the
+    # frozen endpoint. The expansion is exact at fiducial params (where
+    # ``tau_traced − tau_frozen`` is identically zero), so ``jax.grad`` /
+    # ``jax.jvp`` evaluated at fiducial pick up the correct linear coefficient.
+    tau_traced = bg.conformal_age
+    tau_end = jax.lax.stop_gradient(tau_traced)
     y0 = _adiabatic_ic(k, tau_ini, bg, params, idx, n_eq, args_ncdm=args_ncdm)
     ode_args = (k, bg, th, params, idx, l_max_g, l_max_pol, l_max_ur,
                 ncdmfa_mode_code, ncdmfa_trigger,
@@ -2276,12 +2299,29 @@ def _matter_delta_m_single_k_impl(
         max_steps=prec.ode_max_steps,
         args=ode_args,
     )
-    return _extract_delta_m(
-        sol.ys[-1], k, tau_end, bg, idx,
-        q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
-        ncdmfa_mode_code=ncdmfa_mode_code,
-        ncdmfa_trigger=ncdmfa_trigger,
+    y_final = sol.ys[-1]
+
+    # Recover the dτ_end gradient sacrificed by ``stop_gradient`` above.
+    # δ_m(τ_traced) ≈ δ_m(τ_end) + (dδ_m/dτ)|_{τ_end} · (τ_traced − τ_end)
+    # where dy/dτ at the endpoint is the ODE RHS (carries full param-tracing
+    # via ode_args), and dδ_m/dτ also includes the explicit τ-dependence in
+    # ρ_b(τ), ρ_cdm(τ), ρ_ncdm(τ) inside ``_extract_delta_m``.
+    dy_dtau = _perturbation_rhs(tau_end, y_final, ode_args)
+
+    def _extract(y, tau):
+        return _extract_delta_m(
+            y, k, tau, bg, idx,
+            q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
+            ncdmfa_mode_code=ncdmfa_mode_code,
+            ncdmfa_trigger=ncdmfa_trigger,
+        )
+
+    delta_m_frozen, ddelta_m_dtau = jax.jvp(
+        _extract,
+        (y_final, tau_end),
+        (dy_dtau, jnp.ones_like(tau_end)),
     )
+    return delta_m_frozen + ddelta_m_dtau * (tau_traced - tau_end)
 
 
 _matter_delta_m_single_k_impl = functools.partial(jax.jit, static_argnums=(1, 4))(
