@@ -141,3 +141,26 @@ class TestShootingGradient:
         assert 1.0 < grad_val < 20.0, (
             f"dh/d(100*theta_s) = {grad_val:.4f}, expected O(1-10)"
         )
+
+    def test_shoot_fn_forward_mode_matches_fd(self, theta_s_fiducial):
+        """jax.jvp through shoot_fn must match finite differences.
+
+        custom_vjp does NOT provide forward-mode AD — jax.jvp through a
+        custom_vjp function raises NotImplementedError. This test requires
+        custom_jvp to be defined instead.
+        """
+        params = CosmoParams()
+        shoot_fn = make_shoot_h_from_theta_s(PREC)
+
+        ts = jnp.array(theta_s_fiducial)
+        h_primal, h_dot = jax.jvp(lambda t: shoot_fn(t, params), (ts,), (jnp.array(1.0),))
+
+        eps = 1e-5
+        h_plus = float(shoot_fn(ts + eps, params))
+        h_minus = float(shoot_fn(ts - eps, params))
+        fd = (h_plus - h_minus) / (2 * eps)
+
+        rel = abs(float(h_dot) - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, (
+            f"shoot_fn JVP: AD={float(h_dot):.6f} FD={fd:.6f} rel={rel:.2%}"
+        )

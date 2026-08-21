@@ -64,7 +64,7 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
     """Create a shooting function with prec as a closure variable.
 
     PrecisionParams is not a valid JAX type (not registered as a pytree),
-    so it cannot be passed through custom_vjp. Instead, we close over it.
+    so it cannot be passed through custom_jvp. Instead, we close over it.
 
     Args:
         prec: precision parameters (static, becomes closure)
@@ -73,7 +73,21 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
         shoot_fn: function(theta_s_100_target, params_template) -> h
     """
 
-    @jax.custom_vjp
+    def _shoot_impl(theta_s_100_target: float, params_template: CosmoParams) -> float:
+        """Newton's method for h such that 100*theta_s(h) = theta_s_100_target."""
+        h0 = 3.54 * theta_s_100_target**2 - 5.455 * theta_s_100_target + 2.548
+
+        def newton_step(i, h):
+            theta_s = _compute_theta_s(h, params_template, prec)
+            eps = 1e-4
+            theta_s_plus = _compute_theta_s(h + eps, params_template, prec)
+            dtheta_dh = (theta_s_plus - theta_s) / eps
+            update = (theta_s - theta_s_100_target) / dtheta_dh
+            return h - 0.5 * update
+
+        return jax.lax.fori_loop(0, 25, newton_step, h0)
+
+    @jax.custom_jvp
     def shoot_fn(theta_s_100_target: float, params_template: CosmoParams) -> float:
         """Find h such that 100*theta_s(h) = theta_s_100_target.
 
@@ -81,38 +95,26 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
         Initial guess from CLASS input.c:1190:
             h_guess = 3.54*theta_s^2 - 5.455*theta_s + 2.548
         """
-        # CLASS's initial guess formula (input.c:1190)
-        h0 = 3.54 * theta_s_100_target**2 - 5.455 * theta_s_100_target + 2.548
+        return _shoot_impl(theta_s_100_target, params_template)
 
-        def newton_step(i, h):
-            theta_s = _compute_theta_s(h, params_template, prec)
-            # Finite difference derivative for the forward Newton solve
-            eps = 1e-4
-            theta_s_plus = _compute_theta_s(h + eps, params_template, prec)
-            dtheta_dh = (theta_s_plus - theta_s) / eps
-            # Damped Newton update to prevent oscillation
-            # (the discrete z_rec grid can cause 2-cycles in undamped Newton)
-            update = (theta_s - theta_s_100_target) / dtheta_dh
-            h = h - 0.5 * update
-            return h
+    @shoot_fn.defjvp
+    def _shoot_jvp(primals, tangents):
+        theta_s_100_target, params_template = primals
+        theta_s_dot, _params_dot = tangents
 
-        h_final = jax.lax.fori_loop(0, 25, newton_step, h0)
-        return h_final
+        h = _shoot_impl(theta_s_100_target, params_template)
 
-    def shoot_fwd(theta_s_100_target, params_template):
-        h = shoot_fn(theta_s_100_target, params_template)
-        return h, (h, theta_s_100_target, params_template)
+        # IFT: F(h, theta_s_target) = theta_s(h; params) - theta_s_target = 0
+        # dh/d(theta_s_target) = 1 / (d(theta_s)/dh)
+        h_sg = jax.lax.stop_gradient(h)
+        dtheta_dh = jax.grad(
+            lambda h_: _compute_theta_s(
+                h_, jax.lax.stop_gradient(params_template), prec
+            )
+        )(h_sg)
+        h_dot = theta_s_dot / dtheta_dh
 
-    def shoot_bwd(res, g):
-        h, theta_s_target, params_template = res
-        # Implicit function theorem:
-        # F(h, theta_s_target) = theta_s(h) - theta_s_target = 0
-        # d(h)/d(theta_s_target) = 1 / (d(theta_s)/d(h))
-        # by the implicit function theorem.
-        dtheta_dh = jax.grad(lambda h_: _compute_theta_s(h_, params_template, prec))(h)
-        dh_dtheta = 1.0 / dtheta_dh
-        # Return gradient w.r.t. (theta_s_100_target, params_template)
-        return (g * dh_dtheta, None)
+        # params_template tangents not propagated (same limitation as prior custom_vjp)
+        return h, h_dot
 
-    shoot_fn.defvjp(shoot_fwd, shoot_bwd)
     return shoot_fn
