@@ -111,6 +111,15 @@ m_e_eV = 0.51099895e6
 m_p_eV = 938.272046e6
 """Proton mass in eV/c^2."""
 
+# Hydrogen atom mass in kg.  Atomic mass of 1H-1: 1.00782503207 amu.
+# CLASS uses 1.673575e-27 kg (thermodynamics.h:706, _m_H_); the values agree
+# to 2.5e-5 relative.  Used for n_H_0 = (1-Y_He) * rho_b / m_H, the hydrogen
+# nucleus number density today.  NOTE: the proton mass m_p = 1.672621637e-27
+# kg is *not* the right choice here — using m_p underestimates m_H by ~0.057%
+# and biases tau_reio inversion correspondingly.
+m_H_kg = 1.67353284e-27
+"""Hydrogen atom mass in kg (atomic mass of 1H-1)."""
+
 # Thomson cross section in m^2
 sigma_T = 6.6524616e-29
 """Thomson scattering cross section in m^2, cf. CLASS thermodynamics.h:708."""
