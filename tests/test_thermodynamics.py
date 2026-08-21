@@ -252,17 +252,6 @@ def test_find_z_reio_forward_mode_matches_fd():
     )
 
 
-_XFAIL_JVP = pytest.mark.xfail(
-    strict=False,
-    raises=TypeError,
-    reason=(
-        "Full-pipeline jax.jvp blocked on this branch by two custom_vjp barriers: "
-        "(1) background_solve uses RecursiveCheckpointAdjoint; "
-        "(2) _find_z_reio still uses custom_vjp. "
-        "Tests will be GREEN after PR-B (feat/forward-mode-ad) is merged and "
-        "background_solve passes prec.ode_adjoint='direct' to solve_nonstiff."
-    ),
-)
 
 
 class TestThermoForwardModeAD:
@@ -273,14 +262,10 @@ class TestThermoForwardModeAD:
     2. Tangents are finite (not 10^8x blown up)
     3. Tangents match centred FD to < 1% at loga=-8 (where x_e~const, rescaling exact)
 
-    Marked xfail on this branch because the full pipeline forward-mode requires:
-    - PR-B: _find_z_reio converted from custom_vjp to custom_jvp (IFT rule)
-    - background_solve to pass prec.ode_adjoint to solve_nonstiff
-    The n_H_0 rescaling here (PR-C) is the remaining piece; xfail becomes xpass
-    once both upstream fixes are merged.
+    Both prerequisites (PR #21: _find_z_reio custom_jvp + direct-adjoint
+    background_solve) are on main as of 2026-08-22, so these run un-marked.
     """
 
-    @_XFAIL_JVP
     def test_kappa_dot_forward_mode_matches_fd(self):
         """jax.jvp(kappa_dot, omega_b) is finite and matches FD to <1%."""
         jvp_val, fd = _thermo_jvp_fd_pair(
@@ -290,7 +275,6 @@ class TestThermoForwardModeAD:
         rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
         assert rel < 0.01, f"kappa_dot jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
 
-    @_XFAIL_JVP
     def test_exp_m_kappa_forward_mode_matches_fd(self):
         """jax.jvp(exp_m_kappa, omega_b) is finite and matches FD to <5%."""
         jvp_val, fd = _thermo_jvp_fd_pair(
@@ -300,7 +284,6 @@ class TestThermoForwardModeAD:
         rel = abs(jvp_val - fd) / (abs(fd) + 1e-30)
         assert rel < 0.05, f"exp_m_kappa jvp={jvp_val:.6e} FD={fd:.6e} rel={rel:.2%}"
 
-    @_XFAIL_JVP
     def test_g_forward_mode_matches_fd(self):
         """jax.jvp(g, omega_b) is finite and matches FD to <1%."""
         jvp_val, fd = _thermo_jvp_fd_pair(
