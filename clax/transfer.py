@@ -73,6 +73,8 @@ def compute_pk_from_perturbations(
     bg: BackgroundResult,
     k_eval: Float[Array, "Nk_eval"],
     z: float = 0.0,
+    *,
+    validate: bool = True,
 ) -> Float[Array, "Nk_eval"]:
     """Compute linear matter density contrast delta_m(k) at redshift z.
 
@@ -83,31 +85,31 @@ def compute_pk_from_perturbations(
         pt: Perturbation results containing delta_m(k, tau)
         bg: Background results (for tau(z) conversion)
         k_eval: Wavenumber array to evaluate at (Mpc^-1)
-        z: Redshift (default 0)
+        z: Redshift (default 0). Traced under JIT/vmap.
+        validate: when True (default) reject k_eval values outside the solved
+            ``pt.k_grid`` support. Set to False to allow log-k extrapolation
+            (used by the Halofit lensing modulator, which needs P(k) past
+            ``pt.k_grid[-1]`` for sigma(R) convergence).
 
     Returns:
         delta_m(k) at the requested redshift, shape (Nk_eval,)
     """
     from clax.background import tau_of_z
 
-    _validate_k_eval_support(pt.k_grid, k_eval)
+    if validate:
+        _validate_k_eval_support(pt.k_grid, k_eval)
 
     tau_grid = pt.tau_grid  # shape (Ntau,)
     log_k_pt = jnp.log(pt.k_grid)
     log_k_eval = jnp.log(k_eval)
 
-    if z == 0.0:
-        # Fast path: last time step
-        delta_m_at_z = pt.delta_m[:, -1]  # shape (Nk,)
-    else:
-        # Find tau at requested z
-        tau_z = tau_of_z(bg, z)
-        # Interpolate delta_m at each k to the target tau
-        # delta_m has shape (Nk, Ntau) — interpolate along tau axis
-        def _interp_single_k(delta_m_k):
-            spline = CubicSpline(tau_grid, delta_m_k)
-            return spline.evaluate(tau_z)
-        delta_m_at_z = jax.vmap(_interp_single_k)(pt.delta_m)
+    # Always interpolate along tau to keep this path vmap-safe over z. At
+    # z=0 the spline endpoint reproduces ``pt.delta_m[:, -1]`` exactly,
+    # so there is no accuracy cost relative to the previous fast path.
+    tau_z = jnp.clip(tau_of_z(bg, z), tau_grid[0], tau_grid[-1])
+    def _interp_single_k(delta_m_k):
+        return CubicSpline(tau_grid, delta_m_k).evaluate(tau_z)
+    delta_m_at_z = jax.vmap(_interp_single_k)(pt.delta_m)
 
     # Interpolate to evaluation k-grid
     delta_m_spline = CubicSpline(log_k_pt, delta_m_at_z)
@@ -122,6 +124,8 @@ def compute_linear_matter_pk_from_perturbations(
     params: CosmoParams,
     k_eval: Float[Array, "Nk_eval"],
     z: float = 0.0,
+    *,
+    validate: bool = True,
 ) -> Float[Array, "Nk_eval"]:
     """Compute linear matter ``P(k, z)`` from a perturbation-table solve.
 
@@ -133,12 +137,15 @@ def compute_linear_matter_pk_from_perturbations(
         bg: background results for ``tau(z)`` conversion
         params: cosmological parameters for the primordial spectrum
         k_eval: wavenumbers in ``Mpc^-1``
-        z: redshift at which to evaluate the spectrum
+        z: redshift at which to evaluate the spectrum (traced)
+        validate: when True (default) reject k_eval values outside the solved
+            ``pt.k_grid`` support. Pass False from internal callers that
+            extend the k-grid for sigma(R) convergence.
 
     Returns:
         Linear matter power spectrum ``P(k, z)`` in ``Mpc^3``
     """
     k_eval = jnp.asarray(k_eval)
-    delta_m = compute_pk_from_perturbations(pt, bg, k_eval, z=z)
+    delta_m = compute_pk_from_perturbations(pt, bg, k_eval, z=z, validate=validate)
     primordial = primordial_scalar_pk(k_eval, params)
     return 2.0 * jnp.pi**2 / k_eval**3 * primordial * delta_m**2

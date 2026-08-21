@@ -170,15 +170,10 @@ def _halofit_modulator(
         ``S_transfer`` to inject NL corrections into the source-Limber
         kernel (CLASS source-multiplication recipe).
     """
-    from clax.nonlinear import compute_pk_nonlinear, sigma_R
-    from clax.interpolation import CubicSpline
+    from clax.nonlinear import compute_pk_nonlinear
+    from clax.transfer import compute_linear_matter_pk_from_perturbations
 
     # --- Extended k-grid (power-law extrapolation if pt.k_grid too narrow) ---
-    # We avoid `compute_linear_matter_pk_from_perturbations` here because it
-    # (a) rejects k_eval outside pt.k_grid via _validate_k_eval_support, and
-    # (b) has a Python-level `if z == 0.0` branch that fails under vmap-over-z.
-    # Instead we inline the τ-interpolation of δ_m and extrapolate P_lin in
-    # log-log space ourselves.
     pt_k_max = float(pt.k_grid[-1])
     k_max_use = max(pt_k_max, k_max_extend)
     if pt_k_max < k_max_extend:
@@ -194,26 +189,18 @@ def _halofit_modulator(
     log1pz_grid = jnp.linspace(jnp.log(1.0), jnp.log(1.0 + z_rec), n_z)
     z_grid = jnp.expm1(log1pz_grid)
 
-    # --- δ_m(k_pt, z) via vmap over z (interpolate along τ axis) ---
-    # pt.delta_m has shape (Nk_pt, Ntau). For each z we want δ_m at τ(z),
-    # interpolated cubically along τ at every k.
-    def _delta_m_at_z(z):
-        loga_z = jnp.log(1.0 / (1.0 + z))
-        tau_z = bg.tau_of_loga.evaluate(loga_z)
-        spline_along_tau = jax.vmap(
-            lambda dm_k: CubicSpline(pt.tau_grid, dm_k).evaluate(tau_z))
-        return spline_along_tau(pt.delta_m)  # (Nk_pt,)
+    # --- P_lin(k_pt, z) on the native pt.k_grid via the public helper ---
+    def _pk_lin_on_pt_grid(z):
+        return compute_linear_matter_pk_from_perturbations(
+            pt, bg, params, pt.k_grid, z=z)
 
-    delta_m_pt_z = jax.vmap(_delta_m_at_z)(z_grid)  # (n_z, Nk_pt)
-
-    # P_lin(k_pt, z) = 2π² / k³ · P_R(k) · δ_m²
-    P_R_pt = primordial_scalar_pk(pt.k_grid, params)
-    pk_lin_pt_z = (2.0 * jnp.pi**2) / pt.k_grid[None, :]**3 \
-        * P_R_pt[None, :] * delta_m_pt_z**2  # (n_z, Nk_pt)
+    pk_lin_pt_z = jax.vmap(_pk_lin_on_pt_grid)(z_grid)  # (n_z, Nk_pt)
 
     # --- Extend P_lin to k_ext via log-log power-law extrapolation ---
     # Log-linear interp inside pt.k_grid; power-law tail beyond pt_k_max with
-    # slope from the last two points.
+    # slope from the last two points. δ_m extrapolation is non-physical past
+    # the solved support, so we extend P_lin directly in log-log space here
+    # rather than passing k_ext through ``compute_linear_matter_pk_from_perturbations``.
     log_k_pt = jnp.log(pt.k_grid)
     log_k_ext = jnp.log(k_ext)
     log_pk_pt_z = jnp.log(jnp.maximum(pk_lin_pt_z, 1e-300))  # (n_z, Nk_pt)
@@ -237,22 +224,15 @@ def _halofit_modulator(
     fnu = bg.Omega_ncdm / jnp.maximum(Omega_m_0, 1e-30)
 
     # --- P_NL(k_ext, z) via vmap over z ---
-    # CLASS skips Halofit when sigma(R)<1 (cf. fourier.c:1706-1716, where
-    # nl_corr_density = 1.0). The Python-level check inside
-    # compute_pk_nonlinear is bypassed under vmap (try/except catches
-    # ConcretizationTypeError), so we replicate the check inline here.
-    lnk_ext = jnp.log(k_ext)
-    R_min = jnp.sqrt(-jnp.log(1e-7)) / k_ext[-1]
-
+    # ``compute_pk_nonlinear`` enforces the CLASS sigma(R) >= 1 fallback
+    # (cf. fourier.c:1597-1716) using ``jnp.where`` internally, so this
+    # remains vmap-safe even at high z where sigma < 1.
     def _halofit_one_z(pk_lin_one, z):
-        pk_nl = compute_pk_nonlinear(
+        return compute_pk_nonlinear(
             k_ext, pk_lin_one,
             Omega_m_0=Omega_m_0, Omega_lambda_0=Omega_lambda_0,
             Omega_r_0=Omega_r_0, w0=params.w0, wa=params.wa,
             fnu=fnu, h=params.h, z=z)
-        # Force pk_nl = pk_lin when sigma(R_min) < 1 (Halofit not applicable)
-        sig = sigma_R(R_min, lnk_ext, pk_lin_one)
-        return jnp.where(sig >= 1.0, pk_nl, pk_lin_one)
 
     pk_nl_z = jax.vmap(_halofit_one_z)(pk_lin_z, z_grid)  # (n_z, Nk_ext)
 
