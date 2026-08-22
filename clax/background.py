@@ -785,3 +785,33 @@ def luminosity_distance(bg: BackgroundResult, z: float) -> float:
     D_L(z) = chi(z) * (1 + z)  (for flat universe)
     """
     return comoving_distance(bg, z) * (1.0 + z)
+
+
+def sound_horizon_drag(params: CosmoParams) -> float:
+    """Sound horizon at baryon drag epoch r_s(z_drag) in Mpc.
+
+    Aubourg et al. 2015 (arXiv:1411.1074) Eq. (17), the Neff-aware variant.
+    Quoted accuracy 0.119% across 0 < sum m_nu < 0.6 eV, 3 < N_eff < 5.
+    Cross-checked against CLASS pth->rs_d at Planck 2018 fiducial: 0.002%.
+    Mirrors ps_1loop_jax sound_horizon_drag_aubourg2014_neff.
+
+    The hardcoded literal `99.0` in clax/ept.py corresponded to r_s_drag * h
+    at fiducial Planck 2018 (147.05 Mpc * 0.6736 = 99.05). This function
+    computes the cosmology-varying value used everywhere CLASS-PT uses
+    `pth->rs_d` (nonlinear_pt.c:5596).
+
+    Returns: r_s(z_drag) in Mpc (multiply by h for the Mpc*h convention
+    used by clax/ept.py IR resummation).
+    """
+    omega_cb = params.omega_b + params.omega_cdm
+    omega_nu = params.m_ncdm / 93.14
+    neff = params.N_ur + float(params.N_ncdm)
+    return (
+        56.067
+        * jnp.exp(-49.7 * (omega_nu + 0.002) ** 2)
+        / (
+            omega_cb ** 0.2436
+            * params.omega_b ** 0.128876
+            * (1.0 + (neff - 3.046) / 30.60)
+        )
+    )

@@ -1,9 +1,14 @@
 """Test fixtures for clax test suite.
 
 Provides:
+- Session-scoped pipeline fixtures (run expensive solves ONCE)
 - Reference data loading from CLASS-generated .npz files
 - Default CosmoParams and PrecisionParams
 - --fast flag for quick regression checks
+
+Pipeline fixtures (session-scoped, shared across test files):
+    pipeline_fast_cl      — CosmoParams() + fast_cl preset
+    pipeline_fast_cl_k5   — CosmoParams() + fast_cl + pt_k_max_cl=5.0
 """
 
 import json
@@ -15,9 +20,55 @@ jax.config.update("jax_enable_x64", True)
 
 import numpy as np
 import pytest
+from dataclasses import replace as _dc_replace
+
+from clax import CosmoParams, PrecisionParams
+from clax.background import background_solve
+from clax.thermodynamics import thermodynamics_solve
+from clax.perturbations import perturbations_solve
 
 # Path to reference data
 REFERENCE_DIR = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped pipeline fixtures
+# ---------------------------------------------------------------------------
+# Each perturbation solve takes 2-5 min on CPU.  By sharing results across
+# all test files that use the same precision settings, the full test suite
+# runs in ~10 min instead of 60+.
+
+@pytest.fixture(scope="session")
+def pipeline_fast_cl():
+    """Background + thermo + perturbations with fast_cl preset.
+
+    Used by: test_harmonic, test_high_l, test_lensing, test_cl_pp_implementations.
+    Returns (params, prec, bg, th, pt).
+    """
+    params = CosmoParams()
+    prec = _dc_replace(PrecisionParams.fast_cl(), pt_k_chunk_size=20)
+    bg = background_solve(params, prec)
+    th = thermodynamics_solve(params, prec, bg)
+    pt = perturbations_solve(params, prec, bg, th)
+    return params, prec, bg, th, pt
+
+
+@pytest.fixture(scope="session")
+def pipeline_fast_cl_k5():
+    """Background + thermo + perturbations with fast_cl + k_max=5.
+
+    Extends the k-grid for source-based Limber and Halofit sigma(R).
+    Used by: test_cl_pp_source_limber, test_clpp_limber_accuracy,
+             test_lensing_nonlinear, test_clpp_halofit_ratio.
+    Returns (params, prec, bg, th, pt).
+    """
+    params = CosmoParams()
+    prec = _dc_replace(PrecisionParams.fast_cl(),
+                       pt_k_max_cl=5.0, pt_k_chunk_size=20)
+    bg = background_solve(params, prec)
+    th = thermodynamics_solve(params, prec, bg)
+    pt = perturbations_solve(params, prec, bg, th)
+    return params, prec, bg, th, pt
 
 
 def pytest_addoption(parser):
