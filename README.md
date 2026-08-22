@@ -1,16 +1,24 @@
-# clax
+<p align="center">
+  <img src="assets/clax-pt_logo.png" alt="clax-pt" width="900"/>
+</p>
 
-**A differentiable cosmological Boltzmann solver in JAX.**
+# clax-pt
+
+**A differentiable cosmological Boltzmann solver and one-loop EFTofLSS engine in JAX.**
 
 ## Development
 
-This codebase was written entirely by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus 4.6). The development process -- including architecture decisions, bug hunting through the CLASS C source code, and numerical validation -- is documented in [CHANGELOG.md](CHANGELOG.md) and [CLAUDE.md](CLAUDE.md).
+This codebase was written entirely by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus and Sonnet models). The development process -- including architecture decisions, bug hunting through the CLASS and CLASS-PT C source code, and numerical validation -- is documented in [CHANGELOG.md](CHANGELOG.md) and [CLAUDE.md](CLAUDE.md).
 
 ## Overview
 
+**clax-pt** extends [clax](https://github.com/smsharma/clax) with a JAX-native one-loop EFTofLSS engine, exposing real-space and redshift-space galaxy power-spectrum multipoles, IR resummation, bias operators, and EFT counterterms — all end-to-end differentiable via JAX automatic differentiation.
+
+While clax mirrors [CLASS](https://github.com/lesgourg/class_public), clax-pt mirrors [CLASS-PT](https://github.com/Michalychforever/CLASS-PT). Both clax and clax-pt were written by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus and Sonnet models) under human supervision; see [CHANGELOG.md](CHANGELOG.md) and [CLAUDE.md](CLAUDE.md) for the development log.
+
 clax solves the coupled Einstein-Boltzmann equations for cosmological perturbations from first principles: background cosmology, hydrogen recombination, the full photon-baryon-neutrino Boltzmann hierarchy in synchronous gauge, line-of-sight integration for CMB angular power spectra, HaloFit for nonlinear matter power, gravitational lensing, and a shooting method for theta_s parametrization. The entire pipeline -- from cosmological parameters to P(k), C_l^TT/EE/TE/BB, and lensed C_l -- is end-to-end differentiable via JAX automatic differentiation.
 
-The goal is a differentiable alternative to [CLASS](https://github.com/lesgourg/class_public) that enables gradient-based cosmological inference (HMC, variational methods) on CMB and large-scale structure data.
+The goal is a differentiable alternative to CLASS and CLASS-PT that enables gradient-based cosmological inference (HMC, variational methods) on CMB and large-scale structure data.
 
 ## Status
 
@@ -216,8 +224,8 @@ Requires Python >= 3.10.
 pip install jax jaxlib diffrax equinox jaxtyping
 
 # Clone and install
-git clone https://github.com/smsharma/clax.git
-cd clax
+git clone https://github.com/MinhMPA/clax-pt.git
+cd clax-pt
 pip install -e .
 
 # Run tests
@@ -256,7 +264,7 @@ CosmoParams --> background --> thermodynamics --> perturbations --> primordial
 ### Choosing an adjoint mode
 
 `PrecisionParams.ode_adjoint` controls Diffrax reverse-mode AD through the ODE solves.
-clax currently supports:
+clax-pt currently supports:
 
 - `"recursive_checkpoint"`: production default and recommended choice
 - `"direct"`: optional alternate reverse pass for diagnostics or environment-specific benchmarking
