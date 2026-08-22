@@ -1,5 +1,116 @@
 # clax Development Progress
 
+## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
+
+**End-to-end differentiable pipeline from cosmological parameters to P(k),
+C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
+`jax.jvp` (forward-mode AD) now works through the full pipeline. One-loop EFTofLSS
+power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
+`compute_cl_pp(... nonlinear="ept")`.**
+
+### May 10, 2026: Forward-mode AD + stable thermodynamics gradients (PR-B + PR-C)
+
+**Three AD fixes making `jax.jvp` work end-to-end:**
+
+**PR-B (`feat/forward-mode-ad`)** — Forward-mode through `z_reio` and `theta_s`:
+- Converted `_find_z_reio` from `custom_vjp` to `custom_jvp` with IFT rule:
+  `z_reio_dot = -F_dot / dF_dz` where `F = tau_reio_model(z_reio) - tau_reio_target`.
+- Fixed inf-inf NaN in He C_He tangent at z~15 (`He_Boltz=exp(~500)`):
+  reformulated `C_He = (inv_A + Λ) / (inv_A + Λ + R_up)`.
+- Converted `shoot_fn` to `custom_jvp` with IFT rule `dh/dθ_s = 1/(dθ_s/dh)`.
+  Also restores reverse-mode via JAX transposition — existing tests unchanged.
+
+**PR-C (`fix/thermo-remaining-gradients`)** — Stable `omega_b` gradients for splines:
+- n_H_0 rescaling for `kappa_dot_of_loga`, `exp_m_kappa_of_loga`, `g_of_loga`.
+  Stops the ~10^8× FD blowup from the Friedmann-scan eigenvalue accumulation.
+  Exact where x_e~const (loga<-8); 10-30% residual near recombination (still finite).
+
+**Test results:** 10/10 thermo, 7/7 shooting, all 5 new gradient tests GREEN.
+
+### May 4, 2026: Primordial BB sub-percent — fix BB radial kernel + add fine-k interpolation
+
+**`clax/harmonic.py:compute_cl_bb` had two compounding bugs that produced
+clax/CLASS C_l^BB ratios anywhere in [0.4×, 22×] depending on l. Both are
+fixed; primordial BB now matches CLASS sub-percent at l<=200, ~2% at l=300.**
+
+**Bug 1 — wrong radial kernel.** The function used
+`sqrt[l(l-1)(l+1)(l+2)] * j_l(x)/x^2`, which is CLASS's
+`TENSOR_TEMPERATURE_2` kernel (`transfer.c:4241-4249`), not the BB kernel.
+Replaced with the CLASS `TENSOR_POLARISATION_B` kernel
+(`transfer.c:4263-4272`, flat-space limit):
+
+    K_l^B(x) = 0.5 * (j_l'(x) + 2 * j_l(x) / x)
+
+using the recurrence `j_l'(x) = j_{l-1}(x) - (l+1)/x * j_l(x)` together with
+the existing `spherical_jl_backward` for both `j_l` and `j_{l-1}`.
+
+**Bug 2 — k-grid undersampling for BB integration.** `compute_cl_bb`
+integrated `P_T(k) * |B_l(k)|^2` over the raw 160-mode perturbation k-grid.
+The Bessel-driven oscillation period at the BB recombination peak
+(k ~ 0.005-0.05 Mpc^-1, x = k * chi_rec ~ l) is comparable to the
+log-uniform k-mode spacing, so adjacent modes can sample opposing peaks of
+`|B_l(k)|^2` and produce trapezoidal-rule errors of 6-30% with sign that
+flips with l. Added cubic-spline interpolation of `source_p` from the
+perturbation k-grid to a fine log-uniform k-grid (`n_k_fine=2000` default),
+mirroring `compute_cls_all_fast` for scalar T,E.
+
+**Validation (`tests/test_tensor.py::TestClBB::test_cl_bb_vs_class`):** ratio
+band tightened from `[0.05, 20.0]` to `[0.95, 1.05]` at l=2,10. At
+production precision (l_max_g=30, 40 k/decade, rtol=1e-6, n_k_fine=2000),
+clax/CLASS BB ratios across l=2,10,30,50,80,100,150,200,300:
+
+| l | ratio |
+|---|-------|
+| 2   | 0.998 |
+| 10  | 0.994 |
+| 30  | 0.996 |
+| 50  | 1.000 |
+| 80  | 1.001 |
+| 100 | 1.001 |
+| 150 | 1.002 |
+| 200 | 1.008 |
+| 300 | 1.018 |
+
+**API:** `compute_cl_bb` now takes an additional keyword-only `n_k_fine=2000`
+argument. Existing positional callers `compute_cl_bb(tpt, params, bg, l_values)`
+work unchanged.
+
+### May 4, 2026: README — TE accuracy: flag zero-crossing rows; remove misleading "Known limitation"
+
+The unlensed-`C_l^TE` accuracy table reported `(clax − CLASS) / CLASS` at every
+multipole, including ℓ values near the two ΛCDM TE zero crossings (ℓ≈52, ℓ≈400).
+Near a zero crossing the denominator goes to ~0, so the relative number blows up
+even when the absolute residual matches neighboring ℓ. This was being framed in
+the "Known limitations" section as a real shortcoming, when it is purely a metric
+artifact — the underlying `C_l^TE` matches CLASS as well as TT/EE do.
+
+**Changes:**
+
+1. **README accuracy table:** added a `†` marker on the three rows clearly
+   inside the first zero-crossing region (ℓ=20, 30, 50) and a footnote that
+   states the relative-error metric is ill-defined there, points at the Hu &
+   White (1997) correlation criterion `|C_l^TE| / √(C_l^TT · C_l^EE) < 0.02`,
+   and notes that a Gaussian likelihood weights these modes by
+   `1/Var(C_l^TE) → 0` automatically.
+
+2. **README "Known limitations":** removed the "TE zero crossings" bullet — it
+   was not a physics limitation, only a presentation issue. The remaining
+   limitations in that section (speed, TT ℓ=400-800, TT ℓ>1200, EE ℓ=20-30,
+   primordial BB) are all genuine outstanding items.
+
+**Note on tests:** the existing unlensed-TE accuracy tests in
+`tests/test_harmonic.py::TestClTE` only probe ℓ=100 and ℓ=200, neither of which
+is near a zero crossing, so no test changes are needed. The lensed-TE test
+`tests/test_lensing.py::TestLensCls::test_lensed_te_accuracy` already skips
+zero-crossing ℓ via the same correlation criterion (`corr < 0.02`) — that
+convention is now also documented in the README.
+
+This change is documentation-only; no clax module code is modified.
+
+The ℓ=1000 TE entry (+1.7%) is **not** a zero-crossing artifact — it is a real
+residual driven by k-grid under-resolution at high ℓ (same root cause as the TT
+ℓ>1200 known limitation), to be addressed separately by a hybrid linear/log
+k-grid PR.
 
 ### May 3, 2026: clax-pt module + EPT lensing injection
 
@@ -35,6 +146,9 @@ manual ratio-application pattern. Plots 8-9 unchanged.
 `TestHalofit` (positivity, finiteness, NL boost at high l, no boost at
 low l).
 
+Full clax-pt development history (accuracy tables vs CLASS-PT, bugs found and
+fixed, RSD redesign decision): see the **PT Branch (clax-pt)** section near the
+end of this file.
 
 ### May 3, 2026: C_l^phiphi API consolidation + z-aware Halofit injection (BREAKING)
 
@@ -104,395 +218,50 @@ along with `clax.lens_cls`.
 **Migration:** pre-1.0, hard break — no deprecation shims. Replace all
 calls to the removed implementations with `compute_cl_pp(... nonlinear=...)`.
 
-
----
-
-## PT Branch (clax-pt): CLASS-PT EFT Power Spectra
-
-Tracks the path to sub-percent accuracy vs CLASS-PT, following the accuracy-convergence
-methodology. Each entry logs implementations, bugs found/fixed, and measured accuracy.
-
-### Current Status (clax-pt branch)
-
-| Component | State | Notes |
-|-----------|-------|-------|
-| FFTLog decomposition | ✅ implemented | NMAX=256, B=-0.3, biased DFT |
-| M22/M13 matrix loading | ✅ implemented + tested | Symmetry bug fixed (see below) |
-| P22 kernel | ✅ implemented | Bilinear zdotu convention |
-| P13 + UV counterterm | ✅ implemented | σ_v² trapezoidal integral |
-| IR resummation | ✅ implemented + accurate | Linear k-grid DST, odd/even spline mode removal, j₂ sigma_BAO |
-| Bias expansion | ✅ implemented | P_mm, P_mg, P_gg (caveats below) |
-| RSD multipoles | ✅ implemented | ℓ=0,2,4 for matter and galaxies |
-| Unit tests | ✅ written | Matrix symmetry, FFTLog, P22 scaling |
-| **Accuracy vs CLASS-PT** | ✅ verified | P_mm max 0.45%, RMS 0.13% at k<0.3 h/Mpc |
-
-### PT Bugs Found and Fixed
-
-| # | Bug | Root Cause | Fix |
-|---|-----|------------|-----|
-| 1 | M22 Hermitian vs symmetric | `_load_complex_triangular` used `M[j,i] = tri[idx].conj()` — M22 is **symmetric** (CLASS-PT `zdotu` bilinear), not Hermitian | Changed to `M[j,i] = tri[idx]` (ept.py line 114) |
-| 2 | M22 wrong packed format | `M22oneline_N256_packed.dat` uses LAPACK 'L' column-major, not row-major. Wrong formula gave nonsense P22 | New `_load_complex_triangular_lapack_l`: `start_j = j*n - j*(j-1)//2` |
-| 3 | IR resummation log k-grid | Used `np.logspace` for DST grid → BAO modes 120-240 map to wrong scales; P13_UV σ_v ≈ 1686 instead of ~23 | Linear k-grid `np.linspace(1e-4, 10, 65536)`, matching CLASS-PT kmin2/kmax2 |
-| 4 | IR resummation linear mode interp | Linear interpolation across DST modes 120-240 gave P_mm err 1.54% | Odd/even spline: split DST into even/odd indexed arrays, natural cubic spline each |
-
-### PT Accuracy Table (Planck 2018 fiducial, z=0.38, b1=2 b4=500 all other bias=0)
-
-Reference: `reference_data/classpt_z0.38_fullrange.npz` — CLASS-PT on ept_kgrid (256 pts, 5e-5–100 h/Mpc).
-
-#### 2026-04-09 (revised, no fudge factor) — ALL 9 SPECTRA PASS
-
-| Observable    | k range [h/Mpc] | Max error  | Mean error | Metric      | Status | Target |
-|---------------|----------------|------------|------------|-------------|--------|--------|
-| P_mm real     | 0.005 – 0.30   | **0.31%**  | 0.04%      | relative    | ✅ PASS | < 1%   |
-| P_gg real     | 0.005 – 0.30   | **0.31%**  | 0.04%      | relative    | ✅ PASS | < 1%   |
-| P_gm real     | 0.005 – 0.30   | **0.31%**  | 0.04%      | relative    | ✅ PASS | < 1%   |
-| P_mm ℓ=0     | 0.005 – 0.30   | **0.59%**  | 0.40%      | relative    | ✅ PASS | < 1%   |
-| P_mm ℓ=2     | 0.005 – 0.30   | **0.70%**  | 0.44%      | relative    | ✅ PASS | < 1%   |
-| P_mm ℓ=4     | 0.005 – 0.30   | **0.70%**  | 0.15%      | abs/max(ref)| ✅ PASS | < 2%   |
-| P_gg ℓ=0     | 0.005 – 0.30   | **0.56%**  | 0.39%      | relative    | ✅ PASS | < 1%   |
-| P_gg ℓ=2     | 0.005 – 0.30   | **0.89%**  | 0.50%      | relative    | ✅ PASS | < 1%   |
-| P_gg ℓ=4     | 0.005 – 0.30   | **1.43%**  | 0.37%      | abs/max(ref)| ✅ PASS | < 2%   |
-
-Notes on l=4 metric: hexadecapole crosses near zero at k~0.25 h/Mpc due to near-
-cancellation between P_b4 (~-800) and tree+loop (~937). Relative error blows up there
-even with excellent absolute accuracy. `abs/max(ref)` = |Δ|/max(|ref| at k<0.3) is
-the robust criterion; any absolute error < 2% of the spectrum's characteristic scale.
-
-#### 2026-04-04 (before redesign)
-
-| Observable    | k range [h/Mpc] | Max |ΔP/P| | Status |
-|---------------|----------------|------------|--------|
-| P_mm real     | 0.005 – 0.30   | **0.18%**  | ✅ PASS |
-| P_gg real     | 0.005 – 0.30   | **0.18%**  | ✅ PASS |
-| P_gm real     | 0.005 – 0.30   | **0.18%**  | ✅ PASS |
-| P_mm ℓ=0     | 0.005 – 0.30   | **1.75%**  | ❌ FAIL |
-| P_mm ℓ=2     | 0.005 – 0.30   | **3.77%**  | ❌ FAIL |
-| P_mm ℓ=4     | 0.005 – 0.30   | **7.91%**  | ❌ FAIL |
-| P_gg ℓ=0     | 0.005 – 0.30   | **1.41%**  | ❌ FAIL |
-| P_gg ℓ=2     | 0.005 – 0.30   | **5.08%**  | ❌ FAIL |
-| P_gg ℓ=4     | 0.005 – 0.30   | **36.89%** | ❌ FAIL |
-
-### PT Bugs Found and Fixed (2026-04-09 session)
-
-| # | Bug | Root Cause | Fix |
-|---|-----|------------|-----|
-| 10 | `pk_gg_l2` tree used isotropic `pk_disc_mu` (bare P_lin) | GL integral of `L2 * pk_disc_mu * (b1+fμ²)²` used bare P_lin, not the anisotropic resummed P_tree. Also included a b1²*Pk_2_dd term that CLASS-PT doesn't have (vanishes in isotropic limit: ∫L2*1 dμ=0). | Replace with `Pk_2_vv + b1*Pk_2_vd` (anisotropic resummed components, matching CLASS-PT pm[18]+b1*pm[19]) |
-| 11 | `pk_gg_l4` tree had b1 factors not present in CLASS-PT | GL integral `L4 * pk_disc_mu * (b1+fμ²)²` again used bare P_lin. Galaxy l=4 tree should match CLASS-PT's pm[20] (matter tree, no b1 factors), since ∫L4*(1+fμ²)²dμ = ∫L4*(b1+fμ²)²/(b1=1) dμ in the isotropic limit. | Replace with `Pk_4_vv + Pk_4_vd + Pk_4_dd` (anisotropic matter tree) |
-| 12 | `accuracy_classpt.py` used relative error < 1% for l=4 | Hexadecapole crosses near zero at k~0.25 h/Mpc: tree+loop (~937) nearly cancels P_b4 (~-806), so a ~1.5% error in tree+loop gives >11% relative error in the near-zero total | Changed l=4 metric to `|Δ|/max(|ref|) < 2%` — absolute error normalized to characteristic spectrum scale |
-| 13 | `pk_mm_l2` / `pk_gg_l2` failing at 1.40% / 1.73% | `Pk_tree` used `(1 + Σ²k²)` correction (alpha=1.0) which was calibrated only for l=0. The reference uses CLASS-PT AP=Yes path with anisotropic Sigmatot(μ); projecting onto isotropic multipoles requires a smaller effective correction. alpha=1.0 over-corrects l=2 at BAO peaks (+1.25% at k=0.136). | Reduced `_TREE_ALPHA` from 1.0 to 0.27 — the value that minimises the worst-case error across all 9 spectra simultaneously. All spectra now < 1% (l0,l2) / < 2% (l4). |
-| 14 | `_TREE_ALPHA = 0.27` was an empirical fudge; real-space errors > 1% with alpha=0 | The correct formula (CLASS-PT AP path, `nonlinear_pt.c` line 9388) computes `p_tree(k,μ) = Pnw + Pw·exp(-Σtot(μ)·k²)·(1+Σtot(μ)·k²)` at each GL node μ and integrates to get multipoles. Our code used an isotropic approximation with scalar alpha. For real-space, the tree should use the raw P_lin (no IR damping), avoiding sensitivity to DST-derived sigma2_bao. | Moved RSD tree multipoles into the existing GL loop using anisotropic Σtot(μ), matching CLASS-PT AP path. Set real-space `Pk_tree = pk_lin_h` (no BAO damping), eliminating `_TREE_ALPHA` entirely. Real-space accuracy improved 0.94% → 0.31%; all 9 spectra pass. |
-
-### PT Bugs Found and Fixed (2026-04-04 session)
-
-| # | Bug | Root Cause | Fix |
-|---|-----|------------|-----|
-| 5 | Spurious `h³` multiply in all bias/multipole functions | `pk_gm_real`, `pk_gg_real`, `pk_mm_l0/l2/l4`, `pk_gg_l0/l2/l4` each multiplied output by `h**3` before return. EPTComponents already store values in (Mpc/h)³. | Removed `* h**3` from all 8 functions |
-| 6 | Wrong b4 k-factor `(kh/h)²` | Used `(kh/h)**2` but CLASS-PT passes k in 1/Mpc to `initialize_output`, so `self.kh/h = k_h` (h/Mpc). Should be `kh**2`. | Changed to `kh**2` in pk_gg_l0/l2/l4 |
-| 7 | Incomplete M22 RSD kernels | M22_0_dd was using identity; M22_2_dd, M22_4_vv/vd/dd were zero placeholders | Implemented all M22 RSD kernels from nonlinear_pt.c lines 7054/7395/7506/7618/7739 |
-| 8 | Incomplete M13 RSD kernels | M13 multipoles for ℓ=2,4 were zero | Implemented M13_0_vv/vd/dd, M13_2_vv/vd/dd, M13_4_vv/vd from nonlinear_pt.c |
-| 9 | Wrong UV counterterm coefficients | ℓ=2,4 UV coefficients were incorrect placeholders | Fixed from nonlinear_pt.c lines 6832, 7211, 7323, 7443, 7554, 7667 |
-
-### PT Known Caveats (post 2026-04-04)
-
-1. RSD multipole 1-loop kernels: all implemented but still ~2-8% error at k>0.15 h/Mpc.
-   Sub-leading terms or coefficient differences not yet traced. See accuracy table above.
-2. ~~`rs_h` default = 99.0 hardcoded~~ — **Resolved (2026-05-03)**: `compute_ept_from_clax`
-   now plumbs `clax.background.sound_horizon_drag(params) * params.h` (Aubourg+2014 Eq. 17,
-   Neff-aware) into IR resummation. Matches `ps_1loop_jax` at machine precision and
-   CLASS `pth->rs_d` to 0.002% at fiducial Planck. The variable name `rs_h` was also
-   misleading: dimensions are r_s × h in Mpc, NOT r_s/h in Mpc/h — docstrings updated.
-   Direct callers of `compute_ept(...)` still default to 99.0 (Planck-fiducial fallback).
-3. σ_v² integration over FFTLog grid rather than fine CLASS-PT grid — ~0.1% error.
-
----
-
-### 2026-04-08: RSD Redesign Decision — Assemble P(k,μ) + GL integrate
-
-**Status: PLANNED (not yet implemented)**
-
-#### Root cause analysis of large RSD multipole errors
-
-Investigation on branch `claude/zealous-khorana` established that the RSD
-multipole errors (8.91% ℓ=0, 29.78% ℓ=2, 86.06% ℓ=4 for matter) are not
-caused by the IR decomposition choice in `qf_rsd`/`p13_rsd` alone. Replacing
-`x_nw` with `x` (the proposed "non-AP path" fix) made errors marginally
-*worse*, confirming the root cause is architectural.
-
-Also fixed a pre-existing bug in `scripts/accuracy_classpt.py`: reference file
-key `pk_gm_real` → `pk_mg_real` (wrong key, caused KeyError on every run).
-
-**Root cause: hybrid tree/1-loop architecture is inconsistent.**
-
-The current code has two paths that cannot be reconciled:
-
-1. **Tree term** — GL quadrature over μ with the full **anisotropic** BAO damping
-   `Σtot(μ) = σ²(1 + fμ²(2+f)) + δσ² f²μ²(μ²-1)`. Correct.
-2. **1-loop terms** (μ^0/μ^2/μ^4 piece) — analytically projected to ℓ=0,2,4
-   using multipole-specific M22/M13 kernels (`M22_0_vv`, `M22_2_vv`, ...),
-   stored as `Pk_0_vv1`, `Pk_2_vv1`, etc. in `EPTComponents`.
-
-The 1-loop analytic projection is computed using the **isotropic** resummed
-`Pbin = pk_nw + pk_w × exp(-σ²k²)` (no μ-dependence in the BAO damping). The
-tree uses the μ-dependent `Σtot(μ)`. These are evaluated at **different points**
-in the IR-resummed spectrum, making the total P_ℓ(k) inconsistent.
-
-Additionally, the 9 multipole-specific M22 kernels and 8 M13 kernels
-(M22_0_vv, M22_0_vd, M22_0_dd, M22_2_vv, ..., M13_4_vd) each embed the
-Legendre projection factor analytically — any error in those rational kernel
-expressions (sign, coefficient, normalization) directly corrupts the multipoles
-with no way to diagnose which kernel is wrong.
-
-**CLASS-PT has two branches** for multipole computation:
-- **Branch 1 (no-AP)**: analytic Legendre projection via multipole-specific
-  kernels. Our current code targets this branch but gets ~8–86% errors.
-- **Branch 2 (AP-enabled)**: assemble `P(k,μ)` at each GL node, then numerically
-  integrate `∫ dμ L_ℓ(μ) P(k,μ)`. This branch is simpler and more robust.
-
-**Decision: adopt Branch 2 architecture.**
-
----
-
-#### New Architecture: Assemble P(k,μ) → GL integrate
-
-The core idea: precompute a small set of **bare (μ-independent) building blocks**
-via FFTLog, then at each GL node μᵢ assemble P(k,μᵢ) and accumulate multipoles.
-
-**Bare building blocks needed** (the μ-polynomial structure of the loop integral):
-
-```
-P_1loop_matter(k, μ) = P22_dd(k)              # μ^0 × f^0
-                     + 2f μ² P22_vd(k)         # μ^2 × f^1
-                     + f² μ^4 P22_vv(k)        # μ^4 × f^2
-                     + P13_dd(k)               # μ^0 × f^0 (same structure)
-                     + 2f μ² P13_vd(k)
-                     + f² μ^4 P13_vv(k)
-                     + f³ μ^6 P22_mu6_vv(k)   # higher order (already bare)
-                     + f³ μ^6 P22_mu6_vd(k)
-                     + f^4 μ^8 P22_mu8(k)
-                     + f³ μ^6 P13_mu6(k) × P13ratio(k,μ)
-```
-
-For biased tracers, the galaxy-matter coupling enters as:
-```
-P_1loop_gal(k, μ) = (b1 + fμ²)^2 × [P22_matter loop] + bias cross terms
-```
-The bias cross-term building blocks (Pk_b1b2, Pk_b2, Pk_b1bG2, Pk_bG2,
-Pk_IFG2) are μ-independent integrals; their μ-weighting is handled by expanding
-(b1 + fμ²)^2 at each GL node.
-
-**Kernel derivation** (algebraic, from existing code):
-
-The bare kernels k_P22_dd, k_P22_vd, k_P22_vv can be recovered by algebraically
-solving the linear system that relates them to the existing multipole-projected
-kernels (k_0_vv, k_2_vv, k_4_vv). From the Legendre integrals:
-
-```
-P22_l0 = P22_dd + (2f/3) P22_vd + (f²/5) P22_vv
-P22_l2 = (4f/3) P22_vd + (4f²/7) P22_vv
-P22_l4 = (8f²/35) P22_vv
-```
-
-Solving this triangular system gives the bare kernels in terms of N_vv, N_vd,
-N_dd (the polynomials already used in the current M22 RSD kernels):
-
-```python
-k_P22_vv = D_inv * f**2 * N_vv / 126.0            # μ^4 coefficient
-k_P22_vd = 3.0 * D_inv * f**2 * N_vd / 980.0      # μ^2 coefficient
-k_P22_dd = D_inv * f**2 * N_dd / 980.0             # μ^0 coefficient
-```
-
-Note: the f² factor in every term is a CLASS-PT normalization convention; the
-physical powers of f enter explicitly when assembling P(k,μ).
-
-P13 bare kernels follow the same decomposition from M13_0_vv, M13_0_vd, M13_0_dd.
-
-**GL assembly at each node μᵢ**:
-
-```python
-def p_matter_at_mu(mu, k, P22_dd, P22_vd, P22_vv, P13_dd, P13_vd, P13_vv,
-                   P22_mu6_vv, P22_mu6_vd, P22_mu8, P13_mu6,
-                   pk_nw, pk_w, sigma2_bao, delta_sigma2_bao, f):
-    mu2 = mu**2
-    # Anisotropic BAO damping (same as current tree term)
-    Sigmatot = sigma2_bao * (1 + f*mu2*(2+f)) + delta_sigma2_bao * f**2 * mu2*(mu2-1)
-    Exp = jnp.exp(-Sigmatot * k**2)
-    Pbin_mu = pk_nw + pk_w * Exp
-    P13ratio = 1 + (pk_w/pk_nw) * Exp  # for P13 wiggle correction
-    # Tree
-    Ptree = Pbin_mu * (1 + f*mu2)**2
-    # 1-loop: bare μ-polynomial assembly
-    P1loop = (P22_dd + P13_dd
-             + 2*f*mu2 * (P22_vd + P13_vd)
-             + f**2*mu2**2 * (P22_vv + P13_vv)
-             + f**3*mu2**3 * (P22_mu6_vv + P22_mu6_vd)
-             + f**4*mu2**4 * P22_mu8
-             + f**3*mu2**3 * P13_mu6 * P13ratio)
-    return Ptree + P1loop
-
-# Multipole projection
-def pk_mm_l0(ept):
-    result = sum(w * p_matter_at_mu(mu, ...) for mu, w in GL_nodes)
-    return 0.5 * result + EFT counterterms
-```
-
-**EPTComponents restructuring**:
-
-The 31 RSD arrays in the current `EPTComponents` (9 loop multipoles
-`Pk_0/2/4_vv/vd/dd1`, 12 bias cross multipoles, 6 tree multipoles, 4 higher-
-order arrays) are replaced by just **10 bare loop building blocks**:
-
-```
-P22_dd, P22_vd, P22_vv     # 3 bare 1-loop P22 matter components
-P13_dd, P13_vd, P13_vv     # 3 bare 1-loop P13 matter components
-P22_mu6_vv, P22_mu6_vd, P22_mu8, P13_mu6  # 4 higher-order (already bare)
-```
-
-Plus the **5 bias cross-term arrays** (already μ-independent; keep as-is):
-`Pk_Id2d2, Pk_Id2, Pk_IG2, Pk_Id2G2, Pk_IG2G2, Pk_IFG2`
-
-And the IR resummation arrays (unchanged): `pk_nw, pk_w, sigma2_bao,
-delta_sigma2_bao`.
-
-The 6 old tree arrays (`Pk_0_vv`, `Pk_0_vd`, etc.) are entirely removed —
-the tree is computed inline in the GL loop.
-
-**Why this is correct:**
-- IR resummation is consistent: the SAME anisotropic `Pbin(k,μ)` enters both
-  tree and 1-loop terms at each μ node
-- No multipole-specific M22 kernels needed: eliminates 17 kernel expressions
-  that were the source of likely numerical errors
-- Direct correspondence to CLASS-PT's AP branch: straightforward to validate
-
----
-
-#### Implementation Plan
-
-**Prerequisite reading**: Before implementing, read CLASS-PT `nonlinear_pt.c`
-lines 8215–8600 (the AP-branch GL loop) to confirm the bare kernel expressions.
-
----
-
-**Step 1 — Derive and verify bare P22/P13 kernels** (no code changes yet)
-
-Compute the bare kernels algebraically:
-```python
-k_P22_vv = D_inv * f**2 * N_vv / 126.0
-k_P22_vd = 3.0 * D_inv * f**2 * N_vd / 980.0
-k_P22_dd = D_inv * f**2 * N_dd / 980.0
-```
-Verify by checking that the monopole combination recovers the current `Pk_0_vv1`:
-```
-qf(M22*k_P22_dd) + (2f/3)*qf(M22*k_P22_vd) + (f²/5)*qf(M22*k_P22_vv) == Pk_0_vv1
-```
-Similarly derive M13_bare_vv, M13_bare_vd, M13_bare_dd from the existing
-M13_0_vv/vd/dd kernels using the same triangular solve.
-
-Spike: add these 6 bare components to the existing EPTComponents temporarily
-(do NOT remove the old multipole arrays yet) and print the comparison.
-
-**Validation gate**: bare components recover all 3 multipole sets (ℓ=0,2,4)
-to within numerical precision (< 1e-6 relative error).
-
----
-
-**Step 2 — Implement `_p1loop_at_mu(mu, ept_bare)` helper**
-
-Write the function that assembles `P_1loop_matter(k, μ)` from the bare building
-blocks at a single μ value:
-
-```python
-def _p1loop_matter_at_mu(mu: float, k, P22_dd, P22_vd, P22_vv,
-                          P13_dd, P13_vd, P13_vv, P22_mu6_vv, P22_mu6_vd,
-                          P22_mu8, P13_mu6, pk_nw, pk_w, sigma2_bao,
-                          delta_sigma2_bao, f):
-    ...
-```
-
-Write corresponding `_p1loop_gal_at_mu` that wraps in `(b1 + fμ²)²` and adds
-bias cross terms.
-
-**Validation gate**: Accumulate GL quadrature over the existing 40 nodes. The
-resulting P22_l0, P22_l2, P22_l4 must match the current `Pk_0_vv1`, `Pk_2_vv1`,
-`Pk_4_vv1` etc. to < 0.01% (should be exact up to GL truncation error).
-
----
-
-**Step 3 — Rewrite output functions `pk_mm_l0/l2/l4`, `pk_gg_l0/l2/l4`**
-
-Replace the current hybrid implementation (GL tree + analytic 1-loop) with a
-single GL loop using `_p1loop_matter_at_mu`:
-
-```python
-def pk_mm_l0(ept, cs0=0.0):
-    result = jnp.zeros_like(ept.kh)
-    for mu_g, w_g in zip(_GAUSS_NODES, _GAUSS_WEIGHTS):
-        Ptree_plus_loop = _p_matter_at_mu(float(mu_g), ept, ept.f)
-        result = result + w_g * Ptree_plus_loop
-    return 0.5 * result + 2.0 * cs0 * ept.Pk_ctr0
-```
-
-Keep the counterterm arrays unchanged (`Pk_ctr0`, `Pk_ctr2`, `Pk_ctr4`) — these
-are still analytic.
-
-**Validation gate**: Run `scripts/accuracy_classpt.py`. Target:
-- pk_mm_l0 < 1%, pk_mm_l2 < 2%, pk_mm_l4 < 5%
-- pk_gg_l0 < 1%, pk_gg_l2 < 2%, pk_gg_l4 < 10%
-
----
-
-**Step 4 — Strip EPTComponents of old multipole arrays**
-
-Only after Step 3 passes validation:
-- Remove `Pk_0_vv/vd/dd`, `Pk_2_vv/vd/dd`, `Pk_4_vv` (6 tree arrays)
-- Remove `Pk_0_vv1/vd1/dd1`, `Pk_2_vv1/vd1/dd1`, `Pk_4_vv1/vd1/dd1` (9 loop arrays)
-- Remove `Pk_0/2/4_b1b2`, `Pk_0/2/4_b2`, `Pk_0/2/4_b1bG2`, `Pk_0/2/4_bG2` (12 bias arrays)
-- Add: `P22_dd`, `P22_vd`, `P22_vv`, `P13_dd`, `P13_vd`, `P13_vv` (6 new bare arrays)
-- Update `tree_flatten`/`tree_unflatten` to match
-- Update `_compute_bias_spectra` to return bare components, not multipole-projected ones
-- Remove the entire `_compute_rsd_multipoles` section inside `_compute_bias_spectra`
-  (the `qf_rsd`, `p13_rsd` helpers and all M22_0_vv/M13_0_vv etc. kernel computation)
-
-**Validation gate**: Full test suite `pytest tests/ -q --fast` must still pass.
-Then re-run accuracy check; errors should be same as end of Step 3.
-
----
-
-**Step 5 — Accuracy tuning**
-
-If errors are still > targets after Step 3, diagnose by comparing P(k,μ) at
-specific μ values against CLASS-PT's AP branch output. Use the diagnostic pattern:
-1. Print P_matter(k=0.1 h/Mpc, μ=0.5) from clax vs CLASS-PT
-2. Print P22_dd(k=0.1), P22_vd(k=0.1), P22_vv(k=0.1) from clax vs CLASS-PT
-3. Fix any kernel normalization discrepancy found at step 2 before investigating step 1
-
-**Do NOT** tune by adjusting GL node count or adding fudge factors. Fix the kernel.
-
----
-
-**Step 6 — Commit and update CHANGELOG**
-
-Commit message: `Fix RSD: assemble P(k,μ) + GL integrate, matching CLASS-PT AP branch`
-Update the accuracy table above with new measured errors.
-
----
-
-**Appendix: files touched**
-
-| File | Change |
-|------|--------|
-| `clax/ept.py` | Strip 17 multipole M22/M13 kernels; add 6 bare kernels; rewrite `_compute_bias_spectra` return dict; rewrite `pk_mm_l0/l2/l4`, `pk_gg_l0/l2/l4` |
-| `clax/ept.py` `EPTComponents` | Remove 27 fields; add 6 bare fields; update `tree_flatten`/`tree_unflatten` |
-| `scripts/accuracy_classpt.py` | Bug fix already applied: `ref["pk_mg_real"]` not `ref["pk_gm_real"]` |
-
-No new files needed. No changes to tests (test interface is the output functions,
-which still take the same arguments). If tests break, fix them — do NOT skip.
-
----
-
-## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline
-
-**End-to-end differentiable pipeline from cosmological parameters to P(k),
-C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.**
+### May 3, 2026: Use hydrogen-atom mass (not proton mass) for `n_H_0` in z_reio inversion
+
+**Fixes a one-line unit bug in `clax/thermodynamics.py` that biased the
+`tau_reio` → `z_reio` inversion at fiducial Planck and propagated to
+EE l=20-30 as a ~1% systematic.**
+
+The `n_H_0` calculation inside `_find_z_reio` (line 710) used the proton
+mass `m_p` where it should have used the hydrogen atom mass `m_H`. CLASS
+uses `_m_H_ = 1.673575e-27 kg` at `thermodynamics.c:812`, and clax's
+RECFAST block at line 534 already used `m_H = 1.67353284e-27 kg` correctly
+— only the reionization-inversion site was off.
+
+`m_H / m_p = 1.000570`, so clax's `n_H_0` was 0.057% too large at this
+site → the bisection target `_tau_reio_for_zreio` overshot by 0.057% →
+the converged `z_reio` came out too low by 0.0033 in absolute redshift.
+That offset propagated as ~1% in `x_e` across the reionization transition
+(z=7-9), ~1% in `g(τ)` at the secondary visibility peak, and to the
+EE l=20-30 residual the README was attributing to "RECFAST visibility
+function bias".
+
+**Empirical impact at Planck 2018 fiducial:**
+
+| Quantity | Pre-fix | Post-fix | CLASS reference |
+|---|---|---|---|
+| `z_reio` (`tau_reio = 0.0544`) | 7.6885 | **7.6915** | 7.6918 |
+| `x_e(z=8)` | 0.2397 (-1.06%) | **0.2420 (-0.11%)** | 0.2423 |
+| `g(τ)` at z=8 vs CLASS | -1.00% | **-0.11%** | — |
+| `g(τ)` at z=1090 (recomb peak) | unchanged | unchanged | — |
+
+The fix closes 90% of the `z_reio` offset; the residual ~3e-4 is the
+2.5e-5-relative numerical difference between clax's atomic 1H-1 mass and
+CLASS's rounded `_m_H_`, well below any current accuracy target.
+
+**Changes:**
+
+- `clax/constants.py`: add `m_H_kg = 1.67353284e-27` with a comment
+  flagging that `m_p` is *not* the right choice for hydrogen number density.
+- `clax/thermodynamics.py:710`: replace local `_m_p` with `const.m_H_kg`
+  in the `n_H_0` formula used by `_find_z_reio`.
+
+The README "Known limitations" line claiming "EE l=20-30: ~0.2% from
+RECFAST visibility function bias" should be reassessed in a follow-up;
+empirically clax/RECFAST `x_e` agrees with HyRec to 0.09% at z=1090, so
+the residual was upstream of recombination, not in RECFAST itself.
 
 ### Apr 20, 2026: Rodas5 Rosenbrock solver + dark energy perturbations + accuracy fixes
 
@@ -1242,6 +1011,388 @@ With `planck_cl` preset (k_max=1.0, 300 modes) + source interpolation + ncdm (ρ
 Bessel functions accurate to machine precision at l=2500.
 RSA damping in ODE for post-recombination hierarchy.
 100 tests passing, ~10K lines of code.
+
+---
+
+## PT Branch (clax-pt): CLASS-PT EFT Power Spectra
+
+Tracks the path to sub-percent accuracy vs CLASS-PT, following the accuracy-convergence
+methodology. Each entry logs implementations, bugs found/fixed, and measured accuracy.
+
+### Current Status (clax-pt branch)
+
+| Component | State | Notes |
+|-----------|-------|-------|
+| FFTLog decomposition | ✅ implemented | NMAX=256, B=-0.3, biased DFT |
+| M22/M13 matrix loading | ✅ implemented + tested | Symmetry bug fixed (see below) |
+| P22 kernel | ✅ implemented | Bilinear zdotu convention |
+| P13 + UV counterterm | ✅ implemented | σ_v² trapezoidal integral |
+| IR resummation | ✅ implemented + accurate | Linear k-grid DST, odd/even spline mode removal, j₂ sigma_BAO |
+| Bias expansion | ✅ implemented | P_mm, P_mg, P_gg (caveats below) |
+| RSD multipoles | ✅ implemented | ℓ=0,2,4 for matter and galaxies |
+| Unit tests | ✅ written | Matrix symmetry, FFTLog, P22 scaling |
+| **Accuracy vs CLASS-PT** | ✅ verified | P_mm max 0.45%, RMS 0.13% at k<0.3 h/Mpc |
+
+### PT Bugs Found and Fixed
+
+| # | Bug | Root Cause | Fix |
+|---|-----|------------|-----|
+| 1 | M22 Hermitian vs symmetric | `_load_complex_triangular` used `M[j,i] = tri[idx].conj()` — M22 is **symmetric** (CLASS-PT `zdotu` bilinear), not Hermitian | Changed to `M[j,i] = tri[idx]` (ept.py line 114) |
+| 2 | M22 wrong packed format | `M22oneline_N256_packed.dat` uses LAPACK 'L' column-major, not row-major. Wrong formula gave nonsense P22 | New `_load_complex_triangular_lapack_l`: `start_j = j*n - j*(j-1)//2` |
+| 3 | IR resummation log k-grid | Used `np.logspace` for DST grid → BAO modes 120-240 map to wrong scales; P13_UV σ_v ≈ 1686 instead of ~23 | Linear k-grid `np.linspace(1e-4, 10, 65536)`, matching CLASS-PT kmin2/kmax2 |
+| 4 | IR resummation linear mode interp | Linear interpolation across DST modes 120-240 gave P_mm err 1.54% | Odd/even spline: split DST into even/odd indexed arrays, natural cubic spline each |
+
+### PT Accuracy Table (Planck 2018 fiducial, z=0.38, b1=2 b4=500 all other bias=0)
+
+Reference: `reference_data/classpt_z0.38_fullrange.npz` — CLASS-PT on ept_kgrid (256 pts, 5e-5–100 h/Mpc).
+
+#### 2026-04-09 (revised, no fudge factor) — ALL 9 SPECTRA PASS
+
+| Observable    | k range [h/Mpc] | Max error  | Mean error | Metric      | Status | Target |
+|---------------|----------------|------------|------------|-------------|--------|--------|
+| P_mm real     | 0.005 – 0.30   | **0.31%**  | 0.04%      | relative    | ✅ PASS | < 1%   |
+| P_gg real     | 0.005 – 0.30   | **0.31%**  | 0.04%      | relative    | ✅ PASS | < 1%   |
+| P_gm real     | 0.005 – 0.30   | **0.31%**  | 0.04%      | relative    | ✅ PASS | < 1%   |
+| P_mm ℓ=0     | 0.005 – 0.30   | **0.59%**  | 0.40%      | relative    | ✅ PASS | < 1%   |
+| P_mm ℓ=2     | 0.005 – 0.30   | **0.70%**  | 0.44%      | relative    | ✅ PASS | < 1%   |
+| P_mm ℓ=4     | 0.005 – 0.30   | **0.70%**  | 0.15%      | abs/max(ref)| ✅ PASS | < 2%   |
+| P_gg ℓ=0     | 0.005 – 0.30   | **0.56%**  | 0.39%      | relative    | ✅ PASS | < 1%   |
+| P_gg ℓ=2     | 0.005 – 0.30   | **0.89%**  | 0.50%      | relative    | ✅ PASS | < 1%   |
+| P_gg ℓ=4     | 0.005 – 0.30   | **1.43%**  | 0.37%      | abs/max(ref)| ✅ PASS | < 2%   |
+
+Notes on l=4 metric: hexadecapole crosses near zero at k~0.25 h/Mpc due to near-
+cancellation between P_b4 (~-800) and tree+loop (~937). Relative error blows up there
+even with excellent absolute accuracy. `abs/max(ref)` = |Δ|/max(|ref| at k<0.3) is
+the robust criterion; any absolute error < 2% of the spectrum's characteristic scale.
+
+#### 2026-04-04 (before redesign)
+
+| Observable    | k range [h/Mpc] | Max |ΔP/P| | Status |
+|---------------|----------------|------------|--------|
+| P_mm real     | 0.005 – 0.30   | **0.18%**  | ✅ PASS |
+| P_gg real     | 0.005 – 0.30   | **0.18%**  | ✅ PASS |
+| P_gm real     | 0.005 – 0.30   | **0.18%**  | ✅ PASS |
+| P_mm ℓ=0     | 0.005 – 0.30   | **1.75%**  | ❌ FAIL |
+| P_mm ℓ=2     | 0.005 – 0.30   | **3.77%**  | ❌ FAIL |
+| P_mm ℓ=4     | 0.005 – 0.30   | **7.91%**  | ❌ FAIL |
+| P_gg ℓ=0     | 0.005 – 0.30   | **1.41%**  | ❌ FAIL |
+| P_gg ℓ=2     | 0.005 – 0.30   | **5.08%**  | ❌ FAIL |
+| P_gg ℓ=4     | 0.005 – 0.30   | **36.89%** | ❌ FAIL |
+
+### PT Bugs Found and Fixed (2026-04-09 session)
+
+| # | Bug | Root Cause | Fix |
+|---|-----|------------|-----|
+| 10 | `pk_gg_l2` tree used isotropic `pk_disc_mu` (bare P_lin) | GL integral of `L2 * pk_disc_mu * (b1+fμ²)²` used bare P_lin, not the anisotropic resummed P_tree. Also included a b1²*Pk_2_dd term that CLASS-PT doesn't have (vanishes in isotropic limit: ∫L2*1 dμ=0). | Replace with `Pk_2_vv + b1*Pk_2_vd` (anisotropic resummed components, matching CLASS-PT pm[18]+b1*pm[19]) |
+| 11 | `pk_gg_l4` tree had b1 factors not present in CLASS-PT | GL integral `L4 * pk_disc_mu * (b1+fμ²)²` again used bare P_lin. Galaxy l=4 tree should match CLASS-PT's pm[20] (matter tree, no b1 factors), since ∫L4*(1+fμ²)²dμ = ∫L4*(b1+fμ²)²/(b1=1) dμ in the isotropic limit. | Replace with `Pk_4_vv + Pk_4_vd + Pk_4_dd` (anisotropic matter tree) |
+| 12 | `accuracy_classpt.py` used relative error < 1% for l=4 | Hexadecapole crosses near zero at k~0.25 h/Mpc: tree+loop (~937) nearly cancels P_b4 (~-806), so a ~1.5% error in tree+loop gives >11% relative error in the near-zero total | Changed l=4 metric to `|Δ|/max(|ref|) < 2%` — absolute error normalized to characteristic spectrum scale |
+| 13 | `pk_mm_l2` / `pk_gg_l2` failing at 1.40% / 1.73% | `Pk_tree` used `(1 + Σ²k²)` correction (alpha=1.0) which was calibrated only for l=0. The reference uses CLASS-PT AP=Yes path with anisotropic Sigmatot(μ); projecting onto isotropic multipoles requires a smaller effective correction. alpha=1.0 over-corrects l=2 at BAO peaks (+1.25% at k=0.136). | Reduced `_TREE_ALPHA` from 1.0 to 0.27 — the value that minimises the worst-case error across all 9 spectra simultaneously. All spectra now < 1% (l0,l2) / < 2% (l4). |
+| 14 | `_TREE_ALPHA = 0.27` was an empirical fudge; real-space errors > 1% with alpha=0 | The correct formula (CLASS-PT AP path, `nonlinear_pt.c` line 9388) computes `p_tree(k,μ) = Pnw + Pw·exp(-Σtot(μ)·k²)·(1+Σtot(μ)·k²)` at each GL node μ and integrates to get multipoles. Our code used an isotropic approximation with scalar alpha. For real-space, the tree should use the raw P_lin (no IR damping), avoiding sensitivity to DST-derived sigma2_bao. | Moved RSD tree multipoles into the existing GL loop using anisotropic Σtot(μ), matching CLASS-PT AP path. Set real-space `Pk_tree = pk_lin_h` (no BAO damping), eliminating `_TREE_ALPHA` entirely. Real-space accuracy improved 0.94% → 0.31%; all 9 spectra pass. |
+
+### PT Bugs Found and Fixed (2026-04-04 session)
+
+| # | Bug | Root Cause | Fix |
+|---|-----|------------|-----|
+| 5 | Spurious `h³` multiply in all bias/multipole functions | `pk_gm_real`, `pk_gg_real`, `pk_mm_l0/l2/l4`, `pk_gg_l0/l2/l4` each multiplied output by `h**3` before return. EPTComponents already store values in (Mpc/h)³. | Removed `* h**3` from all 8 functions |
+| 6 | Wrong b4 k-factor `(kh/h)²` | Used `(kh/h)**2` but CLASS-PT passes k in 1/Mpc to `initialize_output`, so `self.kh/h = k_h` (h/Mpc). Should be `kh**2`. | Changed to `kh**2` in pk_gg_l0/l2/l4 |
+| 7 | Incomplete M22 RSD kernels | M22_0_dd was using identity; M22_2_dd, M22_4_vv/vd/dd were zero placeholders | Implemented all M22 RSD kernels from nonlinear_pt.c lines 7054/7395/7506/7618/7739 |
+| 8 | Incomplete M13 RSD kernels | M13 multipoles for ℓ=2,4 were zero | Implemented M13_0_vv/vd/dd, M13_2_vv/vd/dd, M13_4_vv/vd from nonlinear_pt.c |
+| 9 | Wrong UV counterterm coefficients | ℓ=2,4 UV coefficients were incorrect placeholders | Fixed from nonlinear_pt.c lines 6832, 7211, 7323, 7443, 7554, 7667 |
+
+### PT Known Caveats (post 2026-04-04)
+
+1. RSD multipole 1-loop kernels: all implemented but still ~2-8% error at k>0.15 h/Mpc.
+   Sub-leading terms or coefficient differences not yet traced. See accuracy table above.
+2. ~~`rs_h` default = 99.0 hardcoded~~ — **Resolved (2026-05-03)**: `compute_ept_from_clax`
+   now plumbs `clax.background.sound_horizon_drag(params) * params.h` (Aubourg+2014 Eq. 17,
+   Neff-aware) into IR resummation. Matches `ps_1loop_jax` at machine precision and
+   CLASS `pth->rs_d` to 0.002% at fiducial Planck. The variable name `rs_h` was also
+   misleading: dimensions are r_s × h in Mpc, NOT r_s/h in Mpc/h — docstrings updated.
+   Direct callers of `compute_ept(...)` still default to 99.0 (Planck-fiducial fallback).
+3. σ_v² integration over FFTLog grid rather than fine CLASS-PT grid — ~0.1% error.
+
+---
+
+### 2026-04-08: RSD Redesign Decision — Assemble P(k,μ) + GL integrate
+
+**Status: PLANNED (not yet implemented)**
+
+#### Root cause analysis of large RSD multipole errors
+
+Investigation on branch `claude/zealous-khorana` established that the RSD
+multipole errors (8.91% ℓ=0, 29.78% ℓ=2, 86.06% ℓ=4 for matter) are not
+caused by the IR decomposition choice in `qf_rsd`/`p13_rsd` alone. Replacing
+`x_nw` with `x` (the proposed "non-AP path" fix) made errors marginally
+*worse*, confirming the root cause is architectural.
+
+Also fixed a pre-existing bug in `scripts/accuracy_classpt.py`: reference file
+key `pk_gm_real` → `pk_mg_real` (wrong key, caused KeyError on every run).
+
+**Root cause: hybrid tree/1-loop architecture is inconsistent.**
+
+The current code has two paths that cannot be reconciled:
+
+1. **Tree term** — GL quadrature over μ with the full **anisotropic** BAO damping
+   `Σtot(μ) = σ²(1 + fμ²(2+f)) + δσ² f²μ²(μ²-1)`. Correct.
+2. **1-loop terms** (μ^0/μ^2/μ^4 piece) — analytically projected to ℓ=0,2,4
+   using multipole-specific M22/M13 kernels (`M22_0_vv`, `M22_2_vv`, ...),
+   stored as `Pk_0_vv1`, `Pk_2_vv1`, etc. in `EPTComponents`.
+
+The 1-loop analytic projection is computed using the **isotropic** resummed
+`Pbin = pk_nw + pk_w × exp(-σ²k²)` (no μ-dependence in the BAO damping). The
+tree uses the μ-dependent `Σtot(μ)`. These are evaluated at **different points**
+in the IR-resummed spectrum, making the total P_ℓ(k) inconsistent.
+
+Additionally, the 9 multipole-specific M22 kernels and 8 M13 kernels
+(M22_0_vv, M22_0_vd, M22_0_dd, M22_2_vv, ..., M13_4_vd) each embed the
+Legendre projection factor analytically — any error in those rational kernel
+expressions (sign, coefficient, normalization) directly corrupts the multipoles
+with no way to diagnose which kernel is wrong.
+
+**CLASS-PT has two branches** for multipole computation:
+- **Branch 1 (no-AP)**: analytic Legendre projection via multipole-specific
+  kernels. Our current code targets this branch but gets ~8–86% errors.
+- **Branch 2 (AP-enabled)**: assemble `P(k,μ)` at each GL node, then numerically
+  integrate `∫ dμ L_ℓ(μ) P(k,μ)`. This branch is simpler and more robust.
+
+**Decision: adopt Branch 2 architecture.**
+
+---
+
+#### New Architecture: Assemble P(k,μ) → GL integrate
+
+The core idea: precompute a small set of **bare (μ-independent) building blocks**
+via FFTLog, then at each GL node μᵢ assemble P(k,μᵢ) and accumulate multipoles.
+
+**Bare building blocks needed** (the μ-polynomial structure of the loop integral):
+
+```
+P_1loop_matter(k, μ) = P22_dd(k)              # μ^0 × f^0
+                     + 2f μ² P22_vd(k)         # μ^2 × f^1
+                     + f² μ^4 P22_vv(k)        # μ^4 × f^2
+                     + P13_dd(k)               # μ^0 × f^0 (same structure)
+                     + 2f μ² P13_vd(k)
+                     + f² μ^4 P13_vv(k)
+                     + f³ μ^6 P22_mu6_vv(k)   # higher order (already bare)
+                     + f³ μ^6 P22_mu6_vd(k)
+                     + f^4 μ^8 P22_mu8(k)
+                     + f³ μ^6 P13_mu6(k) × P13ratio(k,μ)
+```
+
+For biased tracers, the galaxy-matter coupling enters as:
+```
+P_1loop_gal(k, μ) = (b1 + fμ²)^2 × [P22_matter loop] + bias cross terms
+```
+The bias cross-term building blocks (Pk_b1b2, Pk_b2, Pk_b1bG2, Pk_bG2,
+Pk_IFG2) are μ-independent integrals; their μ-weighting is handled by expanding
+(b1 + fμ²)^2 at each GL node.
+
+**Kernel derivation** (algebraic, from existing code):
+
+The bare kernels k_P22_dd, k_P22_vd, k_P22_vv can be recovered by algebraically
+solving the linear system that relates them to the existing multipole-projected
+kernels (k_0_vv, k_2_vv, k_4_vv). From the Legendre integrals:
+
+```
+P22_l0 = P22_dd + (2f/3) P22_vd + (f²/5) P22_vv
+P22_l2 = (4f/3) P22_vd + (4f²/7) P22_vv
+P22_l4 = (8f²/35) P22_vv
+```
+
+Solving this triangular system gives the bare kernels in terms of N_vv, N_vd,
+N_dd (the polynomials already used in the current M22 RSD kernels):
+
+```python
+k_P22_vv = D_inv * f**2 * N_vv / 126.0            # μ^4 coefficient
+k_P22_vd = 3.0 * D_inv * f**2 * N_vd / 980.0      # μ^2 coefficient
+k_P22_dd = D_inv * f**2 * N_dd / 980.0             # μ^0 coefficient
+```
+
+Note: the f² factor in every term is a CLASS-PT normalization convention; the
+physical powers of f enter explicitly when assembling P(k,μ).
+
+P13 bare kernels follow the same decomposition from M13_0_vv, M13_0_vd, M13_0_dd.
+
+**GL assembly at each node μᵢ**:
+
+```python
+def p_matter_at_mu(mu, k, P22_dd, P22_vd, P22_vv, P13_dd, P13_vd, P13_vv,
+                   P22_mu6_vv, P22_mu6_vd, P22_mu8, P13_mu6,
+                   pk_nw, pk_w, sigma2_bao, delta_sigma2_bao, f):
+    mu2 = mu**2
+    # Anisotropic BAO damping (same as current tree term)
+    Sigmatot = sigma2_bao * (1 + f*mu2*(2+f)) + delta_sigma2_bao * f**2 * mu2*(mu2-1)
+    Exp = jnp.exp(-Sigmatot * k**2)
+    Pbin_mu = pk_nw + pk_w * Exp
+    P13ratio = 1 + (pk_w/pk_nw) * Exp  # for P13 wiggle correction
+    # Tree
+    Ptree = Pbin_mu * (1 + f*mu2)**2
+    # 1-loop: bare μ-polynomial assembly
+    P1loop = (P22_dd + P13_dd
+             + 2*f*mu2 * (P22_vd + P13_vd)
+             + f**2*mu2**2 * (P22_vv + P13_vv)
+             + f**3*mu2**3 * (P22_mu6_vv + P22_mu6_vd)
+             + f**4*mu2**4 * P22_mu8
+             + f**3*mu2**3 * P13_mu6 * P13ratio)
+    return Ptree + P1loop
+
+# Multipole projection
+def pk_mm_l0(ept):
+    result = sum(w * p_matter_at_mu(mu, ...) for mu, w in GL_nodes)
+    return 0.5 * result + EFT counterterms
+```
+
+**EPTComponents restructuring**:
+
+The 31 RSD arrays in the current `EPTComponents` (9 loop multipoles
+`Pk_0/2/4_vv/vd/dd1`, 12 bias cross multipoles, 6 tree multipoles, 4 higher-
+order arrays) are replaced by just **10 bare loop building blocks**:
+
+```
+P22_dd, P22_vd, P22_vv     # 3 bare 1-loop P22 matter components
+P13_dd, P13_vd, P13_vv     # 3 bare 1-loop P13 matter components
+P22_mu6_vv, P22_mu6_vd, P22_mu8, P13_mu6  # 4 higher-order (already bare)
+```
+
+Plus the **5 bias cross-term arrays** (already μ-independent; keep as-is):
+`Pk_Id2d2, Pk_Id2, Pk_IG2, Pk_Id2G2, Pk_IG2G2, Pk_IFG2`
+
+And the IR resummation arrays (unchanged): `pk_nw, pk_w, sigma2_bao,
+delta_sigma2_bao`.
+
+The 6 old tree arrays (`Pk_0_vv`, `Pk_0_vd`, etc.) are entirely removed —
+the tree is computed inline in the GL loop.
+
+**Why this is correct:**
+- IR resummation is consistent: the SAME anisotropic `Pbin(k,μ)` enters both
+  tree and 1-loop terms at each μ node
+- No multipole-specific M22 kernels needed: eliminates 17 kernel expressions
+  that were the source of likely numerical errors
+- Direct correspondence to CLASS-PT's AP branch: straightforward to validate
+
+---
+
+#### Implementation Plan
+
+**Prerequisite reading**: Before implementing, read CLASS-PT `nonlinear_pt.c`
+lines 8215–8600 (the AP-branch GL loop) to confirm the bare kernel expressions.
+
+---
+
+**Step 1 — Derive and verify bare P22/P13 kernels** (no code changes yet)
+
+Compute the bare kernels algebraically:
+```python
+k_P22_vv = D_inv * f**2 * N_vv / 126.0
+k_P22_vd = 3.0 * D_inv * f**2 * N_vd / 980.0
+k_P22_dd = D_inv * f**2 * N_dd / 980.0
+```
+Verify by checking that the monopole combination recovers the current `Pk_0_vv1`:
+```
+qf(M22*k_P22_dd) + (2f/3)*qf(M22*k_P22_vd) + (f²/5)*qf(M22*k_P22_vv) == Pk_0_vv1
+```
+Similarly derive M13_bare_vv, M13_bare_vd, M13_bare_dd from the existing
+M13_0_vv/vd/dd kernels using the same triangular solve.
+
+Spike: add these 6 bare components to the existing EPTComponents temporarily
+(do NOT remove the old multipole arrays yet) and print the comparison.
+
+**Validation gate**: bare components recover all 3 multipole sets (ℓ=0,2,4)
+to within numerical precision (< 1e-6 relative error).
+
+---
+
+**Step 2 — Implement `_p1loop_at_mu(mu, ept_bare)` helper**
+
+Write the function that assembles `P_1loop_matter(k, μ)` from the bare building
+blocks at a single μ value:
+
+```python
+def _p1loop_matter_at_mu(mu: float, k, P22_dd, P22_vd, P22_vv,
+                          P13_dd, P13_vd, P13_vv, P22_mu6_vv, P22_mu6_vd,
+                          P22_mu8, P13_mu6, pk_nw, pk_w, sigma2_bao,
+                          delta_sigma2_bao, f):
+    ...
+```
+
+Write corresponding `_p1loop_gal_at_mu` that wraps in `(b1 + fμ²)²` and adds
+bias cross terms.
+
+**Validation gate**: Accumulate GL quadrature over the existing 40 nodes. The
+resulting P22_l0, P22_l2, P22_l4 must match the current `Pk_0_vv1`, `Pk_2_vv1`,
+`Pk_4_vv1` etc. to < 0.01% (should be exact up to GL truncation error).
+
+---
+
+**Step 3 — Rewrite output functions `pk_mm_l0/l2/l4`, `pk_gg_l0/l2/l4`**
+
+Replace the current hybrid implementation (GL tree + analytic 1-loop) with a
+single GL loop using `_p1loop_matter_at_mu`:
+
+```python
+def pk_mm_l0(ept, cs0=0.0):
+    result = jnp.zeros_like(ept.kh)
+    for mu_g, w_g in zip(_GAUSS_NODES, _GAUSS_WEIGHTS):
+        Ptree_plus_loop = _p_matter_at_mu(float(mu_g), ept, ept.f)
+        result = result + w_g * Ptree_plus_loop
+    return 0.5 * result + 2.0 * cs0 * ept.Pk_ctr0
+```
+
+Keep the counterterm arrays unchanged (`Pk_ctr0`, `Pk_ctr2`, `Pk_ctr4`) — these
+are still analytic.
+
+**Validation gate**: Run `scripts/accuracy_classpt.py`. Target:
+- pk_mm_l0 < 1%, pk_mm_l2 < 2%, pk_mm_l4 < 5%
+- pk_gg_l0 < 1%, pk_gg_l2 < 2%, pk_gg_l4 < 10%
+
+---
+
+**Step 4 — Strip EPTComponents of old multipole arrays**
+
+Only after Step 3 passes validation:
+- Remove `Pk_0_vv/vd/dd`, `Pk_2_vv/vd/dd`, `Pk_4_vv` (6 tree arrays)
+- Remove `Pk_0_vv1/vd1/dd1`, `Pk_2_vv1/vd1/dd1`, `Pk_4_vv1/vd1/dd1` (9 loop arrays)
+- Remove `Pk_0/2/4_b1b2`, `Pk_0/2/4_b2`, `Pk_0/2/4_b1bG2`, `Pk_0/2/4_bG2` (12 bias arrays)
+- Add: `P22_dd`, `P22_vd`, `P22_vv`, `P13_dd`, `P13_vd`, `P13_vv` (6 new bare arrays)
+- Update `tree_flatten`/`tree_unflatten` to match
+- Update `_compute_bias_spectra` to return bare components, not multipole-projected ones
+- Remove the entire `_compute_rsd_multipoles` section inside `_compute_bias_spectra`
+  (the `qf_rsd`, `p13_rsd` helpers and all M22_0_vv/M13_0_vv etc. kernel computation)
+
+**Validation gate**: Full test suite `pytest tests/ -q --fast` must still pass.
+Then re-run accuracy check; errors should be same as end of Step 3.
+
+---
+
+**Step 5 — Accuracy tuning**
+
+If errors are still > targets after Step 3, diagnose by comparing P(k,μ) at
+specific μ values against CLASS-PT's AP branch output. Use the diagnostic pattern:
+1. Print P_matter(k=0.1 h/Mpc, μ=0.5) from clax vs CLASS-PT
+2. Print P22_dd(k=0.1), P22_vd(k=0.1), P22_vv(k=0.1) from clax vs CLASS-PT
+3. Fix any kernel normalization discrepancy found at step 2 before investigating step 1
+
+**Do NOT** tune by adjusting GL node count or adding fudge factors. Fix the kernel.
+
+---
+
+**Step 6 — Commit and update CHANGELOG**
+
+Commit message: `Fix RSD: assemble P(k,μ) + GL integrate, matching CLASS-PT AP branch`
+Update the accuracy table above with new measured errors.
+
+---
+
+**Appendix: files touched**
+
+| File | Change |
+|------|--------|
+| `clax/ept.py` | Strip 17 multipole M22/M13 kernels; add 6 bare kernels; rewrite `_compute_bias_spectra` return dict; rewrite `pk_mm_l0/l2/l4`, `pk_gg_l0/l2/l4` |
+| `clax/ept.py` `EPTComponents` | Remove 27 fields; add 6 bare fields; update `tree_flatten`/`tree_unflatten` |
+| `scripts/accuracy_classpt.py` | Bug fix already applied: `ref["pk_mg_real"]` not `ref["pk_gm_real"]` |
+
+No new files needed. No changes to tests (test interface is the output functions,
+which still take the same arguments). If tests break, fix them — do NOT skip.
 
 ---
 
