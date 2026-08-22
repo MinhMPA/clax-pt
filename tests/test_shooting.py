@@ -142,21 +142,12 @@ class TestShootingGradient:
             f"dh/d(100*theta_s) = {grad_val:.4f}, expected O(1-10)"
         )
 
-
-class TestShootingForwardModeAD:
-    """Forward-mode AD (jax.jvp) through the shooting function.
-
-    shoot_fn has a custom_jvp boundary that intercepts forward-mode propagation.
-    The JVP rule's inner jax.grad call is standalone reverse-mode, so no
-    ode_adjoint="direct" is needed — works with the default PREC.
-    """
-
     def test_shoot_fn_forward_mode_matches_fd(self, theta_s_fiducial):
-        """jax.jvp through shoot_fn matches finite differences; expects <1% relative error.
+        """jax.jvp through shoot_fn must match finite differences.
 
-        RED before converting shoot_fn from custom_vjp to custom_jvp
-        (raises NotImplementedError: forward-mode through custom_vjp).
-        GREEN after conversion.
+        custom_vjp does NOT provide forward-mode AD — jax.jvp through a
+        custom_vjp function raises NotImplementedError. This test requires
+        custom_jvp to be defined instead.
         """
         params = CosmoParams()
         shoot_fn = make_shoot_h_from_theta_s(PREC)

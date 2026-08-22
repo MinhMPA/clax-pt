@@ -2,7 +2,7 @@
 
 Converts user-friendly parameters (e.g., 100*theta_s) to internal
 parameters (H0) by iterative root-finding, in a differentiable way
-via jax.custom_jvp and the implicit function theorem.
+via jax.custom_vjp and the implicit function theorem.
 
 Key function:
     shoot_h_from_theta_s(theta_s_target, other_params, prec) -> h
@@ -73,6 +73,20 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
         shoot_fn: function(theta_s_100_target, params_template) -> h
     """
 
+    def _shoot_impl(theta_s_100_target: float, params_template: CosmoParams) -> float:
+        """Newton's method for h such that 100*theta_s(h) = theta_s_100_target."""
+        h0 = 3.54 * theta_s_100_target**2 - 5.455 * theta_s_100_target + 2.548
+
+        def newton_step(i, h):
+            theta_s = _compute_theta_s(h, params_template, prec)
+            eps = 1e-4
+            theta_s_plus = _compute_theta_s(h + eps, params_template, prec)
+            dtheta_dh = (theta_s_plus - theta_s) / eps
+            update = (theta_s - theta_s_100_target) / dtheta_dh
+            return h - 0.5 * update
+
+        return jax.lax.fori_loop(0, 25, newton_step, h0)
+
     @jax.custom_jvp
     def shoot_fn(theta_s_100_target: float, params_template: CosmoParams) -> float:
         """Find h such that 100*theta_s(h) = theta_s_100_target.
@@ -80,40 +94,27 @@ def make_shoot_h_from_theta_s(prec: PrecisionParams):
         Uses Newton's method with a fixed number of iterations.
         Initial guess from CLASS input.c:1190:
             h_guess = 3.54*theta_s^2 - 5.455*theta_s + 2.548
-
-        The JVP rule (below) applies the IFT: dh/dtheta_s = 1/(dtheta_s/dh).
-        custom_jvp provides VJP via transposition, so reverse-mode tests pass too.
         """
-        # CLASS's initial guess formula (input.c:1190)
-        h0 = 3.54 * theta_s_100_target**2 - 5.455 * theta_s_100_target + 2.548
-
-        def newton_step(i, h):
-            theta_s = _compute_theta_s(h, params_template, prec)
-            # Finite difference derivative for the forward Newton solve
-            eps = 1e-4
-            theta_s_plus = _compute_theta_s(h + eps, params_template, prec)
-            dtheta_dh = (theta_s_plus - theta_s) / eps
-            # Damped Newton update to prevent oscillation
-            # (the discrete z_rec grid can cause 2-cycles in undamped Newton)
-            update = (theta_s - theta_s_100_target) / dtheta_dh
-            h = h - 0.5 * update
-            return h
-
-        h_final = jax.lax.fori_loop(0, 25, newton_step, h0)
-        return h_final
+        return _shoot_impl(theta_s_100_target, params_template)
 
     @shoot_fn.defjvp
-    def shoot_fn_jvp(primals, tangents):
+    def _shoot_jvp(primals, tangents):
         theta_s_100_target, params_template = primals
-        t_theta_s_100_target, _ = tangents  # params_template is static; its tangent is unused
+        theta_s_dot, _params_dot = tangents
 
-        h = shoot_fn(theta_s_100_target, params_template)
+        h = _shoot_impl(theta_s_100_target, params_template)
 
-        # IFT: F(h, theta_s_target) = theta_s(h) - theta_s_target = 0
-        # dh/dtheta_s_target = 1 / (dtheta_s/dh)
-        dtheta_dh = jax.grad(lambda h_: _compute_theta_s(h_, params_template, prec))(h)
-        h_dot = t_theta_s_100_target / dtheta_dh
+        # IFT: F(h, theta_s_target) = theta_s(h; params) - theta_s_target = 0
+        # dh/d(theta_s_target) = 1 / (d(theta_s)/dh)
+        h_sg = jax.lax.stop_gradient(h)
+        dtheta_dh = jax.grad(
+            lambda h_: _compute_theta_s(
+                h_, jax.lax.stop_gradient(params_template), prec
+            )
+        )(h_sg)
+        h_dot = theta_s_dot / dtheta_dh
 
+        # params_template tangents not propagated (same limitation as prior custom_vjp)
         return h, h_dot
 
     return shoot_fn
