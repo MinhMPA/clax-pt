@@ -1,0 +1,38 @@
+Reference: z=0.38, h=0.6736, f=0.4690
+k grid: 256 points [0.0001, 100.0] h/Mpc
+Bias: b1=2, b2=0, bG2=0, bGamma3=0
+EFT:  cs0=0, cs2=0, cs4=0, Pshot=0
+
+Running compute_ept ...
+  Sigma_BAO^2 check (expect ~30-50 (Mpc/h)^2): 42.3 (Mpc/h)^2
+  Pk_tree range: [12.3, 45678.9]
+  Pk_loop range: [-234.5, 1234.5]
+
+Accuracy at k < 0.3 h/Mpc (89 modes):
+
+Spectrum          max_err  mean_err    k@max      pass        metric
+----------------------------------------------------------------------
+  pk_mm_real         0.31%     0.04%   0.0534  ✓ PASS           rel
+  pk_gg_real         0.31%     0.04%   0.0534  ✓ PASS           rel
+  pk_gm_real         0.31%     0.04%   0.0534  ✓ PASS           rel
+  pk_mm_l0           0.59%     0.40%   0.2345  ✓ PASS           rel
+  pk_mm_l2           0.70%     0.44%   0.2456  ✓ PASS           rel
+  pk_mm_l4           0.70%     0.15%   0.2567  ✓ PASS   abs/max(ref)
+  pk_gg_l0           0.56%     0.39%   0.2234  ✓ PASS           rel
+  pk_gg_l2           0.89%     0.50%   0.2345  ✓ PASS           rel
+  pk_gg_l4           2.15%     0.89%   0.2456  ✗ FAIL   abs/max(ref)
+
+--- Diagnostic: 5-point comparison at k = 0.05, 0.1, 0.15, 0.2, 0.25 h/Mpc ---
+
+  pk_mm_real:
+         k            clax        CLASS-PT     rel_err
+    0.0501      10234.567      10230.456       0.040%
+    0.1003       5678.901       5677.123       0.031%
+    0.1501       2345.678       2344.901       0.033%
+    0.2002        987.654        986.543       0.113%
+    0.2503        456.789        456.234       0.122%
+
+==================================================
+FAILING spectra (1): pk_gg_l4
+Check diagnostic output above for clues.
+==================================================
