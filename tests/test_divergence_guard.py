@@ -90,18 +90,25 @@ class TestDivergenceGuardFires:
     @pytest.mark.parametrize("value", [1e21, -1e25, 1e98])
     def test_huge_scalar_raises_eager(self, value):
         with pytest.raises(Exception):
-            _raise_if_diverged(jnp.asarray(value), "test")
+            jax.block_until_ready(_raise_if_diverged(jnp.asarray(value), "test"))
 
     @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
     def test_nonfinite_scalar_raises_eager(self, value):
         with pytest.raises(Exception):
-            _raise_if_diverged(jnp.asarray(value), "test")
+            jax.block_until_ready(_raise_if_diverged(jnp.asarray(value), "test"))
 
     def test_huge_scalar_raises_under_jit(self):
-        """Matches production: all 3 guarded functions are plain jax.jit-wrapped."""
+        """Matches production: all 3 guarded functions are plain jax.jit-wrapped.
+
+        ``block_until_ready`` is required, not decorative: JAX dispatches
+        asynchronously on GPU, so without it the guard's error is raised after
+        the ``pytest.raises`` block has already exited and the test fails with
+        DID NOT RAISE even though the guard fired correctly (observed on V100,
+        job 13089; the same test passes on CPU, where dispatch is synchronous).
+        """
         f = jax.jit(lambda x: _raise_if_diverged(x, "test"))
         with pytest.raises(Exception):
-            f(jnp.asarray(1e30))
+            jax.block_until_ready(f(jnp.asarray(1e30)))
 
     def test_threshold_boundary(self):
         """1e20 itself must still pass (guard is a strict '>' on 1e20)."""
@@ -115,13 +122,13 @@ class TestDivergenceGuardFires:
         arr = np.random.default_rng(1).uniform(-10, 10, size=(11, 23))
         arr[7, 15] = np.inf
         with pytest.raises(Exception):
-            _raise_if_diverged(jnp.asarray(arr), "test")
+            jax.block_until_ready(_raise_if_diverged(jnp.asarray(arr), "test"))
 
     def test_single_huge_entry_in_2d_array_raises(self):
         arr = np.random.default_rng(2).uniform(-10, 10, size=(11, 23))
         arr[3, 4] = 1e30
         with pytest.raises(Exception):
-            _raise_if_diverged(jnp.asarray(arr), "test")
+            jax.block_until_ready(_raise_if_diverged(jnp.asarray(arr), "test"))
 
 
 class TestGuardWiring:
