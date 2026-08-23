@@ -33,6 +33,7 @@ import math
 from dataclasses import dataclass
 
 import diffrax
+import equinox as eqx
 import jax
 import jax.flatten_util as jfu
 import jax.numpy as jnp
@@ -2321,7 +2322,27 @@ def _matter_delta_m_single_k_impl(
         (y_final, tau_end),
         (dy_dtau, jnp.ones_like(tau_end)),
     )
-    return delta_m_frozen + ddelta_m_dtau * (tau_traced - tau_end)
+    delta_m = delta_m_frozen + ddelta_m_dtau * (tau_traced - tau_end)
+
+    # Latent-correctness guard: a diverged perturbation solve (e.g. the
+    # TCA-transition instability at k/kappa_dot ~ 0.01, matter-radiation
+    # equality) can be silently reported as "success" by the filtered-norm
+    # step-size controller while returning an astronomically large, but
+    # still finite, delta_m (observed: P(k) ~ 1e98). ``eqx.error_if`` is
+    # AD-safe (jvp/grad pass through unaffected) and jit-safe (compiles to
+    # a runtime check via jax.debug callback / XLA custom-call under jit,
+    # raising at call time rather than trace time), so it converts that
+    # silent garbage into a loud error instead of masking it with
+    # ``stop_gradient`` or a fudge factor. Threshold 1e20 is far above any
+    # physically healthy delta_m (O(1e1) at k=0.05, z=0).
+    delta_m = eqx.error_if(
+        delta_m,
+        ~jnp.isfinite(delta_m) | (jnp.abs(delta_m) > 1e20),
+        "compute_pk: perturbation solve diverged (|delta_m|>1e20 or "
+        "non-finite) — likely a TCA-transition instability; see project "
+        "memory.",
+    )
+    return delta_m
 
 
 _matter_delta_m_single_k_impl = functools.partial(jax.jit, static_argnums=(1, 4))(
