@@ -8,6 +8,68 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 23, 2026: Fix massive-nu `compute_pk` grind — TCA hard-switch discontinuity (`fix/tca-transition`)
+
+**Root cause found for the known issue below (Aug 13-14 entry): the TCA/full
+switch in the perturbation ODE RHS was a hard
+`jnp.where(is_tca > 0.5, tca_expr, full_expr)` even though `is_tca` is already
+a smooth sigmoid (`_compute_tca_criterion`, mirroring CLASS
+perturbations.c:6178-6179). Flipping hard between the two expressions injects
+a finite discontinuity into the RHS at the crossover, which is exactly what
+`compute_pk(m_ncdm=0.15, k=0.05)` hits: the solve stalls at tau~111 Mpc /
+z~3461 (matter-radiation equality), precisely where `k/kappa_dot = 0.01` (the
+TCA-off threshold), with `delta_b` diverging to ~1e49.**
+
+Established by experiment before fixing (see project memory): device-independent
+(CPU==GPU step counts), solver-independent (Kvaerno5 and Rodas5 both stall at
+the same tau), ncdm-independent (fluid `"none"` and `"class"`, m_nu 0.06 and
+0.15 all stall). Disabling TCA entirely (`is_tca==0`) integrates correctly —
+`P(k=0.05)` ratio 0.9903 vs CLASS in 420 steps — confirming the switch itself,
+not the TCA physics, was the culprit.
+
+**Fix — NaN-safe windowed blend (`_tca_blend`, `clax/perturbations.py`):** a
+plain arithmetic blend (`is_tca*A + (1-is_tca)*B`) at the 9 scalar switch
+sites fixes the grind (ratio 0.9908, C_l accuracy suite unaffected), but a
+code review found it regresses `jnp.where`'s NaN/Inf immunity: `jnp.where` is
+a *select* (a NaN/Inf in the unselected branch is harmless), while the plain
+blend is a real multiply, so `0 * inf = NaN` — a real risk for HMC, which
+explores pathological proposals where one poisoned gradient kills a chain.
+`_tca_blend` synthesizes both properties: inside a narrow window around the
+crossover (`_TCA_BLEND_EPS = 1e-6` from either endpoint) it blends
+continuously; outside the window it masks the unused operand to `0.0` *before*
+the arithmetic and falls back to a plain `jnp.where` select, so a non-finite
+value in the unused branch cannot poison the result. Routed through all 9
+scalar TCA switch sites in the RHS (`_compute_theta_b_prime_blended`,
+`F_g_2_blended`, `F1_prime`, `Fl_prime`, `F_lmax_prime`, `G_g_0`/`G_g_1`
+`.set()`, `Gl_prime`, `G_lmax_prime` `.set()`); the tensor-mode TCA switch in
+`_extract_tensor_sources` is untouched (out of scope, no reported instability
+there).
+
+**Guard extension:** the existing AD-safe divergence guard on
+`_matter_delta_m_single_k_impl` (`eqx.error_if` on `|delta_m| > 1e20` or
+non-finite) only covered the single-k path. The batched table paths behind
+`compute_pk_table` / `compute_pk_interpolator` — the docstring-preferred
+production API — were unguarded and use the *filtered*-norm step-size
+controller, the same controller observed to report a diverged solve
+(P(k) ~ 1e98) as "success". Added the same guard (`jnp.any(...)` over the
+array) to both `_solve_mpk_batched_rosenbrock` and
+`_perturbations_solve_mpk_impl` just before their `return`.
+
+**Validation:** `compute_pk(m_ncdm=0.15, k=0.05)` gate PASS, ratio 0.9908
+(bug repro fixed); `k=1.0` unaffected (no high-k regression); `jax.grad`
+w.r.t. `omega_cdm` finite; new `tests/test_tca_transition.py` (17 tests:
+limits, continuity, NaN/Inf immunity, AD under jit) passes; existing
+`tests/test_divergence_guard.py` (20 tests) still passes.
+
+**Known gap — table path NOT verified end-to-end:** `compute_pk_table(...,
+ncdm_fluid_approximation="none")`, the production path behind
+`compute_pk_table` / `compute_pk_interpolator`, still times out on CPU at
+420s in this same massive-nu configuration and did not print a result.
+Whether it is slow-but-fixed (just needs a longer bound or GPU) or still
+grinding on a related instability is unresolved; do not claim the batched
+table path is fixed by this change without rerunning it to completion
+(ideally on GPU) first.
+
 ### Aug 13-14, 2026: Consolidation — benchmark/clax-pt merged into main (MinhMPA/clax-pt)
 
 PR #4 (`fix/ad-correctness-clax-pt`, rebased onto the branch tip) merged into
