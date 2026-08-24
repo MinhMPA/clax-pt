@@ -8,6 +8,122 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 23, 2026: Fix massive-nu `compute_pk` grind — TCA hard-switch discontinuity (`fix/tca-transition`)
+
+**Root cause found for the known issue below (Aug 13-14 entry): the TCA/full
+switch in the perturbation ODE RHS was a hard
+`jnp.where(is_tca > 0.5, tca_expr, full_expr)` even though `is_tca` is already
+a smooth sigmoid (`_compute_tca_criterion`, mirroring CLASS
+perturbations.c:6178-6179). Flipping hard between the two expressions injects
+a finite discontinuity into the RHS at the crossover, which is exactly what
+`compute_pk(m_ncdm=0.15, k=0.05)` hits: the solve stalls at tau~111 Mpc /
+z~3461 (matter-radiation equality), precisely where `k/kappa_dot = 0.01` (the
+TCA-off threshold), with `delta_b` diverging to ~1e49.**
+
+Established by experiment before fixing (see project memory): device-independent
+(CPU==GPU step counts), solver-independent (Kvaerno5 and Rodas5 both stall at
+the same tau), ncdm-independent (fluid `"none"` and `"class"`, m_nu 0.06 and
+0.15 all stall). Disabling TCA entirely (`is_tca==0`) integrates correctly —
+`P(k=0.05)` ratio 0.9903 vs CLASS in 420 steps — confirming the switch itself,
+not the TCA physics, was the culprit.
+
+**Fix — NaN-safe continuous blend (`_tca_blend`, `clax/perturbations.py`):** a
+plain arithmetic blend (`is_tca*A + (1-is_tca)*B`) at the 9 scalar switch
+sites fixes the grind (ratio 0.9908, C_l accuracy suite unaffected at the
+default fiducial cosmology — see the m_ncdm=0.15 gap noted below), but a
+code review found it regresses `jnp.where`'s NaN/Inf immunity: `jnp.where` is
+a *select* (a NaN/Inf in the unselected branch is harmless), while the plain
+blend is a real multiply, so `0 * inf = NaN` — a real risk for HMC, which
+explores pathological proposals where one poisoned gradient kills a chain.
+
+`_tca_blend`'s first version (Aug 23 AM) tried to restore this by masking
+based on an `is_tca`-value window (`_TCA_BLEND_EPS = 1e-6` from either
+endpoint), blending only inside it and hard-selecting outside. A second
+review round (Aug 23 PM) found this protected only 0.0002% of the domain:
+`is_tca` is a pure function of background/thermo quantities, independent of
+the ODE state `y`, so a diverged `y` (poisoning `tca_val`/`full_val`) with an
+ordinary mid-transition `is_tca` fell straight through the "protected"
+window's masking no-op into the same NaN-unsafe arithmetic as the plain
+blend — plus the window boundaries themselves reintroduced a (much smaller,
+but nonzero) discontinuity. **Current design:** mask each *operand* on
+`jnp.isfinite`, not on where `is_tca` sits. When both operands are finite —
+the overwhelming common case — this reduces to the exact continuous
+arithmetic blend for every `is_tca` in `[0, 1]` (no window, no boundary
+jump). When either operand is non-finite, the blend is discarded in favour
+of *selecting* the finite one outright (or, if both are non-finite, falling
+back to the original hard `is_tca > 0.5` select) — since `jnp.where`'s VJP
+routes the cotangent to only the selected branch, this restores true
+select-not-multiply immunity regardless of where `is_tca` sits. Verified:
+`_tca_blend(is_tca=0.5, tca_val=1.0, full_val=inf)` now returns primal `1.0`
+(not `inf`) with all-finite gradients, for `is_tca` anywhere in
+`{0.001, ..., 0.999}`, not just at the `0`/`1` endpoints (see
+`tests/test_tca_transition.py`, `test_nan_inf_immunity_mid_transition_*`).
+Known residual, matching `jnp.where`'s own behavior (not a regression): a
+*finite* operand from an expression with a locally singular derivative can
+still yield a non-finite gradient (see
+`test_grad_can_still_be_nan_for_singular_derivative_parity_with_where`).
+
+Routed through all 9 scalar TCA switch sites in the RHS
+(`_compute_theta_b_prime_blended`, `F_g_2_blended`, `F1_prime`, `Fl_prime`,
+`F_lmax_prime`, `G_g_0`/`G_g_1` `.set()`, `Gl_prime`, `G_lmax_prime`
+`.set()`), plus the tensor-mode polarization-source switch in
+`_extract_tensor_sources` (added Aug 23 PM — this one cannot reproduce the
+scalar solver-stall bug since it only runs after the tensor RHS, but it fed
+`C_l^BB` from a hard-switched, discontinuous `P`).
+
+**New divergence guard (all 3 sites new, none pre-existing on `main`):** added
+an AD-safe `eqx.error_if` guard (`|delta_m| > 1e20` or non-finite) — this is
+new in this branch (`git show main:clax/perturbations.py` has zero
+`equinox`/`error_if` occurrences), not an extension of prior coverage.
+Guarded via a single shared helper, `_raise_if_diverged`, called at all 3
+`delta_m`-producing entry points: the single-k path
+(`_matter_delta_m_single_k_impl`), and both batched table paths behind
+`compute_pk_table` / `compute_pk_interpolator` — the docstring-preferred
+production API — (`_solve_mpk_batched_rosenbrock`,
+`_perturbations_solve_mpk_impl`), which use the *filtered*-norm step-size
+controller, the same controller observed to report a diverged solve
+(P(k) ~ 1e98) as "success".
+
+**Validation:** `compute_pk(m_ncdm=0.15, k=0.05)` gate PASS, ratio 0.9908
+(bug repro fixed); `k=1.0` unaffected (no high-k regression); `jax.grad`
+w.r.t. `omega_cdm` finite; `tests/test_tca_transition.py` (unit tests on
+`_tca_blend`: limits, continuity, NaN/Inf immunity including mid-transition
+non-finite operands, AD under jit) and new
+`tests/test_tca_transition_integration.py` (RHS-continuity regression at the
+real TCA crossover, tau~111 Mpc for k=0.05/m_ncdm=0.15 — fails with max jump
+0.0396 if any `_tca_blend` call site is reverted to `jnp.where`) all pass;
+`tests/test_divergence_guard.py` — new in this branch, not pre-existing —
+now calls the real shared `_raise_if_diverged` (not a re-implemented mirror)
+at all 3 call sites, plus a source-level wiring check that each site still
+invokes it.
+
+**Known gap — table path NOT verified end-to-end:** `compute_pk_table(...,
+ncdm_fluid_approximation="none")`, the production path behind
+`compute_pk_table` / `compute_pk_interpolator`, still does not complete on
+CPU in this same massive-nu configuration within a bounded run. New evidence
+(review round 2, Aug 23 PM): a *reduced*-precision probe
+(`pt_l_max_g=6`, `ncdm_q_size=5`, `ode_max_steps=4000`, only 2 k-points
+`[0.01, 0.05]`, i.e. far cheaper than production) ran **182s** and then
+raised `equinox._errors._EquinoxRuntimeError: The maximum number of solver
+steps was reached` — a step-*budget* exhaustion inside diffrax, not the
+`_raise_if_diverged` guard firing (that guard is never reached; diffrax's
+own max_steps check raises first) and not obviously the original
+TCA-discontinuity divergence (`delta_b -> 1e49`) recurring. This confirms
+the table path is genuinely **slow** (batched-solve/vmap overhead over even
+2 k-points dominates), separately from whatever residual correctness
+question remains; it is unresolved whether raising `max_steps` further
+would let it complete, hit real divergence, or just keep grinding — do not
+claim the batched table path is fixed by this change without rerunning it
+to completion (ideally on GPU, or with a much larger max_steps budget on a
+dedicated non-shared node) first. The same caveat applies transitively to
+**C_l accuracy at m_ncdm=0.15**: the "C_l accuracy suite (17 tests) passes"
+validation above uses only the default `CosmoParams()` (m_ncdm=0.06); no
+test in this branch computes `C_l^TT/EE/TE/BB` at m_ncdm=0.15 (the actual
+bug-repro cosmology), because that full-source-function solve is at least
+as expensive as the table-path probe above. Whether the wider blend window
+changes `alpha_prime`/shear inputs enough to perturb `C_l^EE`/`C_l^TT` in
+the massive-neutrino regime specifically is unverified.
+
 ### Aug 13-14, 2026: Consolidation — benchmark/clax-pt merged into main (MinhMPA/clax-pt)
 
 PR #4 (`fix/ad-correctness-clax-pt`, rebased onto the branch tip) merged into
@@ -1750,6 +1866,17 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   calibrated together. Must upgrade as complete RECFAST ODE.
 - **Smooth-blending TCA and full equations**: Changes the physics. Use
   jnp.where for equation selection; sigmoid only for switching criterion.
+  **SUPERSEDED (Aug 23, 2026, `fix/tca-transition`, see entry above):**
+  re-investigated as part of diagnosing the massive-nu `compute_pk` grind.
+  The hard `jnp.where` this entry recommends is the actual root cause of
+  that grind (a finite RHS discontinuity at the TCA-off crossover). The
+  "changes the physics" concern does not apply to `_tca_blend`: it
+  reproduces each branch *exactly* at `is_tca=0/1` (verified in
+  `tests/test_tca_transition.py`), and only interpolates inside the
+  transition region where `is_tca` itself is already an approximate,
+  continuous criterion — the C_l accuracy suite (default cosmology) is
+  unaffected. Do not revert to a hard `jnp.where` on the strength of this
+  entry alone; read the Aug 23 entry first.
 - **CubicSpline interpolation of T_l(k)**: T_l oscillates faster than k-grid.
   CubicSpline introduces aliasing. Must interpolate SOURCE functions (smooth)
   instead, then compute T_l on the fine grid.

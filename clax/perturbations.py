@@ -33,6 +33,7 @@ import math
 from dataclasses import dataclass
 
 import diffrax
+import equinox as eqx
 import jax
 import jax.flatten_util as jfu
 import jax.numpy as jnp
@@ -730,6 +731,69 @@ def _compute_tca_criterion(kappa_dot, a_prime_over_a, k):
     return jax.nn.sigmoid(-_TCA_WIDTH * jnp.log(jnp.maximum(tca_ratio, 1e-30))), tau_c
 
 
+def _tca_blend(is_tca, tca_val, full_val):
+    """Continuously blend the TCA and full expressions across the TCA handoff.
+
+    The hard ``jnp.where(is_tca > 0.5, ...)`` switch this replaces injected a
+    finite discontinuity into the RHS at the TCA-off crossover
+    (``tau_c/tau_k ~ 0.01``, near matter-radiation equality) which destabilised
+    the solve at k ~ 0.05 Mpc^-1 (delta_b -> 1e49). ``is_tca`` is already a
+    smooth sigmoid (cf. ``_compute_tca_criterion``, CLASS perturbations.c:6178-6179),
+    so weighting the two expressions by it removes the jump while reproducing
+    each limit exactly.
+
+    NaN/Inf immunity, done per-operand rather than by an ``is_tca`` window:
+    an earlier version of this function masked based on ``is_tca`` being
+    within ``1e-6`` of 0 or 1, which only protects 0.0002% of the domain —
+    everywhere else (essentially the whole physically relevant transition,
+    since ``is_tca`` is a pure function of background/thermo quantities and
+    is unrelated to how diverged the ODE state ``y`` is) it degenerated
+    to the plain, NaN-unsafe arithmetic blend. Instead we test each operand
+    for finiteness directly: a non-finite operand is masked to 0.0 *before*
+    the arithmetic (so it cannot contribute via ``0 * inf = NaN``), and if
+    either operand is non-finite the blended result is discarded in favour
+    of directly *selecting* the finite operand (or, if both are non-finite,
+    falling back to the original hard ``is_tca > 0.5`` select). Because
+    ``jnp.where``'s VJP routes the cotangent to only the selected branch
+    (true multiplexing, not a masked multiply), neither the primal nor the
+    gradient can be poisoned by a non-finite value in the discarded operand,
+    regardless of where ``is_tca`` sits in ``[0, 1]``. When both operands are
+    finite (the overwhelmingly common case) this reduces exactly to the
+    continuous arithmetic blend for every ``is_tca`` in ``[0, 1]`` — so, unlike
+    the windowed version, there is no leftover boundary discontinuity either.
+
+    Known residual gap (matches ``jnp.where`` today, not a regression): if an
+    operand is *finite* but was produced by an expression with a locally
+    singular derivative (e.g. a ``1/x`` term evaluated near ``x=0``), the
+    gradient through that operand can still be non-finite even though this
+    function's own primal/grad are protected — exactly as for a plain
+    ``jnp.where`` on the same expressions. See
+    ``test_grad_can_still_be_nan_for_singular_derivative_parity_with_where``
+    in ``tests/test_tca_transition.py``.
+    """
+    tca_finite = jnp.isfinite(tca_val)
+    full_finite = jnp.isfinite(full_val)
+    both_finite = tca_finite & full_finite
+
+    # Mask each operand to an innocuous value BEFORE the arithmetic so a
+    # non-finite operand can never contribute via 0 * inf = NaN.
+    tca_safe = jnp.where(tca_finite, tca_val, 0.0)
+    full_safe = jnp.where(full_finite, full_val, 0.0)
+    blended = is_tca * tca_safe + (1.0 - is_tca) * full_safe
+
+    # If exactly one operand is non-finite, select the finite one outright
+    # (a true select, so the non-finite operand's value/gradient cannot leak
+    # in even when is_tca gives it non-negligible weight). If both are
+    # non-finite, fall back to the original hard select — no worse than
+    # jnp.where's own behaviour in that case.
+    hard_select = jnp.where(is_tca > 0.5, tca_val, full_val)
+    only_tca_finite = tca_finite & ~full_finite
+    only_full_finite = full_finite & ~tca_finite
+    fallback = jnp.where(only_tca_finite, tca_val,
+                jnp.where(only_full_finite, full_val, hard_select))
+    return jnp.where(both_finite, blended, fallback)
+
+
 def _compute_theta_b_prime_blended(
     theta_b, delta_b, theta_g, delta_g, F_g_2, G_g_0, G_g_2,
     a_prime_over_a, cs2, k, k2, kappa_dot,
@@ -817,8 +881,8 @@ def _compute_theta_b_prime_blended(
     # --- Full (non-TCA) theta_b' ---
     theta_b_full = -a_prime_over_a * theta_b + cs2 * k2 * delta_b + R * kappa_dot * (theta_g - theta_b)
 
-    # Hard switch: TCA or full equations (not blended — blending changes the physics)
-    return jnp.where(is_tca > 0.5, theta_b_tca, theta_b_full)
+    # Continuous TCA<->full handoff (see _tca_blend); a hard switch here destabilised the solve.
+    return _tca_blend(is_tca, theta_b_tca, theta_b_full)
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +903,9 @@ def _perturbation_rhs(tau, y, args):
     - Photon shear σ_g = (16/45) * τ_c * (θ_g + metric_shear)
     - Higher photon multipoles (l>=3) are damped to zero
     - Photon-baryon slip Δ = θ_b - θ_g expanded to first order in τ_c
-    Uses jnp.where for smooth switching (JAX-traceable, no branching).
+    RSA switching uses jnp.where (JAX-traceable, no branching); the TCA<->full
+    handoff uses the continuous blend _tca_blend to avoid a finite discontinuity
+    in the RHS at the crossover (see _tca_blend docstring).
 
     State: y = [η, h'(dummy), δ_cdm, δ_b, θ_b, F_g_0..l_max, G_g_0..l_max, F_ur_0..l_max]
     (h' slot exists for compatibility but its evolution equation is not used)
@@ -1061,7 +1127,7 @@ def _perturbation_rhs(tau, y, args):
     # Step 2: alpha_prime using TCA-blended and RSA-corrected shear
     # During TCA: F_g_2 → tca_F_g_2; during RSA: F_g_2 → 0
     # cf. CLASS perturbations.c:8259-8265 (RSA shear substitution)
-    F_g_2_blended = jnp.where(is_tca > 0.5, tca_F_g_2_1st, F_g[2])
+    F_g_2_blended = _tca_blend(is_tca, tca_F_g_2_1st, F_g[2])
     F_g_2_blended = jnp.where(is_rsa, 0.0, F_g_2_blended)
     F_ur_2_blended = jnp.where(is_rsa, 0.0, F_ur[2])
     # ncdm shear: use integrated moments from Ψ_l(q) hierarchy.
@@ -1129,7 +1195,7 @@ def _perturbation_rhs(tau, y, args):
     # cf. CLASS perturbations.c:9127-9130
     F1_source = -kappa_dot * (F_g[1] - 4.0 * theta_b / (3.0 * k))
     F1_prime_full = k/3.0 * (F_g[0] - 2.0*F_g[2]) + F1_source
-    F1_prime = jnp.where(is_tca > 0.5, F1_prime_tca, F1_prime_full)
+    F1_prime = _tca_blend(is_tca, F1_prime_tca, F1_prime_full)
     dy = dy.at[idx['F_g_1']].set(F1_prime)
 
     # l=2 to l_max-1
@@ -1145,7 +1211,7 @@ def _perturbation_rhs(tau, y, args):
         F2_prime_tca = (tca_F_g_2 - F_g[2]) / tau_c
         Fl_prime_tca = jnp.where(l == 2, F2_prime_tca, -F_g[l] / tau_c)
 
-        Fl_prime = jnp.where(is_tca > 0.5, Fl_prime_tca, Fl_prime)
+        Fl_prime = _tca_blend(is_tca, Fl_prime_tca, Fl_prime)
         return dy_acc.at[idx['F_g_start'] + l].set(Fl_prime)
     dy = jax.lax.fori_loop(2, l_max_g, photon_hierarchy_step, dy)
 
@@ -1161,7 +1227,7 @@ def _perturbation_rhs(tau, y, args):
     tau_safe = jnp.maximum(tau, 1.0 / jnp.maximum(k, 1e-10))
     F_lmax_prime_full = k*F_g[l_max_g-1] - (l_max_g+1.0)/tau_safe*F_g[l_max_g] - kappa_dot*F_g[l_max_g]
     F_lmax_prime_tca = -F_g[l_max_g] / tau_c
-    F_lmax_prime = jnp.where(is_tca > 0.5, F_lmax_prime_tca, F_lmax_prime_full)
+    F_lmax_prime = _tca_blend(is_tca, F_lmax_prime_tca, F_lmax_prime_full)
     dy = dy.at[idx['F_g_start'] + l_max_g].set(F_lmax_prime)
 
     # === RSA (Radiation Streaming Approximation) ===
@@ -1209,23 +1275,23 @@ def _perturbation_rhs(tau, y, args):
         # Drive polarization to zero: G'_l = -G_l / tau_c
         G0_full = -k*G_g[1] - kappa_dot*(G_g[0] - Pi/2.0)
         G0_tca = -G_g[0] / tau_c
-        dy = dy.at[idx['G_g_0']].set(jnp.where(is_tca > 0.5, G0_tca, G0_full))
+        dy = dy.at[idx['G_g_0']].set(_tca_blend(is_tca, G0_tca, G0_full))
 
         G1_full = k/3.0*(G_g[0] - 2.0*G_g[2]) - kappa_dot*G_g[1]
         G1_tca = -G_g[1] / tau_c
-        dy = dy.at[idx['G_g_1']].set(jnp.where(is_tca > 0.5, G1_tca, G1_full))
+        dy = dy.at[idx['G_g_1']].set(_tca_blend(is_tca, G1_tca, G1_full))
 
         def pol_hierarchy_step(l, dy_acc):
             Gl_prime = k/(2.0*l+1.0)*(l*G_g[l-1] - (l+1.0)*G_g[jnp.minimum(l+1, l_max_pol)]) - kappa_dot*G_g[l]
             Gl_prime = Gl_prime + jnp.where(l == 2, kappa_dot * Pi / 10.0, 0.0)
             Gl_prime_tca = -G_g[l] / tau_c
-            Gl_prime = jnp.where(is_tca > 0.5, Gl_prime_tca, Gl_prime)
+            Gl_prime = _tca_blend(is_tca, Gl_prime_tca, Gl_prime)
             return dy_acc.at[idx['G_g_start'] + l].set(Gl_prime)
         dy = jax.lax.fori_loop(2, l_max_pol, pol_hierarchy_step, dy)
 
         G_lmax_prime_full = k*G_g[l_max_pol-1] - (l_max_pol+1.0)/tau_safe*G_g[l_max_pol] - kappa_dot*G_g[l_max_pol]
         G_lmax_prime_tca = -G_g[l_max_pol] / tau_c
-        dy = dy.at[idx['G_g_start'] + l_max_pol].set(jnp.where(is_tca > 0.5, G_lmax_prime_tca, G_lmax_prime_full))
+        dy = dy.at[idx['G_g_start'] + l_max_pol].set(_tca_blend(is_tca, G_lmax_prime_tca, G_lmax_prime_full))
 
     # === MASSLESS NEUTRINO HIERARCHY ===
     # Neutrinos have no scattering — no TCA. Full hierarchy at all times.
@@ -1936,6 +2002,44 @@ def _solve_k_modes_batched(solve_single_k, k_grid, batch_size: int):
 
 
 # ---------------------------------------------------------------------------
+# Shared latent-correctness guard for all compute_pk* entry points
+# ---------------------------------------------------------------------------
+
+def _raise_if_diverged(x, label):
+    """AD-safe/jit-safe divergence guard shared by every ``delta_m`` output.
+
+    A diverged perturbation solve (e.g. the TCA-transition instability at
+    ``k/kappa_dot ~ 0.01``, matter-radiation equality) can be silently
+    reported as "success" by the filtered-norm step-size controller while
+    returning an astronomically large, but still finite, ``delta_m``
+    (observed: P(k) ~ 1e98). ``eqx.error_if`` is AD-safe (jvp/grad pass
+    through unaffected) and jit-safe (compiles to a runtime check rather than
+    a trace-time branch), so it converts that silent garbage into a loud
+    error instead of masking it with ``stop_gradient`` or a fudge factor.
+    Threshold 1e20 is far above any physically healthy delta_m (O(1e1) at
+    k=0.05, z=0).
+
+    ``x`` may be any shape (scalar for the single-k path, 2D ``(n_k, n_tau)``
+    for the batched table paths) — the predicate is reduced with ``jnp.any``
+    so a single bad entry anywhere in the array raises.
+
+    Used at all 3 divergence-guard call sites (single-k
+    ``_matter_delta_m_single_k_impl``, batched ``_solve_mpk_batched_rosenbrock``,
+    and the table-assembly ``_perturbations_solve_mpk_impl``) so that deleting
+    or bypassing any one of them is a one-line diff to spot in review, and so
+    that ``tests/test_divergence_guard.py`` can exercise the real guard
+    instead of a re-implemented mirror of its predicate.
+    """
+    return eqx.error_if(
+        x,
+        jnp.any(~jnp.isfinite(x) | (jnp.abs(x) > 1e20)),
+        f"{label}: perturbation solve diverged for at least one entry "
+        "(|delta_m|>1e20 or non-finite) — likely a TCA-transition "
+        "instability; see project memory.",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main solver
 # ---------------------------------------------------------------------------
 
@@ -2164,6 +2268,14 @@ def _solve_mpk_batched_rosenbrock(
     # Reshape to (n_k, n_tau) matching the unbatched path.
     all_delta_m = jnp.transpose(all_delta_m, (0, 2, 1))   # (n_chunks, batch_size, n_tau)
     all_delta_m = all_delta_m.reshape(-1, n_tau)[:n_k]     # (n_k, n_tau)
+
+    # Latent-correctness guard (see _raise_if_diverged for the full
+    # rationale): the batched Rosenbrock path feeds compute_pk_table /
+    # compute_pk_interpolator via the *filtered*-norm step-size controller,
+    # which is exactly the controller observed to report a diverged solve
+    # (P(k) ~ 1e98 from the TCA-transition instability) as "success". Guard
+    # the whole array once here rather than let the silent garbage propagate.
+    all_delta_m = _raise_if_diverged(all_delta_m, "_solve_mpk_batched_rosenbrock")
     return all_delta_m
 
 
@@ -2236,6 +2348,18 @@ def _perturbations_solve_mpk_impl(
         )
     else:
         all_delta_m = _solve_k_modes_batched(solve_single_k, k_grid, batch_size)
+
+    # Latent-correctness guard (see _raise_if_diverged for the full
+    # rationale). This is the production entry point behind compute_pk_table
+    # and compute_pk_interpolator: both the batched-Rosenbrock and the
+    # per-k-chunk unbatched path above use the filtered-norm step-size
+    # controller, which can report a diverged solve (P(k) ~ 1e98) as
+    # "success", so guard the assembled table once here regardless of which
+    # solver path produced it. (Redundant with the guard already inside
+    # _solve_mpk_batched_rosenbrock when that path is taken — kept so each
+    # function is independently unit-testable and a guard removed from one
+    # site does not silently lose all coverage.)
+    all_delta_m = _raise_if_diverged(all_delta_m, "_perturbations_solve_mpk_impl")
 
     return MatterPerturbationResult(k_grid=k_grid, tau_grid=tau_grid, delta_m=all_delta_m)
 
@@ -2321,7 +2445,15 @@ def _matter_delta_m_single_k_impl(
         (y_final, tau_end),
         (dy_dtau, jnp.ones_like(tau_end)),
     )
-    return delta_m_frozen + ddelta_m_dtau * (tau_traced - tau_end)
+    delta_m = delta_m_frozen + ddelta_m_dtau * (tau_traced - tau_end)
+
+    # Latent-correctness guard: see _raise_if_diverged for the full
+    # rationale (a diverged solve can be silently reported as "success" by
+    # the filtered-norm step-size controller while returning an
+    # astronomically large, but still finite, delta_m — observed:
+    # P(k) ~ 1e98).
+    delta_m = _raise_if_diverged(delta_m, "_matter_delta_m_single_k_impl")
+    return delta_m
 
 
 _matter_delta_m_single_k_impl = functools.partial(jax.jit, static_argnums=(1, 4))(
@@ -2683,8 +2815,16 @@ def _extract_tensor_sources(y, k, tau, bg, th, idx, l_max_g, l_max_pol):
     # P_tca = -1/3 * h' / kappa'  (CLASS perturbations.c:8046-8047)
     P_tca = -1.0/3.0 * gw_dot / jnp.maximum(kappa_dot, 1e-30)
     tau_c = 1.0 / jnp.maximum(kappa_dot, 1e-30)
+    # NOTE: intentionally NOT _compute_tca_criterion — this uses only the
+    # tau_c*k <-> 0.01 criterion (no tau_c/tau_h check), a pre-existing
+    # simplification for the tensor source; unifying it with the shared
+    # scalar criterion would change the tensor is_tca formula and needs its
+    # own validation, so it is left as-is (see CHANGELOG for the tracked gap).
     is_tca = jax.nn.sigmoid(-5.0 * (jnp.log(tau_c * k + 1e-30) - jnp.log(0.01)))
-    P = jnp.where(is_tca > 0.5, P_tca, P)
+    # Continuous handoff (_tca_blend) rather than a hard switch: this P feeds
+    # source_p -> C_l^BB, and a hard jnp.where here reproduces the same class
+    # of value-discontinuity the scalar RHS switch had (see _tca_blend).
+    P = _tca_blend(is_tca, P_tca, P)
 
     # Temperature source: -h' * e^{-kappa} + g * P
     source_t = -gw_dot * exp_m_kappa + g * P
