@@ -8,6 +8,62 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 24, 2026: Test-only coverage-gap sweep (branch `test/coverage-gaps`, tests/ only)
+
+Closed 4 confirmed test-coverage gaps found by a per-file grep of `jax.grad`/
+`jax.jvp` usage. No `clax/` source changes -- tests/ only (plus this entry).
+
+- **`tests/test_pk_forward_mode.py` (new)**: first `jax.jvp` test through
+  `compute_pk` end-to-end (background -> thermodynamics -> perturbations).
+  Requires `ode_adjoint="direct"` (`RecursiveCheckpointAdjoint`'s
+  checkpointed `while_loop` is an `eqx.filter_custom_vjp`, so `jax.jvp`
+  cannot cross it -- a diffrax limitation, not a clax bug: clax itself has
+  zero `custom_vjp` sites, all four custom-AD-rule sites are `custom_jvp`).
+  Asserts jvp(direct) vs grad(direct) tightly (<1e-4) and vs central FD
+  loosely (<1%), at k=0.1, d/d omega_cdm, mirroring
+  `diags/diag_grad_jvp_direct.py`'s precision.
+- **`tests/pk_test_utils.py`**: extended `PK_DIRECT_SPOT_FULL_K` with
+  k=0.05 and 0.07 Mpc^-1, closing the 0.04-0.08 window (a real prior
+  TCA-transition bug lived here) that the table-vs-direct contract test
+  (`test_pk_table_tracks_direct_single_mode_solves` in
+  `tests/test_perturbations.py`) previously skipped entirely. Existing
+  tolerance (1%) unchanged.
+- **`tests/test_cl_massive_nu.py` (new)**: first C_l (TT/EE/TE) test at
+  `m_ncdm=0.15` -- every prior C_l test used the default 0.06. Real CLASS
+  oracle comparison (`reference_data/massive_nu_015/cls.npz` exists and is
+  used), not a self-consistency fallback. Uses `fast_cl` +
+  `ncdm_fluid_approximation="none"` (the documented massive-neutrino-robust
+  choice from `tests/test_multipoint.py`), which runs through
+  `perturbations_solve`'s FILTERED scalar-PID controller
+  (`_make_scalar_pid_controller`) -- confirmed via fresh `probe-massnu-ctrl`
+  diagnostics (Aug 23) to be unaffected by the known
+  `ncdm_fluid_approximation="none"` grind (that grind is specific to the
+  UNFILTERED controller used by `compute_pk`'s single-mode
+  `_matter_delta_m_single_k_impl` / `perturbations_solve_mpk`, not by
+  `perturbations_solve`'s batch/table path used here and throughout the
+  rest of the C_l test suite).
+- **`tests/test_ept_gradients.py`**: added 3 tests closing the
+  "EPT AD only tested w.r.t. `pk_lin`, never from `CosmoParams`" gap.
+  Two cheap tests (`ln10A_s`, reusing the shared session-scoped
+  `pipeline_fast_cl_k5` fixture, no extra perturbation solve) check
+  AD-vs-FD and jvp-vs-vjp through `compute_ept_from_clax`. One heavy test
+  (`h`, full re-solve per probe, `@pytest.mark.slow`) checks the genuinely
+  full CosmoParams -> background -> thermodynamics -> perturbations ->
+  `compute_ept_from_clax` gradient chain.
+
+Rebased onto the just-landed `fix/tca-transition` main (Aug 23 entry below):
+that entry's own "unverified" note -- "no test in this branch computes
+C_l^TT/EE/TE/BB at m_ncdm=0.15 ... whether the wider blend window changes
+alpha_prime/shear inputs enough to perturb C_l^EE/C_l^TT in the
+massive-neutrino regime specifically is unverified" -- is exactly the
+question `tests/test_cl_massive_nu.py` (gap c above) now answers.
+`tests/pk_test_utils.py`'s extended k-grid (gap b above, k=0.05/0.07) also
+sits directly in the window that fix touches; re-measured post-rebase, see
+PR/commit for the post-fix numbers.
+
+See PR/commit for verbatim GPU validation output (collection tail, per-test
+result lines, `--fast` regression summary, measured grad/jvp/FD numbers).
+
 ### Aug 24, 2026: Fix `th_z_max` from an 11-order-of-magnitude physics knob to a numerical one
 
 **Root cause:** `thermodynamics_solve()` builds its RECFAST/Saha table starting at
@@ -89,6 +145,7 @@ thermodynamics-only, no perturbation solve):**
 
 **GPU acceptance (`compute_pk(k=0.01)`, `th_z_max` in `{5e3, 5e4}`,
 `pytest tests/ --fast -q`):** pending / see below.
+
 
 ### Aug 24, 2026: chore — raise `th_z_max` presets below 5e4 floor to 5e4
 

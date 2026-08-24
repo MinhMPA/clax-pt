@@ -481,3 +481,155 @@ def test_grad_pk_gg_l2_wrt_b1(ept_setup):
         f"AD vs FD disagree for d(pk_gg_l2)/d(b1): "
         f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%}"
     )
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: CosmoParams -> ... -> EPT (coverage gap)
+#
+# Tests 1-8 above all differentiate w.r.t. ``pk_lin`` (or ``b1``) directly.
+# The tests below start the differentiation at an actual ``CosmoParams``
+# field and flow through ``clax.ept.compute_ept_from_clax``, which is the
+# public entry point that couples clax's own cosmology objects to EPT (see
+# ``clax/lensing.py``'s nonlinear="ept" path and ``clax/ept.py``'s own
+# comment: "h is JAX-traced here for d(pk_h)/d(h) flows through h^3 factor").
+#
+# Test 9/10 hold background+perturbations FIXED and vary only ln10A_s, which
+# only rescales the primordial amplitude downstream of the (already-solved)
+# perturbation ODE -- cheap, and isolates the
+# CosmoParams -> primordial P_R(k) -> compute_ept chain. They reuse the
+# session-scoped ``pipeline_fast_cl_k5`` fixture (tests/conftest.py),
+# already computed elsewhere in the suite (test_cl_pp_source_limber,
+# test_clpp_limber_accuracy, test_lensing_nonlinear, test_clpp_halofit_ratio),
+# so they add no meaningful extra cost.
+#
+# Test 11 re-solves background -> thermodynamics -> perturbations for every
+# probed ``h`` -- the genuinely full CosmoParams-to-EPT chain, including the
+# part of the gradient that flows through delta_m(k) itself (not just the
+# explicit h^3 unit-conversion factor). This is heavy (3 full perturbation
+# solves) so it is marked slow and skipped under --fast.
+# ---------------------------------------------------------------------------
+
+
+def _make_f_from_cosmoparams(bg, pt, param_name):
+    """Return f(value) = sum(pk_mm_real(compute_ept_from_clax(...))).
+
+    ``bg``/``pt`` are held fixed (from one pre-solved fiducial cosmology);
+    only the ``CosmoParams`` fields that ``compute_ept_from_clax`` re-reads
+    at call time (e.g. ``ln10A_s``, ``n_s`` via the primordial spectrum, or
+    ``h`` via the explicit h^3 conversion) affect the output through this
+    closure.
+    """
+    from clax import CosmoParams
+    from clax.ept import compute_ept_from_clax, pk_mm_real
+
+    base_params = CosmoParams()
+
+    def f(value):
+        p = base_params.replace(**{param_name: value})
+        ept = compute_ept_from_clax(p, bg, pt, z=0.0)
+        return jnp.sum(pk_mm_real(ept))
+
+    return f
+
+
+def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(pipeline_fast_cl_k5):
+    """d(sum(pk_mm_real))/d(ln10A_s), starting from ``CosmoParams`` (not
+    ``pk_lin`` directly) through ``compute_ept_from_clax``, matches central
+    finite differences.
+    """
+    params, _prec, bg, _th, pt = pipeline_fast_cl_k5
+    f = _make_f_from_cosmoparams(bg, pt, "ln10A_s")
+    x0 = float(params.ln10A_s)
+
+    g_ad = float(jax.grad(f)(jnp.asarray(x0)))
+
+    eps = 1e-3
+    fp = float(f(x0 + eps))
+    fm = float(f(x0 - eps))
+    g_fd = (fp - fm) / (2.0 * eps)
+
+    rel_err = abs(g_ad - g_fd) / (abs(g_fd) + 1e-30)
+    print(f"\nd(sum(pk_mm_real))/d(ln10A_s) [from CosmoParams]: "
+          f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
+
+    assert rel_err < 0.01, (
+        f"AD vs FD disagree for d(sum(pk_mm_real))/d(ln10A_s) starting from "
+        f"CosmoParams: AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%}"
+    )
+
+
+def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(pipeline_fast_cl_k5):
+    """Forward-mode (jvp) equals reverse-mode (grad) for the
+    ``CosmoParams.ln10A_s -> compute_ept_from_clax`` chain.
+
+    No diffrax ODE solve lives inside this closure (``bg``/``pt`` are fixed
+    inputs), so ``RecursiveCheckpointAdjoint``'s ``custom_vjp`` boundary is
+    not a factor here -- unlike jvp through the perturbation ODE itself
+    (see ``tests/test_pk_forward_mode.py``), this jvp needs no
+    ``ode_adjoint="direct"`` escape hatch.
+    """
+    params, _prec, bg, _th, pt = pipeline_fast_cl_k5
+    f = _make_f_from_cosmoparams(bg, pt, "ln10A_s")
+    x0 = float(params.ln10A_s)
+
+    _, jvp_tangent = jax.jvp(f, (jnp.asarray(x0),), (jnp.asarray(1.0),))
+    g_vjp = jax.grad(f)(jnp.asarray(x0))
+
+    rel_diff = float(jnp.abs(jvp_tangent - g_vjp) / (jnp.abs(g_vjp) + 1e-30))
+    print(f"\nJVP={float(jvp_tangent):.6e} VJP={float(g_vjp):.6e} "
+          f"rel_diff={rel_diff:.2e}")
+
+    assert rel_diff < 1e-6, (
+        f"JVP ({float(jvp_tangent):.6e}) and VJP ({float(g_vjp):.6e}) "
+        f"disagree by {rel_diff:.2e} relative (expected <1e-6 for pure JAX ops)"
+    )
+
+
+def test_grad_h_end_to_end_from_cosmoparams_matches_fd(request):
+    """d(sum(pk_mm_real))/dh, fully re-solved (background -> thermodynamics
+    -> perturbations -> compute_ept_from_clax) for every probed ``h`` --
+    the genuine CosmoParams-to-EPT coverage gap this module closes.
+
+    Heavy: 3 full perturbation solves (AD + FD+ + FD-) at the same
+    fast_cl(k_max=5.0) precision as the shared ``pipeline_fast_cl_k5``
+    fixture, so full mode only.
+    """
+    fast_mode = request.config.getoption("--fast", default=False)
+    if fast_mode:
+        pytest.skip("3 full perturbation solves -- full mode only")
+
+    from dataclasses import replace as _dc_replace
+
+    from clax import CosmoParams, PrecisionParams
+    from clax.background import background_solve
+    from clax.thermodynamics import thermodynamics_solve
+    from clax.perturbations import perturbations_solve
+    from clax.ept import compute_ept_from_clax, pk_mm_real
+
+    prec = _dc_replace(PrecisionParams.fast_cl(), pt_k_max_cl=5.0, pt_k_chunk_size=20)
+    base_params = CosmoParams()
+
+    def f(h_val):
+        p = base_params.replace(h=h_val)
+        bg = background_solve(p, prec)
+        th = thermodynamics_solve(p, prec, bg)
+        pt = perturbations_solve(p, prec, bg, th)
+        ept = compute_ept_from_clax(p, bg, pt, z=0.0)
+        return jnp.sum(pk_mm_real(ept))
+
+    h0 = float(base_params.h)
+    g_ad = float(jax.grad(f)(jnp.asarray(h0)))
+
+    eps = 1e-3
+    fp = float(f(h0 + eps))
+    fm = float(f(h0 - eps))
+    g_fd = (fp - fm) / (2.0 * eps)
+
+    rel_err = abs(g_ad - g_fd) / (abs(g_fd) + 1e-30)
+    print(f"\nd(sum(pk_mm_real))/dh [full CosmoParams pipeline]: "
+          f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
+
+    assert rel_err < 0.15, (
+        f"AD vs FD disagree for d(sum(pk_mm_real))/dh (full CosmoParams "
+        f"pipeline): AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%}"
+    )
