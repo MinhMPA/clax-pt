@@ -705,6 +705,59 @@ def thermodynamics_solve(
     cs2_grid = prepend('cs2')
     loga_grid = jnp.log(jnp.maximum(a_grid, 1e-30))
 
+    # --- Extend the table below its first RECFAST/Saha knot (loga_start) with a
+    # closed-form, fully-ionized kappa_dot ~ a^-2 solution.
+    #
+    # Why: perturbations.py starts scalar-mode integration at
+    # tau_ini = min(0.5, 0.01/k) (clax/perturbations.py, _matter_delta_m_single_k_impl
+    # and friends), which for most k of interest is EARLIER than tau_grid[0] above
+    # (e.g. at th_z_max=5e3, tau_grid[0] ~ 80.7 Mpc). Because CubicSpline.evaluate()
+    # CLIPS below its first knot (clax/interpolation.py:67, jnp.clip(x_eval, x[0],
+    # x[-1])), kappa_dot would otherwise FREEZE at the table-boundary value instead
+    # of continuing to scale as a^-2. That corrupts _compute_tca_criterion at
+    # tau_ini (is_tca -> 0 for all k, i.e. the solver thinks the fully-ionized
+    # early-radiation-domination plasma is free-streaming), and makes th_z_max a
+    # physics knob (11 orders of magnitude in P(k)) instead of a numerical one.
+    #
+    # This does NOT reintroduce the RECFAST-integration instability that motivated
+    # starting the scan at a_start (see the comment above `a_start = ...`): nothing
+    # is integrated here, we tabulate the closed form directly. The plasma is fully
+    # ionized at every z above the table's own first knot by construction (that is
+    # exactly the "Initial conditions (early radiation domination, fully ionized)"
+    # used to seed the scan above: xHII0=1, xHeIII0=1), so x_e is held fixed at
+    # xe_raw_grid[0] and kappa_dot follows from the SAME closed form the module
+    # already uses below (kd_prefactor = n_H_0*(1+z)^2*sigma_T*Mpc_over_m); we get
+    # that automatically by extending a_grid/xe_raw_grid here, before z_grid and
+    # kd_prefactor are derived. T_b = T_cmb/a and cs2 = (4/3)*barssc*T_b reuse the
+    # same closed forms as the tb0/cs20 initial conditions above, so xe_of_loga,
+    # Tb_of_loga and cs2_of_loga (all consumed by perturbations.py) are extended
+    # consistently too, not just kappa_dot.
+    #
+    # Point count: kappa_dot ~ exp(-2*loga) is smooth and monotonic in loga, so a
+    # natural-cubic-spline interpolation error estimate (~h^4/24, relative, for
+    # f''''=16f) gives ~9e-8 relative error at h=0.038 -- i.e. N_PREPEND=200 points
+    # spread over the worst case in this codebase (th_z_max=5e3: loga range
+    # bg.loga_table[0] (~log(bg_a_ini_default)=1e-7) to loga_start is ~7.6) is far
+    # more than enough (verified directly by tests/test_thermodynamics.py, which
+    # asserts kappa_dot*a^2 is constant to 1e-6 in this regime). `endpoint=False`
+    # keeps the prepended grid strictly below loga_start so the combined grid stays
+    # strictly increasing (required by CubicSpline).
+    N_PREPEND = 200
+    loga_prepend = jnp.linspace(bg.loga_table[0], loga_start, N_PREPEND, endpoint=False)
+    a_prepend = jnp.exp(loga_prepend)
+    tau_prepend = bg.tau_of_loga.evaluate(loga_prepend)
+    tb_prepend = T_cmb / a_prepend
+    xe_prepend = xe_raw_grid[0] * jnp.ones_like(a_prepend)
+    barssc_prepend = _barssc_raw * (1.0 - 0.75 * Y_He + (1.0 - Y_He) * xe_prepend)
+    cs2_prepend = 4.0 / 3.0 * barssc_prepend * tb_prepend
+
+    a_grid = jnp.concatenate([a_prepend, a_grid])
+    tau_grid = jnp.concatenate([tau_prepend, tau_grid])
+    tb_grid = jnp.concatenate([tb_prepend, tb_grid])
+    xe_raw_grid = jnp.concatenate([xe_prepend, xe_raw_grid])
+    cs2_grid = jnp.concatenate([cs2_prepend, cs2_grid])
+    loga_grid = jnp.concatenate([loga_prepend, loga_grid])
+
     # --- Derived quantities (n_H_0, kappa_dot prefactor) ---
     z_grid = 1.0 / a_grid - 1.0
     mu_H = 1.0 / (1.0 - Y_He)

@@ -21,6 +21,7 @@ import pytest
 
 from clax.background import background_solve
 from clax.thermodynamics import thermodynamics_solve
+from clax.perturbations import _compute_tca_criterion
 from clax.params import CosmoParams, PrecisionParams
 from tests.pk_test_utils import PK_GRAD_PARAM_STEPS
 
@@ -108,6 +109,78 @@ class TestVisibility:
     def test_visibility_peaks_at_recombination(self, th):
         """The visibility function peaks near recombination; expects ``z_star`` close to 1090."""
         assert abs(float(th.z_star) - 1090) < 30, f"z_star = {float(th.z_star):.1f}"
+
+
+class TestEarlyTableExtension:
+    """``th_z_max`` is a NUMERICAL knob, not a physics one (fix/thermo-early-extension).
+
+    ``CubicSpline.evaluate`` clips below its first knot (clax/interpolation.py:67).
+    The thermodynamics table used to start at ``a_start = 1/(1+th_z_max)`` (still
+    ``tau_grid[0]`` on the fixed-up table -- see the "Extend the table..." comment
+    in ``thermodynamics_solve``), which for small ``th_z_max`` (e.g. 5e3 -> table
+    starts at tau=80.7 Mpc) is far LATER than ``tau_ini`` used by perturbations.py.
+    Below the table start, kappa_dot used to FREEZE at the boundary value instead
+    of scaling as a^-2, corrupting the TCA criterion at tau_ini (RED on main:
+    is_tca=0.000000 for all k, i.e. the fully-ionized early-radiation-domination
+    plasma looks free-streaming). GREEN after prepending an analytic a^-2
+    extension covering the gap.
+
+    Fixture ``th`` above uses PREC (th_z_max=5e3), the exact regime from the bug
+    report, so no extra fixture is needed.
+    """
+
+    # Old table start at th_z_max=5e3: a_start = 1/(1+5e3), loga_start ~ -8.5174.
+    _LOGA_START_OLD = float(jnp.log(1.0 / (1.0 + 5e3)))
+
+    def test_kappa_dot_scales_as_a_minus_2_below_old_table_start(self, th):
+        """``kappa_dot(a) * a**2`` is constant well below the pre-fix table start.
+
+        Physically kappa_dot = x_e * n_H_0 * (1+z)^2 * sigma_T * c/Mpc with x_e
+        exactly frozen at full ionization in this regime, so kappa_dot ~ a^-2
+        is exact (not approximate) -- a tight tolerance is appropriate. Before
+        the fix, the spline clips to the frozen boundary value here so
+        kappa_dot*a^2 varies by orders of magnitude instead of being constant;
+        1e-6 is >100x looser than the ~9e-8 spline-interpolation error the
+        prepended analytic grid achieves (verified numerically at 8.6e-8).
+        """
+        loga_test = jnp.linspace(
+            self._LOGA_START_OLD - 5.0, self._LOGA_START_OLD - 0.5, 20
+        )
+        kappa_dot = jax.vmap(th.kappa_dot_of_loga.evaluate)(loga_test)
+        a_test = jnp.exp(loga_test)
+        kappa_dot_a2 = kappa_dot * a_test**2
+
+        rel_spread = float(
+            (kappa_dot_a2.max() - kappa_dot_a2.min()) / kappa_dot_a2.mean()
+        )
+        assert rel_spread < 1e-6, (
+            f"kappa_dot*a^2 relative spread = {rel_spread:.3e} "
+            f"(values: {np.asarray(kappa_dot_a2)})"
+        )
+
+    @pytest.mark.parametrize("k", [0.01, 0.05, 0.1])
+    def test_is_tca_near_one_at_tau_ini(self, bg, th, k):
+        """``is_tca(tau_ini) ~ 1``: the plasma is tightly coupled at the start
+        of scalar-mode integration (early radiation domination, fully ionized).
+
+        ``tau_ini`` mirrors the ``compute_pk`` single-k path in
+        ``_matter_delta_m_single_k_impl`` (clax/perturbations.py):
+        ``tau_ini = min(0.5, 0.01/k)``. Before the fix this is 0.000000 for
+        every k in this range (the smoking gun in the bug report) because
+        kappa_dot is frozen far below its true early-time value.
+        """
+        tau_ini = min(0.5, 0.01 / k)
+        loga_ini = bg.loga_of_tau.evaluate(jnp.array(tau_ini))
+        a_ini = jnp.exp(loga_ini)
+        H_ini = bg.H_of_loga.evaluate(loga_ini)
+        a_prime_over_a = a_ini * H_ini
+        kappa_dot_ini = th.kappa_dot_of_loga.evaluate(loga_ini)
+
+        is_tca, _tau_c = _compute_tca_criterion(kappa_dot_ini, a_prime_over_a, k)
+        assert float(is_tca) > 0.99, (
+            f"is_tca(tau_ini={tau_ini}, k={k}) = {float(is_tca):.6f}, expected ~1 "
+            f"(kappa_dot={float(kappa_dot_ini):.4e}, aH={float(a_prime_over_a):.4e})"
+        )
 
 
 def _thermo_ad_fd_pair(param_name, quantity_fn):
