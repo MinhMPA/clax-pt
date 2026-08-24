@@ -532,12 +532,22 @@ def _make_f_from_cosmoparams(bg, pt, param_name):
     return f
 
 
-def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(pipeline_fast_cl_k5):
+def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request):
     """d(sum(pk_mm_real))/d(ln10A_s), starting from ``CosmoParams`` (not
     ``pk_lin`` directly) through ``compute_ept_from_clax``, matches central
     finite differences.
+
+    Skips under --fast: nothing else in the current suite actually consumes
+    the shared ``pipeline_fast_cl_k5`` fixture (module-scoped, k_max=5.0,
+    ~85 k-modes), so requesting it here would be a full extra perturbation
+    solve added to every --fast run. Fetched lazily via
+    ``request.getfixturevalue`` (after the skip check) rather than as a
+    normal fixture parameter, since pytest resolves fixture parameters
+    before the test body -- and before the skip -- runs.
     """
-    params, _prec, bg, _th, pt = pipeline_fast_cl_k5
+    if fast_mode:
+        pytest.skip("full k_max=5.0 perturbation solve fixture -- full mode only")
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
     f = _make_f_from_cosmoparams(bg, pt, "ln10A_s")
     x0 = float(params.ln10A_s)
 
@@ -558,7 +568,7 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(pipeline_fast_cl_k5
     )
 
 
-def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(pipeline_fast_cl_k5):
+def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(fast_mode, request):
     """Forward-mode (jvp) equals reverse-mode (grad) for the
     ``CosmoParams.ln10A_s -> compute_ept_from_clax`` chain.
 
@@ -567,8 +577,13 @@ def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(pipeline_fast_cl_k5):
     not a factor here -- unlike jvp through the perturbation ODE itself
     (see ``tests/test_pk_forward_mode.py``), this jvp needs no
     ``ode_adjoint="direct"`` escape hatch.
+
+    Skips under --fast for the same reason as the AD-vs-FD test above (the
+    shared ``pipeline_fast_cl_k5`` fixture is otherwise unused right now).
     """
-    params, _prec, bg, _th, pt = pipeline_fast_cl_k5
+    if fast_mode:
+        pytest.skip("full k_max=5.0 perturbation solve fixture -- full mode only")
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
     f = _make_f_from_cosmoparams(bg, pt, "ln10A_s")
     x0 = float(params.ln10A_s)
 
@@ -585,7 +600,7 @@ def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(pipeline_fast_cl_k5):
     )
 
 
-def test_grad_h_end_to_end_from_cosmoparams_matches_fd(request):
+def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     """d(sum(pk_mm_real))/dh, fully re-solved (background -> thermodynamics
     -> perturbations -> compute_ept_from_clax) for every probed ``h`` --
     the genuine CosmoParams-to-EPT coverage gap this module closes.
@@ -594,7 +609,6 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(request):
     fast_cl(k_max=5.0) precision as the shared ``pipeline_fast_cl_k5``
     fixture, so full mode only.
     """
-    fast_mode = request.config.getoption("--fast", default=False)
     if fast_mode:
         pytest.skip("3 full perturbation solves -- full mode only")
 

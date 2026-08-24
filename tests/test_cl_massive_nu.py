@@ -22,9 +22,15 @@ Notes:
   robustness (the fluid-approximation switch has convergence issues for
   massive-neutrino cosmologies with the current solver at the k-scales
   ``fast_cl`` probes). Tolerances are therefore approximate (fast_cl-quality,
-  not science-grade) like ``test_harmonic.py``, and set somewhat looser than
-  the m_ncdm=0.06 fiducial contract to accommodate the added free-streaming
-  physics at this preset's resolution.
+  not science-grade) like ``test_harmonic.py``.
+- Tolerances are set EQUAL to (not looser than) ``test_harmonic.py``'s
+  m_ncdm=0.06 fiducial bounds (TT: 30%/50%/50% at l=100/50/10; EE: 60%/60%
+  at l=100/200), because a GPU measurement (job 13126) showed every probed
+  ratio already fits inside those bounds at m_ncdm=0.15 too:
+  TT(l=100)=1.1859 (30% bound, 11.4pp margin), TT(l=50)=1.0219 (50% bound),
+  TT(l=10)=0.8363 (50% bound), EE(l=100)=1.5480 (60% bound, 5.2pp margin),
+  EE(l=200)=1.0446 (60% bound). No measurement forced a looser bound than
+  the existing fiducial contract, so none is carried here.
 """
 
 import os
@@ -51,8 +57,18 @@ _PREC = _dc_replace(PrecisionParams.fast_cl(), ncdm_fluid_approximation="none")
 
 
 @pytest.fixture(scope="module")
-def pipeline_m_ncdm_015():
-    """Background + thermo + perturbations at m_ncdm=0.15, fast_cl-quality."""
+def pipeline_m_ncdm_015(request):
+    """Background + thermo + perturbations at m_ncdm=0.15, fast_cl-quality.
+
+    Skips under --fast: this is a second full perturbation solve (on top of
+    the shared m_ncdm=0.06 ``pipeline_fast_cl`` fixture other files already
+    pay for), not a --fast-subsamplable sweep, so a `pytest tests/ --fast`
+    dev-loop run must not pay for it. Uses ``request.config.getoption``
+    directly (not the function-scoped ``fast_mode`` fixture) because a
+    module-scoped fixture cannot depend on a function-scoped one.
+    """
+    if request.config.getoption("--fast", default=False):
+        pytest.skip("m_ncdm=0.15 full perturbation solve -- full mode only")
     params = CosmoParams(m_ncdm=0.15)
     bg = background_solve(params, _PREC)
     th = thermodynamics_solve(params, _PREC, bg)
@@ -78,34 +94,34 @@ class TestClMassiveNuTT:
             assert float(cl[i]) > 0, f"C_l^TT(l={l}) = {float(cl[i]):.4e} is not positive"
 
     def test_cl_tt_l100_accuracy(self, pipeline_m_ncdm_015, massive_nu_cls_ref):
-        """``C_l^TT`` at ``l=100`` matches CLASS (m_ncdm=0.15); expects <40% relative error."""
+        """``C_l^TT`` at ``l=100`` matches CLASS (m_ncdm=0.15); expects <30% relative error (matches test_harmonic.py fiducial; measured 18.6%)."""
         params, bg, th, pt = pipeline_m_ncdm_015
         cl = compute_cl_tt(pt, params, bg, [100])
         cl_us = float(cl[0])
         cl_class = float(massive_nu_cls_ref['tt'][100])
         ratio = cl_us / cl_class
         print(f"C_l^TT(l=100, m_ncdm=0.15): clax={cl_us:.4e}, CLASS={cl_class:.4e}, ratio={ratio:.4f}")
-        assert abs(ratio - 1) < 0.40, f"C_l^TT(l=100): ratio={ratio:.4f}, expected within 40%"
+        assert abs(ratio - 1) < 0.30, f"C_l^TT(l=100): ratio={ratio:.4f}, expected within 30%"
 
     def test_cl_tt_l50_accuracy(self, pipeline_m_ncdm_015, massive_nu_cls_ref):
-        """``C_l^TT`` at ``l=50`` matches CLASS (m_ncdm=0.15); expects <60% relative error."""
+        """``C_l^TT`` at ``l=50`` matches CLASS (m_ncdm=0.15); expects <50% relative error (matches test_harmonic.py fiducial; measured 2.2%)."""
         params, bg, th, pt = pipeline_m_ncdm_015
         cl = compute_cl_tt(pt, params, bg, [50])
         cl_us = float(cl[0])
         cl_class = float(massive_nu_cls_ref['tt'][50])
         ratio = cl_us / cl_class
         print(f"C_l^TT(l=50, m_ncdm=0.15): clax={cl_us:.4e}, CLASS={cl_class:.4e}, ratio={ratio:.4f}")
-        assert abs(ratio - 1) < 0.60, f"C_l^TT(l=50): ratio={ratio:.4f}, expected within 60%"
+        assert abs(ratio - 1) < 0.50, f"C_l^TT(l=50): ratio={ratio:.4f}, expected within 50%"
 
     def test_cl_tt_l10_accuracy(self, pipeline_m_ncdm_015, massive_nu_cls_ref):
-        """``C_l^TT`` at ``l=10`` matches CLASS (m_ncdm=0.15); expects <60% relative error."""
+        """``C_l^TT`` at ``l=10`` matches CLASS (m_ncdm=0.15); expects <50% relative error (matches test_harmonic.py fiducial; measured 16.4%)."""
         params, bg, th, pt = pipeline_m_ncdm_015
         cl = compute_cl_tt(pt, params, bg, [10])
         cl_us = float(cl[0])
         cl_class = float(massive_nu_cls_ref['tt'][10])
         ratio = cl_us / cl_class
         print(f"C_l^TT(l=10, m_ncdm=0.15): clax={cl_us:.4e}, CLASS={cl_class:.4e}, ratio={ratio:.4f}")
-        assert abs(ratio - 1) < 0.60, f"C_l^TT(l=10): ratio={ratio:.4f}, expected within 60%"
+        assert abs(ratio - 1) < 0.50, f"C_l^TT(l=10): ratio={ratio:.4f}, expected within 50%"
 
 
 class TestClMassiveNuEE:
@@ -121,24 +137,24 @@ class TestClMassiveNuEE:
             assert val > 0, f"C_l^EE(l={l}) = {val:.4e} is not positive"
 
     def test_cl_ee_l100_accuracy(self, pipeline_m_ncdm_015, massive_nu_cls_ref):
-        """``C_l^EE`` at ``l=100`` matches CLASS (m_ncdm=0.15); expects <70% relative error."""
+        """``C_l^EE`` at ``l=100`` matches CLASS (m_ncdm=0.15); expects <60% relative error (matches test_harmonic.py fiducial; measured 54.8%)."""
         params, bg, th, pt = pipeline_m_ncdm_015
         cl = compute_cl_ee(pt, params, bg, [100])
         cl_us = float(cl[0])
         cl_class = float(massive_nu_cls_ref['ee'][100])
         ratio = cl_us / cl_class
         print(f"C_l^EE(l=100, m_ncdm=0.15): clax={cl_us:.4e}, CLASS={cl_class:.4e}, ratio={ratio:.4f}")
-        assert abs(ratio - 1) < 0.70, f"C_l^EE(l=100): ratio={ratio:.4f}"
+        assert abs(ratio - 1) < 0.60, f"C_l^EE(l=100): ratio={ratio:.4f}"
 
     def test_cl_ee_l200_accuracy(self, pipeline_m_ncdm_015, massive_nu_cls_ref):
-        """``C_l^EE`` at ``l=200`` matches CLASS (m_ncdm=0.15); expects <70% relative error."""
+        """``C_l^EE`` at ``l=200`` matches CLASS (m_ncdm=0.15); expects <60% relative error (matches test_harmonic.py fiducial; measured 4.5%)."""
         params, bg, th, pt = pipeline_m_ncdm_015
         cl = compute_cl_ee(pt, params, bg, [200])
         cl_us = float(cl[0])
         cl_class = float(massive_nu_cls_ref['ee'][200])
         ratio = cl_us / cl_class
         print(f"C_l^EE(l=200, m_ncdm=0.15): clax={cl_us:.4e}, CLASS={cl_class:.4e}, ratio={ratio:.4f}")
-        assert abs(ratio - 1) < 0.70, f"C_l^EE(l=200): ratio={ratio:.4f}"
+        assert abs(ratio - 1) < 0.60, f"C_l^EE(l=200): ratio={ratio:.4f}"
 
 
 class TestClMassiveNuTE:
