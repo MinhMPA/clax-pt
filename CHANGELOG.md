@@ -8,6 +8,54 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 24, 2026: chore — raise `th_z_max` presets below 5e4 floor to 5e4
+
+Decisive sweep (measured earlier, not re-run here): `PrecisionParams.th_z_max`
+below 5e4 puts the thermodynamics table's first knot at a conformal time
+(tau=80.7 Mpc at th_z_max=5e3) *later* than perturbation start
+tau_ini~0.1-0.5 Mpc. `CubicSpline.evaluate` clips its argument to the table
+boundary, so kappa_dot FREEZES at its boundary value below the first knot
+instead of scaling as a^-2 — silently wrong physics. th_z_max=5e4 fixes this
+and is ~6x faster than 5e3 (60s vs 366s at k=0.01, P(k) matches th_z_max=5e5
+to 2e-6).
+
+- Raised `th_z_max=5e3` → `5e4` in: `tests/test_multipoint.py`,
+  `tests/test_end_to_end.py`, `tests/test_perturbations.py`,
+  `tests/test_thermodynamics.py` (`PREC_JVP` local site only, line ~229),
+  `diags/diag_jvp_nan_source.py` (diagnostic script, not a test).
+- `clax/params.py` presets already all default to `th_z_max=5e4` (the field
+  default); no preset override needed changing. Added a comment at the
+  `th_z_max` field definition documenting the floor and the measured numbers
+  so it is not lowered again.
+- Left untouched: `docs/superpowers/plans/2026-05-08-parallel-ad-teams.md`
+  (a dated historical plan record quoting the *then*-current `th_z_max=5e3`
+  test snippet — editing it would misrepresent history, not fix a live bug).
+- **`tests/test_thermodynamics.py` module-level `PREC` (line 28) left at
+  `th_z_max=5e3`, NOT raised — tried 5e4 first per the judgement call in
+  this item's instructions, and it broke
+  `TestThermoGradients::test_opacity_logderivative_gradient_matches_fd_for_omega_b`
+  (GPU sbatch job 13123, verbatim):
+  `AssertionError: dkappa_dot_dloga(loga=-8) grad omega_b: AD=-3.346399e+02
+  FD=-3.642966e+02 rel=8.14%` against a 1% tolerance. This module never runs
+  perturbations, so the CubicSpline boundary-clip bug that motivates the
+  5e4 floor cannot bite here; the failure is instead th_n_points=10000's
+  grid spacing near recombination shifting under a wider z-range, which
+  moves the loga=-8 AD/FD gradient check outside tolerance. Per project
+  rules (never loosen a tolerance to make something pass), reverted to
+  `th_z_max=5e3` rather than touching the assertion. The local `PREC_JVP`
+  in `test_find_z_reio_forward_mode_matches_fd` (line ~229) *was* raised to
+  5e4 and passed, so it stayed raised.
+
+**Validation:** `tests/test_thermodynamics.py --fast -q` is too slow for the
+shared login node even under `--fast` (JAX JIT + CPU-only bg/thermo solve
+exceeded 90s with no output, and a background run took >2 min CPU time
+before being killed); moved to
+`/lustre/work/n2minh/clax/slurm/verify-th-z-max-preset.sbatch` on GPU
+alongside `tests/test_multipoint.py` (massive-nu regression) and the full
+`pytest tests/ --fast -q` suite. See job 13123 (initial, caught the
+regression above) and the follow-up job (post-revert, clean) for verbatim
+pass/fail lines.
+
 ### Aug 23, 2026: Fix massive-nu `compute_pk` grind — TCA hard-switch discontinuity (`fix/tca-transition`)
 
 **Root cause found for the known issue below (Aug 13-14 entry): the TCA/full
@@ -97,32 +145,34 @@ now calls the real shared `_raise_if_diverged` (not a re-implemented mirror)
 at all 3 call sites, plus a source-level wiring check that each site still
 invokes it.
 
-**Known gap — table path NOT verified end-to-end:** `compute_pk_table(...,
-ncdm_fluid_approximation="none")`, the production path behind
-`compute_pk_table` / `compute_pk_interpolator`, still does not complete on
-CPU in this same massive-nu configuration within a bounded run. New evidence
-(review round 2, Aug 23 PM): a *reduced*-precision probe
-(`pt_l_max_g=6`, `ncdm_q_size=5`, `ode_max_steps=4000`, only 2 k-points
-`[0.01, 0.05]`, i.e. far cheaper than production) ran **182s** and then
-raised `equinox._errors._EquinoxRuntimeError: The maximum number of solver
-steps was reached` — a step-*budget* exhaustion inside diffrax, not the
-`_raise_if_diverged` guard firing (that guard is never reached; diffrax's
-own max_steps check raises first) and not obviously the original
-TCA-discontinuity divergence (`delta_b -> 1e49`) recurring. This confirms
-the table path is genuinely **slow** (batched-solve/vmap overhead over even
-2 k-points dominates), separately from whatever residual correctness
-question remains; it is unresolved whether raising `max_steps` further
-would let it complete, hit real divergence, or just keep grinding — do not
-claim the batched table path is fixed by this change without rerunning it
-to completion (ideally on GPU, or with a much larger max_steps budget on a
-dedicated non-shared node) first. The same caveat applies transitively to
-**C_l accuracy at m_ncdm=0.15**: the "C_l accuracy suite (17 tests) passes"
-validation above uses only the default `CosmoParams()` (m_ncdm=0.06); no
-test in this branch computes `C_l^TT/EE/TE/BB` at m_ncdm=0.15 (the actual
-bug-repro cosmology), because that full-source-function solve is at least
-as expensive as the table-path probe above. Whether the wider blend window
-changes `alpha_prime`/shear inputs enough to perturb `C_l^EE`/`C_l^TT` in
-the massive-neutrino regime specifically is unverified.
+**Resolved (Aug 24, 2026) — the table path IS healthy; the apparent gap was a
+`th_z_max` misuse, not a table-path or `_tca_blend` defect.** The paragraph
+previously here claimed `compute_pk_table(..., ncdm_fluid_approximation="none")`
+was unverified end-to-end and cited a reduced-precision probe that exhausted
+`ode_max_steps` after 182 s. Both claims are superseded:
+
+- **Table path verified.** `compute_pk_table` and `compute_pk` agree to
+  **3.2e-8 / 9.0e-7 / 3.5e-6** at k = 0.01 / 0.05 / 0.1 under the `planck_fast`
+  preset (GPU job 13103). The batched/vmapped table path is not a correctness
+  risk.
+- **The max_steps exhaustion was `th_z_max=5e3`.** The probes that ground to a
+  halt borrowed their precision from `tests/test_multipoint.py`'s `PREC`, which
+  sets `th_z_max=5e3`. At 5e3 the thermodynamics table's first knot sits at
+  tau=80.7 Mpc while perturbations start at tau_ini~0.1-0.5 Mpc, and
+  `CubicSpline.evaluate` clips to the table boundary
+  (`clax/interpolation.py:67`), so kappa_dot FREEZES instead of scaling as
+  a^-2. Decisive sweep at k=0.01, all else identical: `th_z_max=5e3` ->
+  P=**4.77e15** (366 s, wrong); `5e4` -> P=**7.94e4** (60 s); `5e5` -> 7.94e4
+  (agrees with 5e4 to 2e-6). So 5e4 is a correctness floor, not a tunable knob
+  — see the comment at `PrecisionParams.th_z_max` and the Aug 24 `th_z_max`
+  entry above.
+
+**C_l at m_ncdm=0.15:** the paragraph previously here also noted that no test
+computes `C_l^TT/EE/TE` at m_ncdm=0.15 (every C_l test used the default 0.06).
+That coverage gap is being closed separately on branch `test/coverage-gaps`
+(new `tests/test_cl_massive_nu.py`, oracle comparison against
+`reference_data/massive_nu_015/cls.npz`). Its results are not reported here
+because that branch is not yet merged.
 
 ### Aug 13-14, 2026: Consolidation — benchmark/clax-pt merged into main (MinhMPA/clax-pt)
 

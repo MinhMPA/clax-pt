@@ -27,6 +27,14 @@ from tests.pk_test_utils import PK_GRAD_PARAM_STEPS
 
 PREC = PrecisionParams(
     bg_n_points=400, ncdm_bg_n_points=200, bg_tol=1e-8,
+    # NOTE: intentionally 5e3, not the 5e4 floor (see PrecisionParams.th_z_max).
+    # This module never runs perturbations, so the CubicSpline boundary-clip
+    # bug that motivates the 5e4 floor cannot bite here. Raising to 5e4 was
+    # tried and reverted: it breaks
+    # TestThermoGradients::test_opacity_logderivative_gradient_matches_fd_for_omega_b
+    # (rel err 8.14% vs 1% tolerance, dkappa_dot_dloga AD=-3.346399e+02 vs
+    # FD=-3.642966e+02 at loga=-8) by shifting the th_n_points=10000 grid
+    # spacing near recombination. Do not loosen the tolerance to compensate.
     th_n_points=10000, th_z_max=5e3,
 )
 
@@ -226,7 +234,7 @@ def test_find_z_reio_forward_mode_matches_fd():
 
     PREC_JVP = PrecisionParams(
         bg_n_points=400, ncdm_bg_n_points=200, bg_tol=1e-8,
-        th_n_points=10000, th_z_max=5e3,
+        th_n_points=10000, th_z_max=5e4,  # 5e4 floor: see PrecisionParams.th_z_max
         ode_adjoint="direct",
     )
     params = CosmoParams()
