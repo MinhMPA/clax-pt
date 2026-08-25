@@ -8,6 +8,37 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 25, 2026: `--fast` now skips `@pytest.mark.slow` (the prescribed pre-commit command was unrunnable)
+
+**`pytest tests/ --fast -x -q` — the command `CLAUDE.md` prescribes before every
+commit — could not complete, because `--fast` never deselected slow tests.**
+
+`--fast` did only half of what its name promises: `tests/conftest.py` defined it
+as a `store_true` feeding the `fast_mode` fixture, which subsamples grids *inside*
+a test. Nothing acted on the `slow` marker. `pyproject.toml` declares the marker
+and even documents `-m "not slow"`, but `addopts = "-q"` never applies it, so all
+21 `@pytest.mark.slow` tests across 9 files ran on every "fast" invocation.
+
+**Evidence.** `pytest tests/ --fast -q` was terminated by its harness timeout at
+`3:00:01` on bare `main`, with an identical `3:00:01` timeout on a feature branch
+(same job, both arms). Every full-suite run in this state was therefore silently
+truncated rather than green — which is why several multi-hour validation jobs in
+the TCA/`th_z_max` effort ended with no summary line, and why a test-cost
+comparison between a branch and `main` was invalid (both arms hit the same wall).
+
+**Fix.** `tests/conftest.py` gains a `pytest_collection_modifyitems` hook that, and
+only when `--fast` is passed, adds a skip marker to any item whose keywords carry
+`slow`. Skipping rather than deselecting keeps them visible as `s` in the summary,
+so a fast run is never mistaken for a full one. `CLAUDE.md` needs no change — the
+command it already documents starts working.
+
+**Tests.** `tests/test_fast_flag_selection.py` loads the real hook from
+`tests/conftest.py` by path and asserts: slow items are skipped under `--fast`,
+non-slow items never are, nothing is skipped without `--fast`, the skip reason
+tells the reader how to get the full suite back, and the `slow` marker is still
+declared in `pyproject.toml` (so the keyword the hook matches cannot silently
+become a typo).
+
 ### Aug 24, 2026: Test-only coverage-gap sweep (branch `test/coverage-gaps`, tests/ only)
 
 Closed 4 confirmed test-coverage gaps found by a per-file grep of `jax.grad`/
