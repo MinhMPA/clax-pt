@@ -74,8 +74,37 @@ def pipeline_fast_cl_k5():
 def pytest_addoption(parser):
     parser.addoption(
         "--fast", action="store_true", default=False,
-        help="Run fast subset of tests (every 10th point)"
+        help="Run the fast subset: subsample grids within tests AND skip "
+             "tests marked @pytest.mark.slow"
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Make ``--fast`` actually skip ``@pytest.mark.slow`` tests.
+
+    ``--fast`` used to do only half of what its name promises: it fed the
+    ``fast_mode`` fixture, which subsamples grids *inside* a test, but nothing
+    deselected the tests marked ``slow``. ``pyproject.toml`` declares the marker
+    and even documents ``-m "not slow"``, but ``addopts`` never applies it, so
+    the command ``CLAUDE.md`` prescribes before every commit --
+    ``pytest tests/ --fast -x -q`` -- ran all 21 slow tests and could not
+    finish. Measured on bare ``main``: terminated at 3:00:01 by its harness
+    timeout, with an identical timeout on a branch, so every "full suite"
+    run in that state was silently truncated rather than green.
+
+    Skipping (rather than deselecting) keeps the skipped tests visible as ``s``
+    in the summary, so it is obvious that a fast run is not a full run.
+    Run without ``--fast`` for the complete suite, or ``-m slow`` for only the
+    slow ones.
+    """
+    if not config.getoption("--fast"):
+        return
+    skip_slow = pytest.mark.skip(
+        reason="slow test skipped by --fast (omit --fast for the full suite)"
+    )
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip_slow)
 
 
 @pytest.fixture
