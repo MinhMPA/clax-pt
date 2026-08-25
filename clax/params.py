@@ -135,6 +135,14 @@ class PrecisionParams:
     ncdm_fluid_trigger_tau_over_tau_k: float = 31.0  # CLASS default late-time switch
 
     # Thermodynamics
+    # 5e4 is a practical floor, not a tunable knob: the thermo table's first
+    # knot (z=th_z_max) must map to a conformal time earlier than perturbation
+    # start tau_ini (~0.1-0.5 Mpc), because CubicSpline.evaluate clips to the
+    # table boundary. Below the first knot, kappa_dot would freeze at its
+    # boundary value instead of scaling as a^-2. Measured: th_z_max=5e3 puts
+    # the first knot at tau=80.7 Mpc (> tau_ini) and gives P(k=0.01)=4.77e15
+    # (wrong); th_z_max=5e4 gives P(k=0.01)=7.94e4, matching th_z_max=5e5 to
+    # 2e-6 while running ~6x faster than 5e3 (60s vs 366s at k=0.01).
     th_z_max: float = 5e4           # max redshift for recombination
     th_n_points: int = 20000        # number of z grid points
     th_tol: float = 1e-5            # ODE tolerance

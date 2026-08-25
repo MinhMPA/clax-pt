@@ -36,7 +36,7 @@ REFERENCE_DIR = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
 # Using "none" is slower but numerically robust.
 PREC = PrecisionParams(
     bg_n_points=200, ncdm_bg_n_points=100, bg_tol=1e-8,
-    th_n_points=5000, th_z_max=5e3,
+    th_n_points=5000, th_z_max=5e4,  # 5e4 floor: see PrecisionParams.th_z_max
     pt_l_max_g=17, pt_l_max_pol_g=17, pt_l_max_ur=17,
     pt_k_max_cl=0.3,
     pt_ode_rtol=1e-3, pt_ode_atol=1e-6,

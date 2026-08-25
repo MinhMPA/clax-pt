@@ -8,7 +8,7 @@ from clax.thermodynamics import thermodynamics_solve
 
 PREC = PrecisionParams(
     bg_n_points=400, ncdm_bg_n_points=200, bg_tol=1e-8,
-    th_n_points=10000, th_z_max=5e3,
+    th_n_points=10000, th_z_max=5e4,  # 5e4 floor: see PrecisionParams.th_z_max
     ode_adjoint="direct",
 )
 params = CosmoParams()
