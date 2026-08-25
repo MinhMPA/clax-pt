@@ -146,6 +146,36 @@ def _scalar_pid_filtered_rms_norm(
     return _rms_norm_safe(x_flat[filter_indices] * filter_weights)
 
 
+class _ScalarPidFilteredNorm(eqx.Module):
+    """Callable pytree carrying the filtered-norm weights for the PID controller.
+
+    The weights MUST be pytree leaves rather than values captured in a closure.
+    ``_scalar_pid_filtered_variable_weights(k)`` builds an array containing ``k``
+    (a tracer, since the controller is constructed inside the ``vmap`` over the
+    k-grid). A value hidden in a ``lambda`` closure is an opaque constant to JAX:
+    ``jax.lax.map``/``vmap`` cannot thread it, so it escapes its trace. That is a
+    real leak, not a theoretical one -- ``JAX_CHECK_TRACER_LEAKS=1`` reported
+
+        This BatchTracer ... was created on line:
+          clax/perturbations.py:115 (_scalar_pid_filtered_variable_weights)
+
+    escaping via ``_solve_k_modes_batched`` -> ``lax.map(solve_chunk)`` ->
+    ``vmap(solve_single_k)``, and it surfaced as ``UnexpectedTracerError`` when a
+    later transformation (``grad`` w.r.t. ``h`` re-entering the solve through EPT)
+    used the stale tracer. Held as leaves here, the weights are ordinary inputs
+    that every transformation maps correctly.
+
+    Numerically identical to the previous closure: same
+    ``_scalar_pid_filtered_rms_norm`` on the same operands.
+    """
+
+    filter_indices: jnp.ndarray
+    filter_weights: jnp.ndarray
+
+    def __call__(self, err):
+        return _scalar_pid_filtered_rms_norm(err, self.filter_indices, self.filter_weights)
+
+
 def _make_scalar_pid_controller(
     *,
     prec: PrecisionParams,
@@ -159,7 +189,7 @@ def _make_scalar_pid_controller(
     return diffrax.PIDController(
         rtol=prec.pt_ode_rtol,
         atol=prec.pt_ode_atol,
-        norm=lambda err: _scalar_pid_filtered_rms_norm(err, filter_indices, filter_weights),
+        norm=_ScalarPidFilteredNorm(filter_indices, filter_weights),
         pcoeff=config.pcoeff,
         icoeff=config.icoeff,
         dcoeff=config.dcoeff,
