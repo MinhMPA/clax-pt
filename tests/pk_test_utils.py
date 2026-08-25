@@ -128,6 +128,8 @@ PK_DIRECT_SPOT_FULL_K = np.array([
     3.0e-4,
     3.0e-3,
     3.0e-2,
+    5.0e-2,  # coverage gap: 0.04-0.08 Mpc^-1 is where a real TCA-transition
+    7.0e-2,  # bug previously lived; the pre-existing grid skipped this window.
     1.0,
 ])
 
