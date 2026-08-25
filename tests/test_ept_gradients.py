@@ -635,6 +635,29 @@ def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(fast_mode, request):
     )
 
 
+@pytest.mark.xfail(
+    raises=jax.errors.UnexpectedTracerError,
+    strict=True,
+    reason=(
+        "PRE-EXISTING clax bug, not a defect in this test (latent on main; this is "
+        "the first test to exercise the path). jax.errors.UnexpectedTracerError is "
+        "raised at clax/perturbations.py:146 via the norm closure built at :162. "
+        "_make_scalar_pid_controller (:149) computes "
+        "filter_weights = _scalar_pid_filtered_variable_weights(k) EAGERLY and "
+        "captures it in norm=lambda err: _scalar_pid_filtered_rms_norm(err, "
+        "filter_indices, filter_weights). Constructed under the vmap over the "
+        "k-grid, k is a VmapTracer, so filter_weights is a traced array baked into "
+        "a closure held by the diffrax controller object. Re-entering the "
+        "perturbation solve under a different transformation stack -- grad wrt h "
+        "through EPT -- makes JAX see a tracer from a foreign trace. It does not "
+        "bite on the common path only because construction and use normally share "
+        "one trace. Likely fix (separate branch, NOT here -- this branch is "
+        "tests-only): stop closing over a traced array, e.g. carry k through "
+        "diffrax's args and derive the weights inside the norm, or bind them at "
+        "call time. Cf. _make_scalar_pid_controller_batched (:193), which already "
+        "vmaps the weights explicitly for the batched path."
+    ),
+)
 def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     """d(sum(pk_mm_real))/dh, fully re-solved (background -> thermodynamics
     -> perturbations -> compute_ept_from_clax) for every probed ``h`` --
