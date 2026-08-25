@@ -8,6 +8,88 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 24, 2026: Fix `th_z_max` from an 11-order-of-magnitude physics knob to a numerical one
+
+**Root cause:** `thermodynamics_solve()` builds its RECFAST/Saha table starting at
+`a_start = 1/(1+th_z_max)` (`clax/thermodynamics.py:~504`), but `perturbations.py`
+starts scalar-mode integration at `tau_ini = min(0.5, 0.01/k)`
+(`_matter_delta_m_single_k_impl` and friends), which for typical `k` is *earlier*
+than the table's first knot whenever `th_z_max` isn't huge (e.g. `th_z_max=5e3`
+→ table starts at `tau=80.7` Mpc). `CubicSpline.evaluate()` clips below its first
+knot (`clax/interpolation.py:67`), so `kappa_dot` FROZE at the boundary value
+there instead of continuing to scale as `a^-2`. Smoking gun: `_compute_tca_criterion`
+returned `is_tca=0.000000` at `tau_ini` for every `k`, i.e. the fully-ionized
+early-radiation-domination plasma looked free-streaming. Measured impact:
+`P(k=0.01)` changed by 11 orders of magnitude between `th_z_max=5e3` (4.77e15)
+and `th_z_max=5e4` (7.94e4) — a convergence failure, not a numerical-knob effect.
+
+**Fix (`clax/thermodynamics.py`, right after the `a_grid/tau_grid/.../loga_grid`
+`prepend()` block and *before* the "Derived quantities" / AD-safe `n_H_0`-rescaling
+block):** prepend 200 analytically-computed grid points spanning
+`[bg.loga_table[0], loga_start)` (log-spaced in `loga`, i.e. uniform since `loga`
+is already the log variable; `endpoint=False` keeps the combined grid strictly
+increasing). In this regime the plasma is fully ionized by construction (the
+module's own IC comment: "Initial conditions (early radiation domination, fully
+ionized)"), so `x_e` is held fixed at `xe_raw_grid[0]` and `kappa_dot` follows
+from the module's *existing* closed form
+(`kd_prefactor = n_H_0*(1+z)^2*sigma_T*Mpc_over_m`) automatically, since we
+extend `a_grid`/`xe_raw_grid` before `z_grid`/`kd_prefactor` are derived.
+`T_b = T_cmb/a` and `cs2 = (4/3)*barssc*T_b` reuse the same closed forms as the
+`tb0`/`cs20` initial conditions a few lines above, so `xe_of_loga`, `Tb_of_loga`,
+and `cs2_of_loga` (all read by `perturbations.py`) are extended consistently too,
+not just `kappa_dot`. This does **not** reintroduce the RECFAST-integration
+instability that motivated starting the scan at `a_start` in the first place —
+nothing is integrated in the extension, the closed form is tabulated directly.
+The existing `stop_gradient` structure in the AD-safe `_kd_safe`/`_kappa_safe`
+block (`~line 758` before this change) is untouched; because the prepend happens
+upstream of that block, it automatically covers the new points.
+
+**Point count:** `kappa_dot ~ exp(-2*loga)` is smooth/monotonic in `loga`; a
+natural-cubic-spline error estimate (`~h^4/24` relative, since `f''''=16f`) gives
+`~9e-8` relative error at `h=0.038`, i.e. `N_PREPEND=200` points spread over the
+worst case in this codebase (`th_z_max=5e3`: loga range `~7.6`) is far more than
+enough — verified numerically at `8.6e-8` (see `tests/test_thermodynamics.py`).
+
+**Explicitly rejected approach:** a guard requiring `tau_ini` to lie inside the
+thermodynamics table. Wrong — it would also fire on the `planck_fast` preset
+(table starts around `tau~7.5` while modes start at `0.1-0.5`), which is fine in
+practice because the table-boundary `kappa_dot` value there is already so far
+above the TCA threshold that clipping is harmless. The actual bug is that the
+frozen value is *wrong* below the table, not that evaluation happens below the
+table at all — fixed the physics (make `kappa_dot` correct everywhere it's
+evaluated), not the symptom.
+
+**Tests (`tests/test_thermodynamics.py::TestEarlyTableExtension`, cheap,
+thermodynamics-only, no perturbation solve):**
+- `test_kappa_dot_scales_as_a_minus_2_below_old_table_start`: asserts
+  `kappa_dot(a)*a^2` is constant (rel. spread < 1e-6) well below the pre-fix
+  `th_z_max=5e3` table start. RED on main: rel. spread 7.5 (750%, values span
+  2.05e-11 to 1.66e-7). GREEN after fix: 8.6e-8.
+- `test_is_tca_near_one_at_tau_ini[k]` for `k in {0.01, 0.05, 0.1}`: calls
+  `_compute_tca_criterion` directly (no ODE) with `tau_ini = min(0.5, 0.01/k)`
+  mirroring `_matter_delta_m_single_k_impl`. RED on main: `is_tca=0.000000` for
+  all three `k` (kappa_dot frozen at 11.308 regardless of `k`/`tau`). GREEN:
+  `is_tca=1.000000` for all three.
+- Full `tests/test_thermodynamics.py`: 20/20 pass after the fix (16 pre-existing
+  + 4 new), including all repaired-AD-path gradient/JVP regressions
+  (`TestThermoGradients`, `TestThermoForwardModeAD`,
+  `test_find_z_reio_forward_mode_matches_fd`) — none of those tolerances were
+  loosened.
+- Verified unaffected (not asserted in a test, informal spot check): `z_star`/
+  `z_rec` identical before/after the fix at `th_z_max=5e3`
+  (`z_star=1088.620335`, `z_rec=1084.853289`, to 6 decimals) since `g~0` and
+  `kappa` is monotonic in the new early region, as expected. `dkappa_dot/dloga /
+  kappa_dot ≈ -2.0` and `g`/`g_prime`/`exp_m_kappa` ≈ 0 throughout the extended
+  region (residual ~1e-200 to 1e-280, numerical noise around zero, not signal).
+  Gradient of `kappa_dot_of_loga` w.r.t. `omega_b` deep in the extended region
+  (`loga=-13`) matches centred FD to 6 significant figures (informal spot check,
+  not a committed test — `TestThermoGradients` already covers the recombination-
+  era grid at `loga=-8`, which sits above `loga_start` and is untouched by the
+  extension).
+
+**GPU acceptance (`compute_pk(k=0.01)`, `th_z_max` in `{5e3, 5e4}`,
+`pytest tests/ --fast -q`):** pending / see below.
+
 ### Aug 24, 2026: chore — raise `th_z_max` presets below 5e4 floor to 5e4
 
 Decisive sweep (measured earlier, not re-run here): `PrecisionParams.th_z_max`
@@ -55,6 +137,7 @@ alongside `tests/test_multipoint.py` (massive-nu regression) and the full
 `pytest tests/ --fast -q` suite. See job 13123 (initial, caught the
 regression above) and the follow-up job (post-revert, clean) for verbatim
 pass/fail lines.
+
 
 ### Aug 23, 2026: Fix massive-nu `compute_pk` grind — TCA hard-switch discontinuity (`fix/tca-transition`)
 
@@ -173,6 +256,7 @@ That coverage gap is being closed separately on branch `test/coverage-gaps`
 (new `tests/test_cl_massive_nu.py`, oracle comparison against
 `reference_data/massive_nu_015/cls.npz`). Its results are not reported here
 because that branch is not yet merged.
+
 
 ### Aug 13-14, 2026: Consolidation — benchmark/clax-pt merged into main (MinhMPA/clax-pt)
 
