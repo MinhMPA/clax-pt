@@ -8,6 +8,77 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 25, 2026: Fix a real tracer leak in the scalar PID controller (`UnexpectedTracerError`)
+
+**The filtered-norm weights were captured in a lambda closure instead of being
+pytree leaves, so they escaped their trace.** Surfaced by the first end-to-end
+`CosmoParams` -> EPT gradient test (`test_grad_h_end_to_end_from_cosmoparams_matches_fd`,
+added as a strict `xfail` in the coverage-gap sweep).
+
+`_scalar_pid_filtered_variable_weights(k)` (`perturbations.py:115`) builds
+`[k^2, 1, 1, 1, 1/k^2, 1]`; since the controller is constructed inside the `vmap`
+over the k-grid, that array contains a tracer. Hidden in
+`norm=lambda err: ...(err, filter_indices, filter_weights)` it is an opaque
+constant to JAX, so `jax.lax.map`/`vmap` cannot thread it and it escapes.
+`JAX_CHECK_TRACER_LEAKS=1` named the site exactly:
+
+```
+This BatchTracer ... was created on line:
+  clax/perturbations.py:115 (_scalar_pid_filtered_variable_weights)
+```
+
+escaping via `_solve_k_modes_batched` -> `lax.map(solve_chunk)` ->
+`vmap(solve_single_k)`. It only bites when a later transformation re-enters the
+solve under a different stack -- `grad` w.r.t. `h` through EPT -- which is why the
+common path never tripped it.
+
+**Fix.** `_ScalarPidFilteredNorm`, a small `eqx.Module` holding `filter_indices`
+and `filter_weights` as fields and implementing `__call__`. As pytree leaves the
+weights are ordinary inputs that every transformation maps correctly. Verified
+numerically identical to the closure at k = 0.05 / 0.1 / 1.0 (same
+`_scalar_pid_filtered_rms_norm` on the same operands, bit-for-bit).
+
+**Failed approach, recorded so it is not retried:** a reproducer that merely
+builds the controller under `vmap` and calls its norm through an inner `jit`
+does **not** leak -- that pattern is legal, and a pytree-norm variant returns
+identical values there. The escape needs the `lax.map`-over-chunks plus inner
+`vmap` structure of `_solve_k_modes_batched`. Reproduce with the real test under
+`JAX_CHECK_TRACER_LEAKS=1`, not with a simplified snippet.
+
+**Not changed:** `_make_scalar_pid_controller_batched` still uses a lambda, but it
+computes `filter_weights_batch` *outside* the `vmap` from the whole `k_batch`, so
+its weights are not per-trace tracers and it is not on the leaking path.
+### Aug 25, 2026: `--fast` now skips `@pytest.mark.slow` (the prescribed pre-commit command was unrunnable)
+
+**`pytest tests/ --fast -x -q` — the command `CLAUDE.md` prescribes before every
+commit — could not complete, because `--fast` never deselected slow tests.**
+
+`--fast` did only half of what its name promises: `tests/conftest.py` defined it
+as a `store_true` feeding the `fast_mode` fixture, which subsamples grids *inside*
+a test. Nothing acted on the `slow` marker. `pyproject.toml` declares the marker
+and even documents `-m "not slow"`, but `addopts = "-q"` never applies it, so all
+21 `@pytest.mark.slow` tests across 9 files ran on every "fast" invocation.
+
+**Evidence.** `pytest tests/ --fast -q` was terminated by its harness timeout at
+`3:00:01` on bare `main`, with an identical `3:00:01` timeout on a feature branch
+(same job, both arms). Every full-suite run in this state was therefore silently
+truncated rather than green — which is why several multi-hour validation jobs in
+the TCA/`th_z_max` effort ended with no summary line, and why a test-cost
+comparison between a branch and `main` was invalid (both arms hit the same wall).
+
+**Fix.** `tests/conftest.py` gains a `pytest_collection_modifyitems` hook that, and
+only when `--fast` is passed, adds a skip marker to any item whose keywords carry
+`slow`. Skipping rather than deselecting keeps them visible as `s` in the summary,
+so a fast run is never mistaken for a full one. `CLAUDE.md` needs no change — the
+command it already documents starts working.
+
+**Tests.** `tests/test_fast_flag_selection.py` loads the real hook from
+`tests/conftest.py` by path and asserts: slow items are skipped under `--fast`,
+non-slow items never are, nothing is skipped without `--fast`, the skip reason
+tells the reader how to get the full suite back, and the `slow` marker is still
+declared in `pyproject.toml` (so the keyword the hook matches cannot silently
+become a typo).
+
 ### Aug 24, 2026: Test-only coverage-gap sweep (branch `test/coverage-gaps`, tests/ only)
 
 Closed 4 confirmed test-coverage gaps found by a per-file grep of `jax.grad`/
