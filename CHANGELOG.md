@@ -46,7 +46,17 @@ across {sum(xe^2), random-linear, sum(g^2)} x {h, omega_b}, where native
 reverse measured 5.1e-11 up to 5.2e+1 (near-zero-derivative visibility
 functional). New tests: `tests/test_thermo_reverse_composite.py` (contract,
 consistency, routing wiring, and a slow GPU pipeline delta_m test).
-GPU validation numbers recorded in the PR (fix/thermo-stable-reverse-composite).
+
+**Verified (GPU, V100 jobs 14019+14027, fast_cl(k_max=5, chunk 20), d/dh).**
+EPT functional sum(pk_mm_real): grad(stable) = 4.0295938682e6 vs frozen-FD
+truth 4.029578e6 (+3.9e-6; vs jvp 1.75e-6), where the native (before-fix)
+grad measured 4.1073874308e6 (+1.93%) in the same worktree. delta_m
+functional sum(delta_m[:,-1]^2): grad(stable) vs jvp relgap 2.654e-6
+(criterion <1e-5; native before-fix gap 4.146e-3). jvp arms reproduce the
+issue #30 oracle values (-7.9674839484e10; EPT jvp-vs-truth +2.2e-6).
+test_pk_forward_mode passed on GPU (mutual AD agreement <=6.2e-4, FD
+<=0.064%); fast suite: only the known pre-existing rosenbrock-vs-kvaerno5
+failure, no regressions.
 
 ### Aug 25, 2026: Fix a real tracer leak in the scalar PID controller (`UnexpectedTracerError`)
 
