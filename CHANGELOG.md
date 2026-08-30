@@ -8,6 +8,56 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Aug 29, 2026: Reverse-mode-stable fused bg+thermo solve (issue #30, "vjp-through-jvp")
+
+**`jax.grad` through `thermodynamics_solve` carried a ~2% h-gradient error from
+catastrophic FP cancellation in the recombination-era backward pass; forward
+mode is exact.** The Peebles/RECFAST Boltzmann-exponential ratios push AD
+intermediates to ~1e13; reverse mode contracts thousands of ±1e13-scale
+cotangent terms into shared scalars whose true total is ~1e-3 (or 0), leaving
+exact-ULP residue (measured: xe.y reverse "derivative" = 2^-9 exactly;
+thermo-chain reverse 8.66e7 vs true 1.16e5, 749x; end-to-end
+d(sum(pk_mm_real))/dh = 4.107e6 vs truth 4.0296e6).
+
+**Fix (issue #30 option 2).** New fused entry point
+`clax.thermodynamics.solve_background_and_thermo(params, prec) -> (bg, th)`
+whose only differentiable input is `CosmoParams`, wrapped in `jax.custom_vjp`
+and gated by the new static `PrecisionParams.th_grad_mode` flag
+(`"stable"` default | `"native"`, mirroring the `ode_adjoint` precedent).
+The stable backward computes the params cotangent for BOTH outputs as
+`(J^T ct)_i = <ct, J e_i>` via one batched `jax.jacfwd` basis over the ~20
+traced `CosmoParams` leaves — mathematically identical arithmetic, contraction
+re-associated into the proven-exact forward order; no approximation, no fudge
+factors. Inside the basis `ode_adjoint="direct"` is forced (diffrax's
+`RecursiveCheckpointAdjoint` is an `eqx.filter_custom_vjp` and blocks jvp)
+without changing caller-visible prec semantics. `clax.compute`,
+`clax.compute_pk_table`/`compute_pk_interpolator`, and `clax.compute_pk` route
+through the fused solve; `background_solve`/`thermodynamics_solve` public APIs
+are unchanged, and `clax.shooting` stays on its own custom_jvp path (its inner
+solves are closed over by an implicit-diff rule; not an acceptance path).
+
+**Caveat.** `jax.custom_vjp` blocks `jax.jvp`: forward-mode users must set
+`th_grad_mode="native"` (`tests/test_pk_forward_mode.py` now does; its
+"clax has zero custom_vjp rules" note is updated). ADR:
+`docs/adr/0001-thermo-reverse-mode-vjp-through-jvp.md`.
+
+**Verified (CPU, login node).** grad(stable) vs jvp: 1.2e-16..8.1e-15 rel
+across {sum(xe^2), random-linear, sum(g^2)} x {h, omega_b}, where native
+reverse measured 5.1e-11 up to 5.2e+1 (near-zero-derivative visibility
+functional). New tests: `tests/test_thermo_reverse_composite.py` (contract,
+consistency, routing wiring, and a slow GPU pipeline delta_m test).
+
+**Verified (GPU, V100 jobs 14019+14027, fast_cl(k_max=5, chunk 20), d/dh).**
+EPT functional sum(pk_mm_real): grad(stable) = 4.0295938682e6 vs frozen-FD
+truth 4.029578e6 (+3.9e-6; vs jvp 1.75e-6), where the native (before-fix)
+grad measured 4.1073874308e6 (+1.93%) in the same worktree. delta_m
+functional sum(delta_m[:,-1]^2): grad(stable) vs jvp relgap 2.654e-6
+(criterion <1e-5; native before-fix gap 4.146e-3). jvp arms reproduce the
+issue #30 oracle values (-7.9674839484e10; EPT jvp-vs-truth +2.2e-6).
+test_pk_forward_mode passed on GPU (mutual AD agreement <=6.2e-4, FD
+<=0.064%); fast suite: only the known pre-existing rosenbrock-vs-kvaerno5
+failure, no regressions.
+
 ### Aug 25, 2026: Fix a real tracer leak in the scalar PID controller (`UnexpectedTracerError`)
 
 **The filtered-norm weights were captured in a lambda closure instead of being

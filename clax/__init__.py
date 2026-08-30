@@ -20,7 +20,7 @@ jax.config.update("jax_enable_x64", True)
 from clax.constants import *  # noqa: F401,F403
 from clax.params import CosmoParams, PrecisionParams  # noqa: F401
 from clax.background import background_solve, BackgroundResult, H_of_z, angular_diameter_distance, sound_horizon_drag  # noqa: F401
-from clax.thermodynamics import thermodynamics_solve, ThermoResult  # noqa: F401
+from clax.thermodynamics import thermodynamics_solve, solve_background_and_thermo, ThermoResult  # noqa: F401
 from clax.perturbations import MatterPerturbationResult, PerturbationResult, TensorPerturbationResult, perturbations_solve, perturbations_solve_mpk, tensor_perturbations_solve  # noqa: F401
 from clax.primordial import primordial_scalar_pk, primordial_tensor_pk  # noqa: F401
 from clax.harmonic import compute_cl_bb, compute_cl_tt, compute_cl_ee, compute_cl_te, compute_cls_all, compute_cls_all_fast  # noqa: F401
@@ -218,8 +218,9 @@ def compute(
     Returns:
         ComputeResult with background and thermodynamics results
     """
-    bg = background_solve(params, prec)
-    th = thermodynamics_solve(params, prec, bg)
+    # Fused solve: reverse-mode-stable AD when prec.th_grad_mode=="stable"
+    # (issue #30); bitwise the old two-call path when "native".
+    bg, th = solve_background_and_thermo(params, prec)
     return ComputeResult(bg=bg, th=th)
 
 
@@ -265,8 +266,9 @@ def compute_pk_table(
         requested ``k`` grid and ``P(k, z)`` values.
     """
     solve_prec = _resolve_pk_precision(prec, k_eval=k_eval, kmax=kmax)
-    bg = background_solve(params, solve_prec)
-    th = thermodynamics_solve(params, solve_prec, bg)
+    # Fused solve: reverse-mode-stable AD when prec.th_grad_mode=="stable"
+    # (issue #30); bitwise the old two-call path when "native".
+    bg, th = solve_background_and_thermo(params, solve_prec)
     pt = perturbations_solve_mpk(
         params,
         solve_prec,
@@ -367,8 +369,9 @@ def compute_pk(
         _resolve_scalar_pid_config,
     )
 
-    bg = background_solve(params, prec)
-    th = thermodynamics_solve(params, prec, bg)
+    # Fused solve: reverse-mode-stable AD when prec.th_grad_mode=="stable"
+    # (issue #30); bitwise the old two-call path when "native".
+    bg, th = solve_background_and_thermo(params, prec)
 
     pid_config = _resolve_scalar_pid_config(
         pt_pid_pcoeff=pt_pid_pcoeff,

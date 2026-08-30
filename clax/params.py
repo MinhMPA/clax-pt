@@ -146,6 +146,18 @@ class PrecisionParams:
     th_z_max: float = 5e4           # max redshift for recombination
     th_n_points: int = 20000        # number of z grid points
     th_tol: float = 1e-5            # ODE tolerance
+    # Reverse-mode AD rule for the fused background+thermodynamics solve
+    # (clax.thermodynamics.solve_background_and_thermo), issue #30:
+    #   "stable" — jax.custom_vjp whose backward pass computes the params
+    #              cotangent via a batched forward-mode basis (jacfwd over
+    #              the CosmoParams leaves). Fixes the ~2% h-gradient error
+    #              from catastrophic cancellation in the recombination-era
+    #              native backward pass. Forward-mode (jax.jvp) through the
+    #              fused solve is BLOCKED in this mode (custom_vjp caveat).
+    #   "native" — plain background_solve + thermodynamics_solve calls;
+    #              required for jax.jvp/jacfwd through the fused solve.
+    # Mirrors the ode_adjoint precedent below (static string flag).
+    th_grad_mode: str = "stable"    # or "native"
 
     # Perturbations
     pt_k_min: float = 1e-5          # Mpc^-1
