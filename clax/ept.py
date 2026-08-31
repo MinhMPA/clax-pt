@@ -1453,7 +1453,7 @@ def compute_ept(
     pk_lin_h: Float[Array, "Nk"],
     k_h: Float[Array, "Nk"],
     h: float | Float[Array, ""],
-    f: float,
+    f: float | Float[Array, ""],
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     _ir_precomputed: Optional[tuple] = None,
     rs_h: float = 99.0,
@@ -2084,8 +2084,13 @@ def compute_ept_from_clax(
     # Convert to h-units: P_h = P * h³,  k_h = k / h
     pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³ — h is JAX-traced here for d(pk_h)/d(h)
 
-    # Growth rate f ≈ Ω_m(z)^0.55 (approximation; improve later)
-    f = float(jax.lax.stop_gradient(bg.Omega_m_of_z(z))) ** 0.55 if hasattr(bg, "Omega_m_of_z") else 0.8
+    # Growth rate from the background solve (f = dlnD/dlna spline),
+    # z-consistent and differentiable. The previous expression
+    # `float(sg(bg.Omega_m_of_z(z)))**0.55 if hasattr(...) else 0.8`
+    # ALWAYS took the fallback (BackgroundResult has no Omega_m_of_z):
+    # every multipole was computed with the literal f = 0.8 regardless
+    # of cosmology or redshift. cf. background.py:681 (f_of_loga).
+    f = bg.f_of_loga.evaluate(jnp.log(1.0 / (1.0 + z)))
 
     # Pre-compute IR resummation with a concrete (stop_gradient) snapshot of pk_h so
     # that compute_ept uses the _ir_precomputed path. In that path:
