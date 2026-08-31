@@ -79,3 +79,25 @@ def test_k_grid_chebyshev_type():
         [float(k_log[0]), float(k_log[-1])], rtol=1e-12)  # same endpoints
     np.testing.assert_array_equal(np.asarray(_k_grid(prec_log)),
                                   np.asarray(k_log))      # default unchanged
+
+
+def test_source_interp_chebyshev_matches_spline_on_smooth():
+    from clax.harmonic import _interp_sources_to_fine_k
+    lk_ch = jnp.asarray(chebyshev_lobatto_nodes(np.log(1e-4), np.log(0.5), 80))
+    lk_fine = jnp.linspace(lk_ch[0], lk_ch[-1], 2000)
+    tau = jnp.linspace(0.0, 1.0, 7)
+    # smooth BAO-like source: slow envelope + 0.02 Mpc^-1-scale ripple
+    src = (jnp.exp(-0.5 * lk_ch[:, None] ** 2)
+           * (1.0 + 0.05 * jnp.sin(jnp.exp(lk_ch)[:, None] / 0.02))
+           * (1.0 + tau[None, :]))
+    out_ch = _interp_sources_to_fine_k([src], lk_ch, lk_fine,
+                                       method="chebyshev")[0]
+    out_sp = _interp_sources_to_fine_k([src], lk_ch, lk_fine,
+                                       method="spline")[0]
+    ref = (jnp.exp(-0.5 * lk_fine[:, None] ** 2)
+           * (1.0 + 0.05 * jnp.sin(jnp.exp(lk_fine)[:, None] / 0.02))
+           * (1.0 + tau[None, :]))
+    err_ch = float(jnp.max(jnp.abs(out_ch - ref)))
+    err_sp = float(jnp.max(jnp.abs(out_sp - ref)))
+    assert err_ch <= err_sp * 1.5, (err_ch, err_sp)   # at worst comparable
+    assert err_ch < 1e-6                              # spectrally small
