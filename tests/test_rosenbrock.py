@@ -360,3 +360,43 @@ class TestRodas5Batched:
             assert rel_err < 1e-5, (
                 f"Rodas5Batched saveat mode {i}: rel err {rel_err:.3e}"
             )
+
+    def test_ad_parameter_gradient_batched(self):
+        """Reverse-mode through Rodas5Batched on a smooth batched RHS."""
+        import diffrax
+        from clax.rosenbrock import Rodas5Batched
+
+        def f_single(t, y, lam):
+            return -lam * y
+
+        def loss(lam):
+            lams = jnp.array([lam, 2.0 * lam])
+            y0 = jnp.ones((2, 1))
+
+            # Rodas5Batched.step unpacks `f, _args = args` and always calls
+            # `terms.vf(..., args=_args)` with just the per-mode array (cf.
+            # the class docstring's args convention and the vf_batched
+            # helpers in the other tests in this file); but diffrax's own
+            # internal `_check` sanity pass calls `term.vf` once with the
+            # full `(f_single, lams)` tuple before stepping begins. Guard
+            # for both, matching the vf_batched pattern used elsewhere in
+            # this file. (Brief snippet used `args[1]` unconditionally,
+            # which breaks once `args` is already `lams`.)
+            def vf_batched(t, y, args):
+                if isinstance(args, tuple) and len(args) == 2:
+                    return jax.tree_util.tree_map(jnp.zeros_like, y)
+                return jax.vmap(f_single, in_axes=(None, 0, 0))(t, y, args)
+
+            term = diffrax.ODETerm(vf_batched)
+            sol = diffrax.diffeqsolve(
+                term, Rodas5Batched(), t0=0.0, t1=1.0, dt0=0.01, y0=y0,
+                args=(f_single, lams),
+                stepsize_controller=diffrax.PIDController(rtol=1e-6, atol=1e-9),
+                adjoint=diffrax.RecursiveCheckpointAdjoint(), max_steps=4096)
+            return jnp.sum(sol.ys ** 2)
+
+        g = jax.grad(loss)(0.7)
+        # d/dlam of exp(-2*lam) + exp(-4*lam) at t1=1 (y0=1 per mode)
+        expected = -2.0 * jnp.exp(-2 * 0.7) - 4.0 * jnp.exp(-4 * 0.7)
+        assert jnp.isfinite(g)
+        assert abs(float(g) - float(expected)) / abs(float(expected)) < 1e-3

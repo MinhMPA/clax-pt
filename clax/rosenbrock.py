@@ -279,35 +279,44 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         n = y0[0].shape[0]  # state dimension from first batch element
         dt = terms.contr(t0, t1)
 
-        # Pre-compute scaled coupling coefficients
-        dtC21 = _R5_C21 / dt
-        dtC31 = _R5_C31 / dt
-        dtC32 = _R5_C32 / dt
-        dtC41 = _R5_C41 / dt
-        dtC42 = _R5_C42 / dt
-        dtC43 = _R5_C43 / dt
-        dtC51 = _R5_C51 / dt
-        dtC52 = _R5_C52 / dt
-        dtC53 = _R5_C53 / dt
-        dtC54 = _R5_C54 / dt
-        dtC61 = _R5_C61 / dt
-        dtC62 = _R5_C62 / dt
-        dtC63 = _R5_C63 / dt
-        dtC64 = _R5_C64 / dt
-        dtC65 = _R5_C65 / dt
-        dtC71 = _R5_C71 / dt
-        dtC72 = _R5_C72 / dt
-        dtC73 = _R5_C73 / dt
-        dtC74 = _R5_C74 / dt
-        dtC75 = _R5_C75 / dt
-        dtC76 = _R5_C76 / dt
-        dtC81 = _R5_C81 / dt
-        dtC82 = _R5_C82 / dt
-        dtC83 = _R5_C83 / dt
-        dtC84 = _R5_C84 / dt
-        dtC85 = _R5_C85 / dt
-        dtC86 = _R5_C86 / dt
-        dtC87 = _R5_C87 / dt
+        # Pre-compute scaled coupling coefficients.
+        # Algebraic identity with the original W = I/(dt*gamma) - J:
+        #   W k = rhs  <=>  (I - dt*gamma*J) k = dt*gamma * rhs
+        # so each C_ij/dt coupling becomes gamma*C_ij (dt-independent, still
+        # hoisted once outside the stages) and each dt*D_i*dT term below
+        # moves inside a dtgamma*(...) factor together with its stage's f
+        # evaluation. Removes every division by dt: a rejected trial step
+        # with dt ~ 0 gives W' ~ I (well conditioned) instead of
+        # manufacturing inf that diffrax's accept/reject where then leaks
+        # into reverse-mode cotangents (issue #30, item 5).
+        gC21 = _R5_GAMMA * _R5_C21
+        gC31 = _R5_GAMMA * _R5_C31
+        gC32 = _R5_GAMMA * _R5_C32
+        gC41 = _R5_GAMMA * _R5_C41
+        gC42 = _R5_GAMMA * _R5_C42
+        gC43 = _R5_GAMMA * _R5_C43
+        gC51 = _R5_GAMMA * _R5_C51
+        gC52 = _R5_GAMMA * _R5_C52
+        gC53 = _R5_GAMMA * _R5_C53
+        gC54 = _R5_GAMMA * _R5_C54
+        gC61 = _R5_GAMMA * _R5_C61
+        gC62 = _R5_GAMMA * _R5_C62
+        gC63 = _R5_GAMMA * _R5_C63
+        gC64 = _R5_GAMMA * _R5_C64
+        gC65 = _R5_GAMMA * _R5_C65
+        gC71 = _R5_GAMMA * _R5_C71
+        gC72 = _R5_GAMMA * _R5_C72
+        gC73 = _R5_GAMMA * _R5_C73
+        gC74 = _R5_GAMMA * _R5_C74
+        gC75 = _R5_GAMMA * _R5_C75
+        gC76 = _R5_GAMMA * _R5_C76
+        gC81 = _R5_GAMMA * _R5_C81
+        gC82 = _R5_GAMMA * _R5_C82
+        gC83 = _R5_GAMMA * _R5_C83
+        gC84 = _R5_GAMMA * _R5_C84
+        gC85 = _R5_GAMMA * _R5_C85
+        gC86 = _R5_GAMMA * _R5_C86
+        gC87 = _R5_GAMMA * _R5_C87
 
         dtd1 = dt * _R5_D1
         dtd2 = dt * _R5_D2
@@ -326,7 +335,7 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         jac_f_batched = jax.vmap(jac_f, in_axes=(None, 0, 0))
 
         lu_batched = jax.vmap(
-            lambda a: jla.lu_factor(I / dtgamma - a))
+            lambda a: jla.lu_factor(I - dtgamma * a))
 
         dT = dt_f_batched(t0, y0, _args)           # (batch, n)
         jac_blocks = jac_f_batched(t0, y0, _args)   # (batch, n, n)
@@ -338,55 +347,55 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         # -- 8 Rosenbrock stages (transformed W-formulation) --
         # Stage 1
         dy1 = terms.vf(t=t0, y=y0, args=_args)
-        rhs = dy1 + dtd1 * dT
+        rhs = dtgamma * (dy1 + dtd1 * dT)
         k1 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 2
         u = y0 + _R5_A21 * k1
         du = terms.vf(t=t0 + _R5_C2 * dt, y=u, args=_args)
-        rhs = du + dtd2 * dT + dtC21 * k1
+        rhs = dtgamma * (du + dtd2 * dT) + gC21 * k1
         k2 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 3
         u = y0 + _R5_A31 * k1 + _R5_A32 * k2
         du = terms.vf(t=t0 + _R5_C3 * dt, y=u, args=_args)
-        rhs = du + dtd3 * dT + (dtC31 * k1 + dtC32 * k2)
+        rhs = dtgamma * (du + dtd3 * dT) + (gC31 * k1 + gC32 * k2)
         k3 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 4
         u = y0 + _R5_A41 * k1 + _R5_A42 * k2 + _R5_A43 * k3
         du = terms.vf(t=t0 + _R5_C4 * dt, y=u, args=_args)
-        rhs = du + dtd4 * dT + (dtC41 * k1 + dtC42 * k2 + dtC43 * k3)
+        rhs = dtgamma * (du + dtd4 * dT) + (gC41 * k1 + gC42 * k2 + gC43 * k3)
         k4 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 5
         u = y0 + _R5_A51 * k1 + _R5_A52 * k2 + _R5_A53 * k3 + _R5_A54 * k4
         du = terms.vf(t=t0 + _R5_C5 * dt, y=u, args=_args)
-        rhs = du + dtd5 * dT + (dtC51 * k1 + dtC52 * k2
-                                + dtC53 * k3 + dtC54 * k4)
+        rhs = dtgamma * (du + dtd5 * dT) + (gC51 * k1 + gC52 * k2
+                                             + gC53 * k3 + gC54 * k4)
         k5 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 6 (at t0 + dt)
         u = (y0 + _R5_A61 * k1 + _R5_A62 * k2 + _R5_A63 * k3
              + _R5_A64 * k4 + _R5_A65 * k5)
         du = terms.vf(t=t0 + dt, y=u, args=_args)
-        rhs = du + (dtC61 * k1 + dtC62 * k2 + dtC63 * k3
-                    + dtC64 * k4 + dtC65 * k5)
+        rhs = dtgamma * du + (gC61 * k1 + gC62 * k2 + gC63 * k3
+                               + gC64 * k4 + gC65 * k5)
         k6 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 7 (accumulating)
         u = u + k6
         du = terms.vf(t=t0 + dt, y=u, args=_args)
-        rhs = du + (dtC71 * k1 + dtC72 * k2 + dtC73 * k3
-                    + dtC74 * k4 + dtC75 * k5 + dtC76 * k6)
+        rhs = dtgamma * du + (gC71 * k1 + gC72 * k2 + gC73 * k3
+                               + gC74 * k4 + gC75 * k5 + gC76 * k6)
         k7 = lu_solve_batched(lu_and_piv, rhs)
 
         # Stage 8 (error estimate stage)
         u = u + k7
         du = terms.vf(t=t0 + dt, y=u, args=_args)
-        rhs = du + (dtC81 * k1 + dtC82 * k2 + dtC83 * k3
-                    + dtC84 * k4 + dtC85 * k5 + dtC86 * k6
-                    + dtC87 * k7)
+        rhs = dtgamma * du + (gC81 * k1 + gC82 * k2 + gC83 * k3
+                               + gC84 * k4 + gC85 * k5 + gC86 * k6
+                               + gC87 * k7)
         k8 = lu_solve_batched(lu_and_piv, rhs)
 
         # Solution and error estimate
