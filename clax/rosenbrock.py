@@ -9,12 +9,19 @@ For the Einstein-Boltzmann system (~60-150 equations), this is ~3-5x
 faster per step than implicit ESDIRK methods (Kvaerno5) which need
 iterative Newton convergence.
 
-Mathematical formulation (transformed W-form):
-    W = I/(h*gamma) - J,  where J = df/dy
+Mathematical formulation (division-free transformed W-form):
+    W' = I - h*gamma*J,  where J = df/dy
     For each stage i:
-        W * k_i = f(t + c_i*h, y + sum_j a_{ij}*k_j) + h*d_i*dT
-                  + sum_j (C_{ij}/h)*k_j
+        W' * k_i = h*gamma*(f(t + c_i*h, y + sum_j a_{ij}*k_j) + h*d_i*dT)
+                   + gamma * sum_j C_{ij}*k_j
     y_{n+1} = y_n + sum_i b_i * k_i
+
+    This is the original W = I/(h*gamma) - J formulation with both sides of
+    each stage equation multiplied through by h*gamma, so no division by h
+    (the trial step size) ever appears: a rejected trial step with h -> 0
+    gives W' -> I (well conditioned) instead of manufacturing inf, which
+    otherwise leaks into reverse-mode cotangents via diffrax's accept/reject
+    `where` (issue #30, item 5).
 
 References:
     Rodas5: Di Marzo (1993), "RODAS5(4) - Méthodes de Rosenbrock d'ordre 5(4)"
@@ -107,8 +114,8 @@ def _lu_solve(lu_piv, b):
 class Rodas5(AbstractAdaptiveSolver):
     """8-stage Rosenbrock method of order 5(4) (Di Marzo 1993).
 
-    Uses the transformed W-formulation where:
-        W = I/(h*gamma) - J
+    Uses the division-free transformed W-formulation where:
+        W' = I - h*gamma*J
     and the error estimate is simply k_8 (the last stage).
 
     This is the method used by DISCO-EB for the Einstein-Boltzmann system.
