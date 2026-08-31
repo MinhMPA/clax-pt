@@ -62,3 +62,20 @@ def test_pytree_roundtrip_and_grad():
     g = jax.grad(lambda t: interp2.evaluate(t))(0.37)
     assert jnp.isfinite(g)
     assert abs(float(g) - float(jnp.cos(0.37))) < 1e-6
+
+
+def test_k_grid_chebyshev_type():
+    from dataclasses import replace as dc_replace
+    from clax import PrecisionParams
+    from clax.perturbations import _k_grid
+
+    prec_log = PrecisionParams.fast_cl()
+    prec_ch = dc_replace(prec_log, pt_k_grid_type="chebyshev")
+    k_log, k_ch = _k_grid(prec_log), _k_grid(prec_ch)
+    assert k_ch.shape == k_log.shape                     # same n_k formula
+    assert np.all(np.diff(np.asarray(k_ch)) > 0)
+    np.testing.assert_allclose(
+        [float(k_ch[0]), float(k_ch[-1])],
+        [float(k_log[0]), float(k_log[-1])], rtol=1e-12)  # same endpoints
+    np.testing.assert_array_equal(np.asarray(_k_grid(prec_log)),
+                                  np.asarray(k_log))      # default unchanged
