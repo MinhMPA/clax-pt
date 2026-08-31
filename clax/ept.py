@@ -2008,6 +2008,23 @@ def compute_ept_from_clax(
 
     Returns:
         EPTComponents in h-units
+
+    Note (stop_gradient rationale): `h` is traced throughout, including the
+    k_mpc = k_h * h resampling of delta_m/the primordial spectrum onto the
+    EPT k-grid, so d(pk_h)/dh carries the k-resampling channel exactly as
+    finite differences do (issue #30 item 4; previously frozen at -9.48e4
+    of the stage h-gradient, GPU job 13313). Three channels remain
+    deliberately frozen via stop_gradient:
+      - the numpy IR-resummation input (`_ir_resummation_numpy` runs on a
+        stop_gradient snapshot of pk_h; its DST grid is built from
+        np.linspace(7e-5/h, 7/h, ...) at a concrete h) -- required because
+        that routine is plain NumPy/scipy, not JAX;
+      - the rs_h (sound-horizon) channel feeding compute_ept, measured
+        negligible at -1.0e2 of the stage h-gradient (job 13313);
+      - pk_nw, the no-wiggle broadband split inside the IR precompute,
+        which structurally drops d(pk_nw)/d(pk_lin_h) -- the documented
+        1.39% ln10A_s-class residual (job 13132; see
+        tests/test_ept_gradients.py::test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd).
     """
     from clax.transfer import compute_pk_from_perturbations
     from clax.primordial import primordial_scalar_pk
@@ -2015,23 +2032,23 @@ def compute_ept_from_clax(
 
     from clax.background import sound_horizon_drag
 
-    h = params.h  # JAX scalar — keep traced so d(pk_h)/d(h) flows through h³ factor
-    # Concrete scalar for numpy IR resummation and compute_ept's h argument.
-    # stop_gradient is safe: rs_h and h_conc only enter damping/unit conversions,
-    # not the loop integrals that carry the gradient.
+    h = params.h  # traced: carries d(pk_h)/dh AND the k-resampling channel
+    # Concrete copies EXIST ONLY for the numpy IR-resummation call below,
+    # whose DST grid endpoints are 7e-5/h .. 7/h feeding np.linspace
+    # (must stay concrete). Do NOT reuse them anywhere else: reusing
+    # h_conc for k_mpc was the frozen resampling channel measured at
+    # -9.48e4 of the stage h-gradient (GPU job 13313, issue #30 item 4).
     h_conc = float(jax.lax.stop_gradient(h))
-    # Cosmology-consistent BAO sound horizon for IR resummation. Convention:
-    # rs_h := r_s_drag * h, in Mpc (matches CLASS-PT pth->rs_d * h numerically;
-    # see nonlinear_pt.c:5637 qint2 * rbao = k_h * rs_h_value).
     rs_h_value = float(jax.lax.stop_gradient(sound_horizon_drag(params))) * h_conc
 
-    # EPT k-grid in h/Mpc → convert to Mpc⁻¹ for clax
-    k_h = ept_kgrid(prec)  # h/Mpc, static numpy array
-    k_mpc = k_h * h_conc   # Mpc⁻¹; h_conc keeps k_mpc a plain numpy array
+    # EPT k-grid in h/Mpc (static shape source) -> Mpc^-1, TRACED in h so
+    # the delta_m/primordial sampling points move with h under AD exactly
+    # as they do under finite differences.
+    k_h = ept_kgrid(prec)              # static numpy array
+    k_mpc = jnp.asarray(k_h) * h       # traced jnp array
 
     # Get δ_m at each k, at redshift z, from perturbation result
     # Then P_lin(k) = 2π²/k³ × A_s × (k/k_pivot)^{n_s-1} × δ_m²
-    A_s = jnp.exp(params.ln10A_s) * 1e-10
     lnk_pt  = jnp.log(pt.k_grid)
     lnk_out = jnp.log(jnp.array(k_mpc))
 
@@ -2068,6 +2085,9 @@ def compute_ept_from_clax(
     ir_pre = _ir_resummation_numpy(
         np.array(jax.lax.stop_gradient(pk_h)), k_h, rs_h=rs_h_value, h=h_conc,
     )
-
-    return compute_ept(pk_h, jnp.array(k_h), h=h_conc, f=f, prec=prec,
+    # h/rs_h are dead arguments on the _ir_precomputed path (audit
+    # 2026-08-31: h only reaches the pytree record, rs_h only the untaken
+    # numpy branch) -- pass the traced h for the record, keep rs_h at the
+    # concrete value the IR tuple was built with.
+    return compute_ept(pk_h, jnp.array(k_h), h=h, f=f, prec=prec,
                         rs_h=rs_h_value, _ir_precomputed=ir_pre)
