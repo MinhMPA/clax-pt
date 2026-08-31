@@ -101,3 +101,35 @@ def test_source_interp_chebyshev_matches_spline_on_smooth():
     err_sp = float(jnp.max(jnp.abs(out_sp - ref)))
     assert err_ch <= err_sp * 1.5, (err_ch, err_sp)   # at worst comparable
     assert err_ch < 1e-6                              # spectrally small
+
+
+@pytest.mark.slow
+def test_cls_chebyshev_path_matches_spline_path(fast_mode):
+    """Full pipeline: chebyshev k-solve + barycentric interp vs the
+    default log-solve + spline interp, both at fast_cl density. Two
+    independent discretizations of the same integral; at matched density
+    they must agree well under the benchmark's 0.5% gate."""
+    if fast_mode:
+        pytest.skip("two perturbation solves")
+    from dataclasses import replace as dc_replace
+    from clax import CosmoParams, PrecisionParams
+    from clax.background import background_solve
+    from clax.thermodynamics import thermodynamics_solve
+    from clax.perturbations import perturbations_solve
+    from clax.harmonic import compute_cls_all_fast
+
+    params = CosmoParams()
+    results = {}
+    for name, prec, kw in [
+        ("log", PrecisionParams.fast_cl(), {}),
+        ("cheb", dc_replace(PrecisionParams.fast_cl(),
+                            pt_k_grid_type="chebyshev"),
+         {"k_interp_method": "chebyshev"}),
+    ]:
+        bg = background_solve(params, prec)
+        th = thermodynamics_solve(params, prec, bg)
+        pt = perturbations_solve(params, prec, bg, th)
+        results[name] = compute_cls_all_fast(pt, params, bg, l_max=600, **kw)
+    for l in (20, 100, 500):
+        r = float(results["cheb"]["tt"][l] / results["log"]["tt"][l])
+        assert abs(r - 1.0) < 0.005, f"TT l={l}: cheb/log ratio {r}"
