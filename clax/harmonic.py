@@ -408,6 +408,16 @@ def compute_cl_te(
 # Source-interpolated C_l (robust against oscillatory T_l(k))
 # ---------------------------------------------------------------------------
 
+
+def _fine_log_k_grid(log_k_coarse, n_k_fine):
+    """The dense log-uniform evaluation grid for the C_l k-integral.
+    Single definition for the four former inline copies. The integration
+    grid deliberately stays log-uniform + trapezoid: T_l(k) is
+    oscillatory, and density -- not spacing -- controls its integral
+    (CHANGELOG.md:2142-2163)."""
+    return jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+
+
 @jax.jit
 def _interp_single_source(src, log_k_coarse, log_k_fine):
     """Interpolate a single source array from coarse to fine k-grid (JIT-cached).
@@ -468,7 +478,7 @@ def compute_cl_tt_interp(
 
     # Fine k-grid
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     # Interpolate sources to fine grid
@@ -515,7 +525,7 @@ def compute_cl_ee_interp(
 ):
     """Compute C_l^EE with source interpolation to a fine k-grid."""
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     fine_sources = _interp_sources_to_fine_k([pt.source_E], log_k_coarse, log_k_fine)
@@ -549,7 +559,7 @@ def compute_cl_te_interp(
         tt_mode = _DEFAULT_TT_MODE
 
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     # Interpolate all needed sources
@@ -721,7 +731,7 @@ def compute_cls_all_fast(
     """
     # 1. Source interpolation to fine k-grid
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     fine_sources = _interp_sources_to_fine_k(
