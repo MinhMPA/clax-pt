@@ -144,64 +144,82 @@ class Rodas5(AbstractAdaptiveSolver):
         J = jax.jacfwd(lambda y: f(t0, y))(y0)
         dT = jax.jacfwd(lambda t: f(t, y0))(t0)
 
-        # -- Form W = I/(dt*gamma) - J and LU factorize --
+        # -- Form W' = I - dt*gamma*J and LU factorize --
+        # Algebraic identity with the original W = I/(dt*gamma) - J:
+        #   W k = rhs  <=>  (I - dt*gamma*J) k = dt*gamma * rhs
+        # so each C_ij/dt coupling becomes gamma*C_ij and each dt*D_i*dT
+        # becomes dt^2*gamma*D_i*dT. Removes every division by dt: a
+        # rejected trial step with dt ~ 0 gives W' ~ I (well conditioned)
+        # instead of manufacturing inf that diffrax's accept/reject where
+        # then leaks into reverse-mode cotangents (issue #30, item 5).
         dtgamma = dt * _R5_GAMMA
-        W = jnp.eye(n) / dtgamma - J
+        W = jnp.eye(n) - dtgamma * J
         lu_piv = jla.lu_factor(W)
 
         # -- Stage 1 --
-        rhs1 = f0 + dt * _R5_D1 * dT
-        k1 = _lu_solve(lu_piv, rhs1)
+        k1 = _lu_solve(lu_piv, dtgamma * (f0 + dt * _R5_D1 * dT))
 
         # -- Stage 2 --
         u2 = y0 + _R5_A21 * k1
-        rhs2 = f(t0 + _R5_C2 * dt, u2) + dt * _R5_D2 * dT + _R5_C21 / dt * k1
-        k2 = _lu_solve(lu_piv, rhs2)
+        k2 = _lu_solve(
+            lu_piv,
+            dtgamma * (f(t0 + _R5_C2 * dt, u2) + dt * _R5_D2 * dT)
+            + _R5_GAMMA * _R5_C21 * k1,
+        )
 
         # -- Stage 3 --
         u3 = y0 + _R5_A31 * k1 + _R5_A32 * k2
-        rhs3 = (f(t0 + _R5_C3 * dt, u3) + dt * _R5_D3 * dT
-                + _R5_C31 / dt * k1 + _R5_C32 / dt * k2)
-        k3 = _lu_solve(lu_piv, rhs3)
+        k3 = _lu_solve(
+            lu_piv,
+            dtgamma * (f(t0 + _R5_C3 * dt, u3) + dt * _R5_D3 * dT)
+            + _R5_GAMMA * (_R5_C31 * k1 + _R5_C32 * k2),
+        )
 
         # -- Stage 4 --
         u4 = y0 + _R5_A41 * k1 + _R5_A42 * k2 + _R5_A43 * k3
-        rhs4 = (f(t0 + _R5_C4 * dt, u4) + dt * _R5_D4 * dT
-                + _R5_C41 / dt * k1 + _R5_C42 / dt * k2 + _R5_C43 / dt * k3)
-        k4 = _lu_solve(lu_piv, rhs4)
+        k4 = _lu_solve(
+            lu_piv,
+            dtgamma * (f(t0 + _R5_C4 * dt, u4) + dt * _R5_D4 * dT)
+            + _R5_GAMMA * (_R5_C41 * k1 + _R5_C42 * k2 + _R5_C43 * k3),
+        )
 
         # -- Stage 5 --
         u5 = y0 + _R5_A51 * k1 + _R5_A52 * k2 + _R5_A53 * k3 + _R5_A54 * k4
-        rhs5 = (f(t0 + _R5_C5 * dt, u5) + dt * _R5_D5 * dT
-                + _R5_C51 / dt * k1 + _R5_C52 / dt * k2
-                + _R5_C53 / dt * k3 + _R5_C54 / dt * k4)
-        k5 = _lu_solve(lu_piv, rhs5)
+        k5 = _lu_solve(
+            lu_piv,
+            dtgamma * (f(t0 + _R5_C5 * dt, u5) + dt * _R5_D5 * dT)
+            + _R5_GAMMA * (_R5_C51 * k1 + _R5_C52 * k2
+                           + _R5_C53 * k3 + _R5_C54 * k4),
+        )
 
         # -- Stage 6 (at t0 + dt) --
         u6 = (y0 + _R5_A61 * k1 + _R5_A62 * k2 + _R5_A63 * k3
               + _R5_A64 * k4 + _R5_A65 * k5)
-        rhs6 = (f(t0 + dt, u6)
-                + _R5_C61 / dt * k1 + _R5_C62 / dt * k2
-                + _R5_C63 / dt * k3 + _R5_C64 / dt * k4
-                + _R5_C65 / dt * k5)
-        k6 = _lu_solve(lu_piv, rhs6)
+        k6 = _lu_solve(
+            lu_piv,
+            dtgamma * f(t0 + dt, u6)
+            + _R5_GAMMA * (_R5_C61 * k1 + _R5_C62 * k2 + _R5_C63 * k3
+                           + _R5_C64 * k4 + _R5_C65 * k5),
+        )
 
         # -- Stage 7 (at t0 + dt, accumulating) --
         u7 = u6 + k6
-        rhs7 = (f(t0 + dt, u7)
-                + _R5_C71 / dt * k1 + _R5_C72 / dt * k2
-                + _R5_C73 / dt * k3 + _R5_C74 / dt * k4
-                + _R5_C75 / dt * k5 + _R5_C76 / dt * k6)
-        k7 = _lu_solve(lu_piv, rhs7)
+        k7 = _lu_solve(
+            lu_piv,
+            dtgamma * f(t0 + dt, u7)
+            + _R5_GAMMA * (_R5_C71 * k1 + _R5_C72 * k2 + _R5_C73 * k3
+                           + _R5_C74 * k4 + _R5_C75 * k5 + _R5_C76 * k6),
+        )
 
         # -- Stage 8 (at t0 + dt, accumulating — error stage) --
         u8 = u7 + k7
-        rhs8 = (f(t0 + dt, u8)
-                + _R5_C81 / dt * k1 + _R5_C82 / dt * k2
-                + _R5_C83 / dt * k3 + _R5_C84 / dt * k4
-                + _R5_C85 / dt * k5 + _R5_C86 / dt * k6
-                + _R5_C87 / dt * k7)
-        k8 = _lu_solve(lu_piv, rhs8)
+        k8 = _lu_solve(
+            lu_piv,
+            dtgamma * f(t0 + dt, u8)
+            + _R5_GAMMA * (_R5_C81 * k1 + _R5_C82 * k2 + _R5_C83 * k3
+                           + _R5_C84 * k4 + _R5_C85 * k5 + _R5_C86 * k6
+                           + _R5_C87 * k7),
+        )
 
         # -- Solution and error --
         y1 = u8 + k8
