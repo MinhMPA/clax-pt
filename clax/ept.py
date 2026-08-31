@@ -2019,8 +2019,11 @@ def compute_ept_from_clax(
         stop_gradient snapshot of pk_h; its DST grid is built from
         np.linspace(7e-5/h, 7/h, ...) at a concrete h) -- required because
         that routine is plain NumPy/scipy, not JAX;
-      - the rs_h (sound-horizon) channel feeding compute_ept, measured
-        negligible at -1.0e2 of the stage h-gradient (job 13313);
+      - the rs_h (sound-horizon) channel feeding compute_ept: job 13313
+        measured rs_h together with f and the then-frozen h argument at
+        -1.0e2 of the stage h-gradient, bounding the rs_h channel below
+        that; tracing it would require reimplementing the Sigma^2_BAO
+        integral in jnp;
       - pk_nw, the no-wiggle broadband split inside the IR precompute,
         which structurally drops d(pk_nw)/d(pk_lin_h) -- the documented
         1.39% ln10A_s-class residual (job 13132; see
