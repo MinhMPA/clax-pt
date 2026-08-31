@@ -222,8 +222,8 @@ class EPTComponents:
 
     # k-grid in h/Mpc
     kh: Float[Array, "Nk"]         # k values [h/Mpc]
-    h:  float                       # Hubble parameter (for unit conversion)
-    f:  float                       # growth rate d ln D/d ln a
+    h:  Float[Array, ""]            # Hubble parameter (for unit conversion)
+    f:  Float[Array, ""]            # growth rate d ln D/d ln a
 
     # Core matter components
     Pk_tree:  Float[Array, "Nk"]   # P_tree = IR-resummed linear P (index 14)
@@ -290,8 +290,8 @@ class EPTComponents:
     # Anisotropic IR resummation + higher-order RSD (added for Gauss quadrature)
     pk_nw: Float[Array, "Nk"]           # no-wiggle P(k) in (Mpc/h)³
     pk_w:  Float[Array, "Nk"]           # wiggle P(k) = pk_lin - pk_nw
-    sigma2_bao: float                    # isotropic BAO damping Σ²_BAO in (Mpc/h)²
-    delta_sigma2_bao: float              # anisotropic correction δΣ²_BAO in (Mpc/h)²
+    sigma2_bao: Float[Array, ""]         # isotropic BAO damping Σ²_BAO in (Mpc/h)²
+    delta_sigma2_bao: Float[Array, ""]   # anisotropic correction δΣ²_BAO in (Mpc/h)²
     P22_mu6_vv: Float[Array, "Nk"]      # P22 bare mu^6 vv coefficient
     P22_mu6_vd: Float[Array, "Nk"]      # P22 bare mu^6 vd coefficient
     P22_mu8:    Float[Array, "Nk"]      # P22 bare mu^8 coefficient
@@ -317,18 +317,24 @@ class EPTComponents:
             self.P22_mu6_vv, self.P22_mu6_vd, self.P22_mu8, self.P13_mu6,  # 45-48
             self.Pk_2_dd, self.Pk_4_vd, self.Pk_4_dd,          # 49, 50, 51
             # Scalars as leaves (tracer-safety for traced h/f/sigma2_bao/
-            # delta_sigma2_bao): tail order is h, f, sigma2_bao,
-            # delta_sigma2_bao -- see tree_unflatten below.
-            jnp.asarray(self.h), jnp.asarray(self.f),                  # 52, 53
-            jnp.asarray(self.sigma2_bao), jnp.asarray(self.delta_sigma2_bao),  # 54, 55
+            # delta_sigma2_bao): these are the LAST FOUR leaves, in order
+            # h, f, sigma2_bao, delta_sigma2_bao -- see tree_unflatten below.
+            # Emitted bare (no jnp.asarray): the constructor already coerces,
+            # and transforming during flatten breaks eval_shape/vmap-sentinel
+            # round-trips.
+            self.h, self.f, self.sigma2_bao, self.delta_sigma2_bao,
         ]
         aux = None
         return arrays, aux
 
     @classmethod
     def tree_unflatten(cls, aux, arrays):
-        # Tail leaf order matches tree_flatten: h, f, sigma2_bao, delta_sigma2_bao
-        h, f, sigma2_bao, delta_sigma2_bao = arrays[52], arrays[53], arrays[54], arrays[55]
+        # The four scalars are the LAST FOUR leaves, in order h, f,
+        # sigma2_bao, delta_sigma2_bao (matches tree_flatten above).
+        # Negative indexing so the tail stays correct if the array-leaf
+        # count above it changes.
+        h, f, sigma2_bao, delta_sigma2_bao = (
+            arrays[-4], arrays[-3], arrays[-2], arrays[-1])
         return cls(
             kh=arrays[0], h=h, f=f,
             Pk_tree=arrays[1], Pk_loop=arrays[2], Pk_ctr=arrays[3],
@@ -1471,6 +1477,8 @@ def compute_ept(
         h:        Hubble parameter h = H₀/100 (float or scalar jnp array;
                   may be traced -- stored as an EPTComponents pytree leaf)
         f:        growth rate f = d ln D / d ln a at the target redshift
+                  (float or scalar jnp array; may be traced -- stored as an
+                  EPTComponents pytree leaf)
         prec:     EPT precision parameters (static)
         _ir_precomputed: optional tuple (pk_nw_np, pk_w_np, sigma2_bao) from
                   _ir_resummation_numpy(), pre-computed outside the JAX trace.
@@ -2034,7 +2042,13 @@ def compute_ept_from_clax(
       - pk_nw, the no-wiggle broadband split inside the IR precompute,
         which structurally drops d(pk_nw)/d(pk_lin_h) -- the documented
         1.39% ln10A_s-class residual (job 13132; see
-        tests/test_ept_gradients.py::test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd).
+        tests/test_ept_gradients.py::test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd),
+        plus the same frozen split reused by the RSD FFTLog bases downstream:
+        compute_ept's RSD 1-loop quadratic forms are built via
+        _fftlog_decompose on the numpy _ir_precomputed pk_nw/pk_w arrays
+        (~line 1594-1596), so RSD-multipole gradients also carry this
+        frozen-wiggle channel. pk_mm_real is unaffected -- it never reads
+        those FFTLog bases.
     """
     from clax.transfer import compute_pk_from_perturbations
     from clax.primordial import primordial_scalar_pk
@@ -2082,7 +2096,14 @@ def compute_ept_from_clax(
     pk_mpc3 = 2.0 * jnp.pi**2 / k_arr ** 3 * prim * delta_m_ept ** 2
 
     # Convert to h-units: P_h = P * h³,  k_h = k / h
-    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³ — h is JAX-traced here for d(pk_h)/d(h)
+    # NOTE: this explicit h**3 cancels exactly against the 1/k_arr**3
+    # prefactor in pk_mpc3 above (k_arr = k_mpc = k_h * h), so it contributes
+    # nothing to d(pk_h)/dh. The true h-derivative is carried entirely by
+    # the h-dependent k-resampling of the primordial spectrum and delta_m
+    # spline (k_mpc = k_h * h, traced above) -- which is why the pre-fix
+    # gradient (with that resampling frozen via stop_gradient) was spurious:
+    # amplitude-only, from this h**3 factor alone.
+    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³
 
     # Growth rate from the background solve (f = dlnD/dlna spline),
     # z-consistent and differentiable. The previous expression
