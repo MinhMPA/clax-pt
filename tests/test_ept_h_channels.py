@@ -76,6 +76,12 @@ def test_growth_rate_is_not_hardcoded(request, fast_mode):
     assert abs(f_val - ref) < 0.01, (
         f"EPT growth rate {f_val} != background f(z=0) {ref:.4f} "
         f"(the hardcoded-0.8 fallback is still active)")
+    # Physical oracle bound, independent of the f_of_loga implementation:
+    # LCDM z=0 has f ~ Omega_m**0.55 = 0.315**0.55 ~ 0.53 (measured 0.5258,
+    # GPU job 14140). Catches a broken f_grid/spline that the
+    # self-referential check above cannot.
+    assert 0.45 < f_val < 0.60, (
+        f"EPT growth rate {f_val} outside the physical LCDM z=0 range")
 
 
 def test_eptcomponents_pytree_roundtrip(request, fast_mode):

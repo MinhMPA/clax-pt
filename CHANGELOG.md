@@ -80,6 +80,13 @@ except the single known pre-existing failure
 (documented above under Aug 29, 2026, jobs 14019+14027, "no regressions";
 tracked separately as issue #30 item 5).
 
+**Stale cross-doc truth, superseded.** The Aug 29, 2026 entry's frozen-FD
+reference `4.029578e6` for `d(sum(pk_mm_real))/dh` predates this branch's
+traced `k_mpc` channel and no longer applies to that functional; the post-fix
+AD-graph value is **4.039169e6** (job 14140, reconfirmed bit-identical on job
+14143) -- future thermo reverse-mode probes must compare against the new value
+or re-freeze the channel.
+
 ### Aug 29, 2026: Reverse-mode-stable fused bg+thermo solve (issue #30, "vjp-through-jvp")
 
 **`jax.grad` through `thermodynamics_solve` carried a ~2% h-gradient error from
