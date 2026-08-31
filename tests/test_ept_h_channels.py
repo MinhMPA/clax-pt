@@ -1,0 +1,78 @@
+"""Channel tests for the h-dependence of compute_ept_from_clax.
+
+GPU job 13313 attributed the stage-level AD-vs-FD h-gradient gap to the
+frozen k_mpc = k_h * stop_gradient(h) resampling channel (-9.48e4 of the
+stage gradient), with the frozen-pk_nw IR split (+3.27e4) as the
+documented residual (same class as the 1.39% ln10A_s finding) and the
+rs_h/f/h-arg channels negligible (-1.0e2). These tests pin the fix.
+"""
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+from clax import CosmoParams
+from clax.ept import compute_ept_from_clax, pk_mm_real
+
+
+@pytest.fixture(scope="module")
+def stage_setup(request):
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
+    return params, bg, pt
+
+
+def _pk_of_h(bg, pt):
+    base = CosmoParams()
+
+    def f(h_val):
+        p = base.replace(h=h_val)
+        return pk_mm_real(compute_ept_from_clax(p, bg, pt, z=0.0))
+
+    return f
+
+
+def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
+    """Per-k d(pk_mm_real)/dh through the EPT stage: AD vs central FD.
+
+    RED before the k_mpc channel is traced: FD carries the resampling
+    term dP/dlnk * (1/h) which AD drops entirely, giving order-unity
+    per-k relative errors at BAO scales. GREEN after: residual is the
+    documented frozen-pk_nw share (~1-2%)."""
+    if fast_mode:
+        pytest.skip("uses the shared full-mode pipeline fixture")
+    params, bg, pt = request.getfixturevalue("stage_setup")
+    f = _pk_of_h(bg, pt)
+    h0 = float(params.h)
+
+    g_ad = jax.jacfwd(f)(jnp.asarray(h0))  # fwd == rev for this stage; cheap
+    eps = 1e-3
+    g_fd = (f(h0 + eps) - f(h0 - eps)) / (2.0 * eps)
+
+    k_h = np.asarray(compute_ept_from_clax(params, bg, pt, z=0.0).kh)
+    sel = (k_h > 0.05) & (k_h < 0.3)
+    rel = np.abs(np.asarray(g_ad - g_fd))[sel] / (
+        np.abs(np.asarray(g_fd))[sel] + 1e-30)
+    med = float(np.median(rel))
+    print(f"\nper-k d(pk_mm)/dh AD-vs-FD: median rel {med:.3e} "
+          f"(max {float(rel.max()):.3e}) over {int(sel.sum())} modes in [0.05,0.3]")
+    assert med < 0.05, (
+        f"median per-k AD-vs-FD rel err {med:.3e} >= 0.05: the k_mpc "
+        f"resampling channel is still frozen (job 13313: -9.48e4)")
+
+
+def test_growth_rate_is_not_hardcoded(request, fast_mode):
+    """compute_ept_from_clax must use the background growth rate, not 0.8.
+
+    bg.Omega_m_of_z does not exist, so the hasattr fallback at
+    ept.py:2061 silently yields the literal 0.8 for every cosmology and
+    redshift. LCDM at z=0 has f ~ 0.52-0.53. RED until Task 4 routes
+    f through bg.f_of_loga."""
+    if fast_mode:
+        pytest.skip("uses the shared full-mode pipeline fixture")
+    params, bg, pt = request.getfixturevalue("stage_setup")
+    ept = compute_ept_from_clax(params, bg, pt, z=0.0)
+    f_val = float(jax.lax.stop_gradient(jnp.asarray(ept.f)))
+    ref = float(bg.f_of_loga.evaluate(jnp.log(jnp.asarray(1.0))))
+    assert abs(f_val - ref) < 0.01, (
+        f"EPT growth rate {f_val} != background f(z=0) {ref:.4f} "
+        f"(the hardcoded-0.8 fallback is still active)")
