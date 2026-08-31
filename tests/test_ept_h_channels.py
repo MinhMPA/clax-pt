@@ -76,3 +76,17 @@ def test_growth_rate_is_not_hardcoded(request, fast_mode):
     assert abs(f_val - ref) < 0.01, (
         f"EPT growth rate {f_val} != background f(z=0) {ref:.4f} "
         f"(the hardcoded-0.8 fallback is still active)")
+
+
+def test_eptcomponents_pytree_roundtrip(request, fast_mode):
+    """h/f/sigma2 are leaves: tree_map touches them, jit caching is safe."""
+    if fast_mode:
+        pytest.skip("uses the shared full-mode pipeline fixture")
+    params, bg, pt = request.getfixturevalue("stage_setup")
+    ept = compute_ept_from_clax(params, bg, pt, z=0.0)
+    leaves, treedef = jax.tree_util.tree_flatten(ept)
+    ept2 = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert float(ept2.f) == float(ept.f)
+    assert float(ept2.h) == float(ept.h)
+    n_scalar_leaves = sum(1 for l in leaves if jnp.ndim(l) == 0)
+    assert n_scalar_leaves >= 4, "h/f/sigma2/delta_sigma2 must be leaves"

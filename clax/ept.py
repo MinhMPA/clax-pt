@@ -316,13 +316,19 @@ class EPTComponents:
             self.pk_nw, self.pk_w,                               # 43, 44
             self.P22_mu6_vv, self.P22_mu6_vd, self.P22_mu8, self.P13_mu6,  # 45-48
             self.Pk_2_dd, self.Pk_4_vd, self.Pk_4_dd,          # 49, 50, 51
+            # Scalars as leaves (tracer-safety for traced h/f/sigma2_bao/
+            # delta_sigma2_bao): tail order is h, f, sigma2_bao,
+            # delta_sigma2_bao -- see tree_unflatten below.
+            jnp.asarray(self.h), jnp.asarray(self.f),                  # 52, 53
+            jnp.asarray(self.sigma2_bao), jnp.asarray(self.delta_sigma2_bao),  # 54, 55
         ]
-        aux = (self.h, self.f, self.sigma2_bao, self.delta_sigma2_bao)
+        aux = None
         return arrays, aux
 
     @classmethod
     def tree_unflatten(cls, aux, arrays):
-        h, f, sigma2_bao, delta_sigma2_bao = aux
+        # Tail leaf order matches tree_flatten: h, f, sigma2_bao, delta_sigma2_bao
+        h, f, sigma2_bao, delta_sigma2_bao = arrays[52], arrays[53], arrays[54], arrays[55]
         return cls(
             kh=arrays[0], h=h, f=f,
             Pk_tree=arrays[1], Pk_loop=arrays[2], Pk_ctr=arrays[3],
@@ -1446,7 +1452,7 @@ def _compute_bias_spectra(
 def compute_ept(
     pk_lin_h: Float[Array, "Nk"],
     k_h: Float[Array, "Nk"],
-    h: float,
+    h: float | Float[Array, ""],
     f: float,
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     _ir_precomputed: Optional[tuple] = None,
@@ -1462,7 +1468,8 @@ def compute_ept(
                   Must be evaluated at k_h = EPT k-grid (prec.kmin_h to prec.kmax_h)
         k_h:      EPT k-grid [h/Mpc], shape (Nmax,)
                   Should match EPT_kgrid(prec) for best accuracy
-        h:        Hubble parameter h = H₀/100
+        h:        Hubble parameter h = H₀/100 (float or scalar jnp array;
+                  may be traced -- stored as an EPTComponents pytree leaf)
         f:        growth rate f = d ln D / d ln a at the target redshift
         prec:     EPT precision parameters (static)
         _ir_precomputed: optional tuple (pk_nw_np, pk_w_np, sigma2_bao) from
@@ -1624,18 +1631,18 @@ def compute_ept(
         pk_w=pk_w if prec.ir_resummation else None,
     )
 
-    _sigma2 = float(sigma2_bao) if sigma2_bao is not None else 0.0
-    _delta_sigma2 = float(delta_sigma2_bao) if delta_sigma2_bao is not None else 0.0
+    _sigma2 = sigma2_bao if sigma2_bao is not None else 0.0
+    _delta_sigma2 = delta_sigma2_bao if delta_sigma2_bao is not None else 0.0
 
     return EPTComponents(
-        kh=k_h, h=h, f=f,
+        kh=k_h, h=jnp.asarray(h), f=jnp.asarray(f),
         Pk_tree=Pk_tree,
         Pk_loop=Pk_loop,
         Pk_ctr=Pk_ctr,
         pk_nw=pk_nw,
         pk_w=pk_w,
-        sigma2_bao=_sigma2,
-        delta_sigma2_bao=_delta_sigma2,
+        sigma2_bao=jnp.asarray(_sigma2),
+        delta_sigma2_bao=jnp.asarray(_delta_sigma2),
         **bias,
     )
 
