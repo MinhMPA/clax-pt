@@ -53,7 +53,18 @@ def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
     (max 3.619e-02) over 31 modes in [0.05,0.3] -- ~3.35x lower than the
     prior 3.294e-02. The bound below (0.02) is 2x the measured 9.825e-03
     (=0.01965), rounded up to one significant figure -- never tighter than
-    2x measured, per this branch's ratchet rule."""
+    2x measured, per this branch's ratchet rule.
+
+    Note on the surviving 9.825e-03: it is NOT a further-openable share of
+    the now-closed frozen-pk_nw channel (that channel's own d(pk_nw)/dh
+    contribution flows exactly through the traced splitter). This test
+    computes ``pk_mm_real`` through ``compute_ept_from_clax`` with the same
+    frozen-bg/pt setup as ``test_grad_h_end_to_end_from_cosmoparams_matches_fd``
+    in ``tests/test_ept_gradients.py``, so it shares that test's leading
+    suspect: the DST grid endpoints/``in_range`` mask inside
+    ``_ir_resummation_jax``, built from a concrete
+    ``h_conc = stop_gradient(h)`` that moves under central FD but is pinned
+    under AD (see that test's FINDING docstring for the full mechanism)."""
     if fast_mode:
         pytest.skip("uses the shared full-mode pipeline fixture")
     params, bg, pt = request.getfixturevalue("stage_setup")
@@ -74,11 +85,15 @@ def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
     # 0.02 = 2x the measured 9.825e-03 (job 14146), rounded up to one
     # significant figure -- never tighter than 2x measured. See docstring:
     # the traced IR-resummation splitter closed most of the frozen-pk_nw
-    # share on top of the pre-existing k_mpc fix.
+    # share on top of the pre-existing k_mpc fix; the surviving median is
+    # attributed to the frozen DST-grid-endpoint/in_range channel, not a
+    # further pk_nw share.
     assert med < 0.02, (
         f"median per-k AD-vs-FD rel err {med:.3e} >= 0.02: either the "
-        f"k_mpc resampling channel (job 13313: -9.48e4) or the frozen-pk_nw "
-        f"IR split (closed by commit 01b5162/322a6ab) has regressed")
+        f"k_mpc resampling channel (job 13313: -9.48e4), the frozen-pk_nw "
+        f"IR split (closed by commit 01b5162/322a6ab), or the DST-grid-"
+        f"endpoint/in_range channel (see the FINDING in "
+        f"tests/test_ept_gradients.py's h end-to-end test) has regressed")
 
 
 def test_growth_rate_is_not_hardcoded(request, fast_mode):
