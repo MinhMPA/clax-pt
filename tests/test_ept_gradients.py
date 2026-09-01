@@ -558,7 +558,8 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
 
     Measured (GPU job 14146, full validation suite on
     fix/ir-resummation-traced @ 322a6ab): AD=1.322286e+06, FD=1.322286e+06,
-    rel_err=1.8231e-07 -- ~7,600x smaller than the pre-closure 1.39%, and
+    rel_err=1.8231e-07 -- ~76,000x smaller than the pre-closure 1.39%
+    (0.0139 / 1.8231e-07 ~= 76,244), and
     consistent with plain central-FD truncation noise (eps=1e-3) rather than
     a remaining structural gap. This test's frozen-bg/pt setup
     (``pipeline_fast_cl_k5`` fixture, no perturbation re-solve) also means
