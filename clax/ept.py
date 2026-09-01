@@ -715,16 +715,19 @@ def _ir_resummation_jax(
     Mirrors: nonlinear_pt.c lines 5315-5776 (DST-based BAO extraction), same
     as `_ir_resummation_numpy`.
 
-    This retires two of the three stop_gradient channels documented in
-    `compute_ept_from_clax`'s "stop_gradient rationale" note (the numpy
-    IR-resummation input snapshot of pk_h, and the rs_h channel feeding
-    compute_ept) -- both flow through here untouched by stop_gradient.
-    Wiring this function into `compute_ept_from_clax` in place of
-    `_ir_resummation_numpy` is Task 3's job, not done here. The third
-    channel (pk_nw structurally dropping d(pk_nw)/d(pk_lin_h) -- the
-    documented 1.39% ln10A_s residual) is exactly the derivative this
-    function restores: `test_pk_nw_gradient_exists_and_matches_fd` in
-    tests/test_ir_resummation_jax.py checks it directly against FD.
+    Wired into `compute_ept_from_clax` (Task 3), this retires two of the
+    three stop_gradient channels its "stop_gradient rationale" note used to
+    document: the numpy IR-resummation input snapshot of pk_h, and the
+    rs_h channel feeding compute_ept -- both flow through here untouched
+    by stop_gradient. This also closes the previously-documented 1.39%
+    ln10A_s-class residual (job 13132): pk_nw structurally dropping
+    d(pk_nw)/d(pk_lin_h) is exactly the derivative this function restores;
+    `test_pk_nw_gradient_exists_and_matches_fd` in
+    tests/test_ir_resummation_jax.py checks it directly against FD. The
+    remaining frozen channel is the RSD FFTLog basis (phase 2, pinned
+    explicitly at compute_ept's `_ir_precomputed` RSD consumption) --
+    unaffected by this function, which sits one level upstream of that
+    split.
 
     Args:
         pk_lin_h:   P_lin(k) in (Mpc/h)^3, shape (N,), TRACED
@@ -1770,8 +1773,13 @@ def compute_ept(
     # (the original numpy wiggle) rather than the traced pk_w = pk_lin_h - pk_nw.
     if prec.ir_resummation:
         if _ir_precomputed is not None:
-            _pk_nw_np_rsd = _ir_precomputed[0]   # numpy, not traced
-            _pk_w_np_rsd  = _ir_precomputed[1]   # numpy, not traced
+            # PHASE-2 FREEZE: the FFTLog cmsym basis is built from a pinned
+            # snapshot (the pre-existing deliberate freeze, now explicit).
+            # Gradient flows through the resummed spectra and damping; the
+            # basis-response term is deferred -- residual after this PR
+            # quantified in tests/test_ept_gradients.py docstrings.
+            _pk_nw_np_rsd = jax.lax.stop_gradient(jnp.asarray(_ir_precomputed[0]))
+            _pk_w_np_rsd  = jax.lax.stop_gradient(jnp.asarray(_ir_precomputed[1]))
         else:
             _pk_nw_np_rsd = np.array(pk_nw)
             _pk_w_np_rsd  = np.array(pk_w)
@@ -2204,27 +2212,23 @@ def compute_ept_from_clax(
     k_mpc = k_h * h resampling of delta_m/the primordial spectrum onto the
     EPT k-grid, so d(pk_h)/dh carries the k-resampling channel exactly as
     finite differences do (issue #30 item 4; previously frozen at -9.48e4
-    of the stage h-gradient, GPU job 13313). Three channels remain
-    deliberately frozen via stop_gradient:
-      - the numpy IR-resummation input (`_ir_resummation_numpy` runs on a
-        stop_gradient snapshot of pk_h; its DST grid is built from
-        np.linspace(7e-5/h, 7/h, ...) at a concrete h) -- required because
-        that routine is plain NumPy/scipy, not JAX;
-      - the rs_h (sound-horizon) channel feeding compute_ept: job 13313
-        measured rs_h together with f and the then-frozen h argument at
-        -1.0e2 of the stage h-gradient, bounding the rs_h channel below
-        that; tracing it would require reimplementing the Sigma^2_BAO
-        integral in jnp;
-      - pk_nw, the no-wiggle broadband split inside the IR precompute,
-        which structurally drops d(pk_nw)/d(pk_lin_h) -- the documented
-        1.39% ln10A_s-class residual (job 13132; see
-        tests/test_ept_gradients.py::test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd),
-        plus the same frozen split reused by the RSD FFTLog bases downstream:
-        compute_ept's RSD 1-loop quadratic forms are built via
-        _fftlog_decompose on the numpy _ir_precomputed pk_nw/pk_w arrays
-        (~line 1594-1596), so RSD-multipole gradients also carry this
-        frozen-wiggle channel. pk_mm_real is unaffected -- it never reads
-        those FFTLog bases.
+    of the stage h-gradient, GPU job 13313). The IR resummation itself now
+    runs through the traced `_ir_resummation_jax` splitter below, so
+    d(pk_nw)/d(params) and d(Sigma^2)/d(params) both flow -- this closes
+    the two channels that used to be stop_gradient'd here: the 1.39%-class
+    pk_nw/ln10A_s residual (job 13132) and the rs_h (sound-horizon) channel
+    (previously bounded below -1.0e2 of the stage h-gradient, GPU job
+    13313). Two channels remain deliberately frozen:
+      - the DST grid endpoints inside `_ir_resummation_jax` itself, built
+        from a concrete h_conc = stop_gradient(h) (np.linspace(7e-5/h,
+        7/h, ...) needs a fixed shape, not a differentiability choice --
+        see that function's docstring);
+      - the RSD FFTLog basis (`_pk_nw_np_rsd`/`_pk_w_np_rsd` at
+        compute_ept's `_ir_precomputed` RSD consumption): PHASE-2 FREEZE,
+        deferred by this PR -- see the inline comment there and
+        tests/test_ept_gradients.py docstrings for the residual this
+        leaves. pk_mm_real is unaffected -- it never reads those FFTLog
+        bases.
     """
     from clax.transfer import compute_pk_from_perturbations
     from clax.primordial import primordial_scalar_pk
@@ -2233,13 +2237,13 @@ def compute_ept_from_clax(
     from clax.background import sound_horizon_drag
 
     h = params.h  # traced: carries d(pk_h)/dh AND the k-resampling channel
-    # Concrete copies EXIST ONLY for the numpy IR-resummation call below,
-    # whose DST grid endpoints are 7e-5/h .. 7/h feeding np.linspace
-    # (must stay concrete). Do NOT reuse them anywhere else: reusing
-    # h_conc for k_mpc was the frozen resampling channel measured at
-    # -9.48e4 of the stage h-gradient (GPU job 13313, issue #30 item 4).
+    # Concrete copy EXISTS ONLY for the DST grid endpoints inside
+    # _ir_resummation_jax below (7e-5/h .. 7/h feeding np.linspace, which
+    # must stay concrete -- see that function's docstring). Do NOT reuse
+    # h_conc anywhere else: reusing it for k_mpc was the frozen resampling
+    # channel measured at -9.48e4 of the stage h-gradient (GPU job 13313,
+    # issue #30 item 4).
     h_conc = float(jax.lax.stop_gradient(h))
-    rs_h_value = float(jax.lax.stop_gradient(sound_horizon_drag(params))) * h_conc
 
     # EPT k-grid in h/Mpc (static shape source) -> Mpc^-1, TRACED in h so
     # the delta_m/primordial sampling points move with h under AD exactly
@@ -2289,17 +2293,16 @@ def compute_ept_from_clax(
     # of cosmology or redshift. cf. background.py:681 (f_of_loga).
     f = bg.f_of_loga.evaluate(jnp.log(1.0 / (1.0 + z)))
 
-    # Pre-compute IR resummation with a concrete (stop_gradient) snapshot of pk_h so
-    # that compute_ept uses the _ir_precomputed path. In that path:
-    #   pk_w = pk_lin_h − pk_nw   (JAX-traced, depends on pk_h)
-    #   d(pk_resummed)/d(pk_lin_h) = exp(−Σ²k²) ≠ 0
-    # This lets jax.grad flow through pk_h → loop integrals → output spectra.
-    ir_pre = _ir_resummation_numpy(
-        np.array(jax.lax.stop_gradient(pk_h)), k_h, rs_h=rs_h_value, h=h_conc,
-    )
-    # h/rs_h are dead arguments on the _ir_precomputed path (audit
-    # 2026-08-31: h only reaches the pytree record, rs_h only the untaken
-    # numpy branch) -- pass the traced h for the record, keep rs_h at the
-    # concrete value the IR tuple was built with.
+    # Traced IR resummation: d(pk_nw)/d(params) and d(Sigma^2)/d(params)
+    # now flow (closes the 1.39% ln10A_s / 1.19% h structural residual,
+    # issue #30). Only the DST grid endpoints stay pinned (see
+    # _ir_resummation_jax) and the RSD FFTLog basis (phase 2, below).
+    rs_h_traced = sound_horizon_drag(params) * params.h
+    ir_pre = _ir_resummation_jax(pk_h, k_h, rs_h_traced, h_conc)
     return compute_ept(pk_h, jnp.array(k_h), h=h, f=f, prec=prec,
-                        rs_h=rs_h_value, _ir_precomputed=ir_pre)
+                        # rs_h is a dead argument on the _ir_precomputed path
+                        # (audit 2026-08-31: only reaches the untaken numpy
+                        # branch); stop_gradient is a no-op here but keeps
+                        # this call site's own gradient graph minimal.
+                        rs_h=jax.lax.stop_gradient(rs_h_traced),
+                        _ir_precomputed=ir_pre)
