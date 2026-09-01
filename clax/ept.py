@@ -692,6 +692,182 @@ def _ir_resummation_numpy(
     return pk_nw, pk_w, float(sigma2_bao), float(delta_sigma2_bao)
 
 
+def _ir_resummation_jax(
+    pk_lin_h: Float[Array, "N"],
+    k_h_static: np.ndarray,
+    rs_h,
+    h_conc: float,
+) -> tuple[Float[Array, "N"], Float[Array, "N"], Float[Array, ""], Float[Array, ""]]:
+    """Traced JAX counterpart of :func:`_ir_resummation_numpy`.
+
+    Same DST-based BAO extraction (see :func:`_ir_resummation_numpy` for the
+    full physics writeup and CLASS-PT anchors), but differentiable in
+    ``pk_lin_h`` (the linear power spectrum values) AND ``rs_h`` (the sound
+    horizon times h that sets the BAO filter scale). Everything that is a
+    *shape* of the computation -- the DST grid, the odd/even mode-removal
+    index arithmetic, the k-integration grids -- stays static numpy/Python,
+    exactly mirroring the numpy splitter's control flow; everything that is
+    *data* flowing from ``pk_lin_h``/``rs_h`` is jnp and stays traced through
+    ``dst2_ortho``/``idst2_ortho`` (Task 1) and
+    :class:`clax.interpolation.CubicSpline` (natural-BC, same math as the
+    scipy `CubicSpline(bc_type='natural')` used in the numpy version).
+
+    Mirrors: nonlinear_pt.c lines 5315-5776 (DST-based BAO extraction), same
+    as `_ir_resummation_numpy`.
+
+    This retires two of the three stop_gradient channels documented in
+    `compute_ept_from_clax`'s "stop_gradient rationale" note (the numpy
+    IR-resummation input snapshot of pk_h, and the rs_h channel feeding
+    compute_ept) -- both flow through here untouched by stop_gradient.
+    Wiring this function into `compute_ept_from_clax` in place of
+    `_ir_resummation_numpy` is Task 3's job, not done here. The third
+    channel (pk_nw structurally dropping d(pk_nw)/d(pk_lin_h) -- the
+    documented 1.39% ln10A_s residual) is exactly the derivative this
+    function restores: `test_pk_nw_gradient_exists_and_matches_fd` in
+    tests/test_ir_resummation_jax.py checks it directly against FD.
+
+    Args:
+        pk_lin_h:   P_lin(k) in (Mpc/h)^3, shape (N,), TRACED
+        k_h_static: k in h/Mpc, shape (N,), static numpy (grid, not traced)
+        rs_h:       r_s(z_d) * h in Mpc*h (see `_ir_resummation_numpy`
+                    docstring for the exact convention), TRACED
+        h_conc:     Hubble parameter h = H0/100, Python float, STATIC
+                    (fixes the DST grid endpoints only -- see the freeze
+                    comment below)
+
+    Returns:
+        pk_nw:        no-wiggle (broadband) P(k), same shape as input, jnp
+        pk_w:         wiggle P(k) = pk_lin_h - pk_nw, jnp
+        sigma2_bao:   BAO damping scale Sigma_BAO^2 in (Mpc/h)^2, jnp scalar
+        delta_sigma2_bao: anisotropic damping scale, jnp scalar
+    """
+    from clax.interpolation import dst2_ortho, idst2_ortho, CubicSpline
+
+    # LINEAR k-grid matching CLASS-PT nonlinear_pt.c:5322-5323 which hardcodes
+    # kmin2=0.00007 1/Mpc and kmax2=7 1/Mpc (in physical 1/Mpc units).
+    # Converting to h-units: kmin2_h = 0.00007/h h/Mpc, kmax2_h = 7/h h/Mpc.
+    # Using the exact CLASS-PT values is critical: the DST mode number for the
+    # BAO oscillation is n_BAO ≈ kmax2/BAO_period, so a 4% kmax2 difference
+    # shifts the BAO mode by 4%, causing different Pnw extraction.
+    N_IR = 65536
+    k_min2 = 7e-5 / h_conc   # 0.00007 1/Mpc in h/Mpc (CLASS-PT kmin2)
+    k_max2 = 7.0 / h_conc    # 7 1/Mpc in h/Mpc (CLASS-PT kmax2)
+    # ENDPOINTS DELIBERATELY STATIC: CLASS-PT-hardcoded cuts (nonlinear_pt.c:5322);
+    # their h-derivative is a boundary term with negligible content (P·k weight
+    # ~0 at both cuts). Everything BETWEEN the cuts is traced.
+    k_ir = np.linspace(k_min2, k_max2, N_IR)
+
+    # Interpolate P_lin to the linear grid (log-log interpolation)
+    log_k_in = np.log(k_h_static)
+    log_pk_in = jnp.log(jnp.clip(pk_lin_h, 1e-300, None))
+    pk_ir = jnp.exp(jnp.interp(jnp.log(k_ir), log_k_in, log_pk_in))
+
+    # DST-II of log(k P(k)) — forward transform.
+    # CLASS-PT uses a custom FFT-based DST via DCT-like trick.
+    # cf. nonlinear_pt.c:5355-5398 (input_realv2 construction + FFT)
+    f_ir = jnp.log(k_ir * pk_ir)
+    f_dst = dst2_ortho(f_ir)
+
+    # Remove BAO modes 120–240 by cubic spline on odd and even modes separately.
+    # CLASS-PT splits cmnew[2i] (odd) and cmnew[2i+1] (even), removes Nleft:Nright
+    # from each, then spline-interpolates back. This matches nonlinear_pt.c:5420-5520.
+    # cf. nonlinear_pt.c:5404-5413: cmodd[i] = out_ir[2*i], cmeven[i] = out_ir[2*i+1]
+    N_left  = 120
+    N_right = 240
+    N_IR_half = N_IR // 2  # = 32768
+
+    # Split full DST into odd and even indexed modes (over the half-spectrum)
+    # The actual CLASS-PT split works on the FFT output of their custom DST,
+    # which differs from scipy's DST-II by a sign/ordering. We approximate
+    # by splitting scipy DST modes directly into odd/even index.
+    cmodd  = f_dst[0:N_IR:2]   # even indices of DST (odd "mode" in CLASS-PT sense)
+    cmeven = f_dst[1:N_IR:2]   # odd indices of DST
+
+    # For each of odd and even, remove modes [N_left, N_right) via cubic spline.
+    # Indices run from 0..N_IR_half-1, mapping to DST indices 0,2,4,...
+    # The "throw" region is [N_left, N_right) in the sub-arrays.
+
+    def _remove_bao_modes_jax(cm, n_left, n_right):
+        """Cubic spline interpolation across [n_left, n_right) in cm array.
+
+        jnp counterpart of the numpy splitter's `_remove_bao_modes`: knots
+        (`i_orig`) and evaluation points (`np.arange(1, n + 1)`) are static
+        index arithmetic; the spline VALUES (`val_keep`, drawn from the
+        traced DST coefficients `cm`) flow through
+        `clax.interpolation.CubicSpline`, which implements the same
+        natural-BC math as scipy's `CubicSpline(bc_type='natural')`.
+        """
+        n = len(cm)
+        n_throw = n_right - n_left
+        n_new = n - n_throw
+        # Build compact array: indices 0..n_left-1, n_right..n-1 → indices 0..n_new-1
+        idx_keep = np.concatenate([np.arange(n_left), np.arange(n_right, n)])
+        val_keep = cm[idx_keep]
+        # Original indices (1-based as in CLASS-PT)
+        i_orig = np.concatenate([np.arange(1, n_left + 1),
+                                  np.arange(n_right + 1, n + 1)])
+        # Spline on compact grid, evaluate at full 1-based indices
+        cs = CubicSpline(jnp.asarray(i_orig, dtype=float), val_keep)
+        cm_nw = cs.evaluate(jnp.arange(1, n + 1, dtype=float))
+        return cm_nw
+
+    cmodd_nw  = _remove_bao_modes_jax(cmodd,  N_left, N_right)
+    cmeven_nw = _remove_bao_modes_jax(cmeven, N_left, N_right)
+
+    # Reconstruct no-wiggle DST coefficients: interleave odd and even
+    f_dst_nw = jnp.zeros(N_IR).at[0::2].set(cmodd_nw).at[1::2].set(cmeven_nw)
+
+    # Inverse DST-II to recover log(k P_nw) on linear grid
+    f_nw_ir = idst2_ortho(f_dst_nw)
+    pk_nw_ir = jnp.exp(jnp.clip(f_nw_ir, -700, 700)) / k_ir
+
+    # Map back to input k-grid; outside [k_min2, k_max2] set Pnw = Plin
+    in_range = (k_h_static >= k_min2) & (k_h_static <= k_max2)
+    assert in_range.sum() > 1
+    pk_nw = jnp.where(
+        in_range,
+        jnp.exp(
+            jnp.interp(
+                jnp.log(k_h_static),
+                jnp.log(k_ir),
+                jnp.log(jnp.clip(pk_nw_ir, 1e-300, None)),
+            )
+        ),
+        pk_lin_h,
+    )
+    pk_w = pk_lin_h - pk_nw
+
+    # Σ_BAO² with CLASS-PT j₂-filter formula, integrating up to ks=0.2 h/Mpc.
+    # IntegrandBAO = P_nw × [1 - 3sin(qr)/(qr) + 6(sin(qr)/(qr)³ - cos(qr)/(qr)²)]
+    # cf. nonlinear_pt.c:5614: ks = 0.2 * pba->h = 0.2 h/Mpc
+    k_s = 0.2  # h/Mpc
+    k_int = np.geomspace(k_min2, k_s, 1000)
+    pk_nw_int = jnp.exp(
+        jnp.interp(jnp.log(k_int), jnp.log(k_ir), jnp.log(jnp.clip(pk_nw_ir, 1e-300, None)))
+    )
+    x_bao = jnp.asarray(k_int) * rs_h
+    bao_filter = (
+        1.0
+        - 3.0 * jnp.sin(x_bao) / x_bao
+        + 6.0 * (jnp.sin(x_bao) / x_bao ** 3 - jnp.cos(x_bao) / x_bao ** 2)
+    )
+    sigma2_bao = (
+        jnp.trapezoid(pk_nw_int * bao_filter * k_int, x=np.log(k_int)) / (6.0 * jnp.pi ** 2)
+    )
+
+    # δΣ_BAO² (anisotropic second damping scale):
+    # IntegrandBAO2 = -Pnw * (3*cos(qr)*r*q + (-3+(qr)²)*sin(qr)) / (qr)³
+    # cf. nonlinear_pt.c line 5639; normalization 1/(2π²) vs 1/(6π²) for Σ_BAO²
+    bao_filter2 = -1.0 * (
+        3.0 * jnp.cos(x_bao) * x_bao + (-3.0 + x_bao ** 2) * jnp.sin(x_bao)
+    ) / x_bao ** 3
+    delta_sigma2_bao = (
+        jnp.trapezoid(pk_nw_int * bao_filter2 * k_int, x=np.log(k_int)) / (2.0 * jnp.pi ** 2)
+    )
+
+    return pk_nw, pk_w, sigma2_bao, delta_sigma2_bao
+
+
 def _ir_resummation_gaussian(
     pk_lin_h: np.ndarray,
     k_h: np.ndarray,
