@@ -8,6 +8,69 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Sep 2, 2026: Traced IR resummation -- no-wiggle split + Sigma^2 differentiable (issue #30)
+
+**The no-wiggle broadband split and IR-resummation damping (`Sigma^2`,
+`delta_Sigma^2`) inside `compute_ept_from_clax` ran through plain NumPy on a
+`stop_gradient`-frozen `pk_lin_h` -- the documented 1.39% ln10A_s-class
+residual (job 13132) left open by the Sep 1 h-channel fix.** Branch
+`fix/ir-resummation-traced`, six commits: `f71ef1a` (DST primitives),
+`01b5162` (traced splitter), `322a6ab` (wiring), `470dbba` (bound ratchets),
+`964754a` (h reattribution), `fa990b9` (ratio fix).
+
+**What was implemented.** New `_ir_resummation_jax`, a fully traced
+reimplementation of the CLASS-PT no-wiggle split: DST-II/IDST-II via
+`jnp.fft` odd-extension (scipy `ortho`-normalization parity ~1e-15;
+convention `sqrt(1/(2N))` per element, the `k=N-1` Nyquist term
+`sqrt(1/(4N))`; `idst2` implemented as the exact `jax.linear_transpose` of
+`dst2`, not a separate hand-derived inverse), clax's own `CubicSpline`
+(natural BC) for the low/high-order mode removal, and traced
+`Sigma^2`/`delta_Sigma^2` damping built from a traced
+`rs_h = sound_horizon_drag(params) * params.h`. Parity vs the original
+`_ir_resummation_numpy` at fiducial LCDM: `pk_nw` max rel err 1.95e-14,
+`sigma2`/`delta_sigma2` ~2e-15/~7e-15 -- numerically identical, now
+differentiable. `_ir_resummation_numpy` is untouched and remains the parity
+anchor; it continues to serve `compute_ept`'s direct/NumPy branch
+(`tests/test_ept_accuracy.py`: 9/9 passed, unchanged).
+
+**Two deliberate freezes remain (both documented in-line in `clax/ept.py`):**
+1. **DST grid endpoints + static `in_range` mask.** `k_min2 = 7e-5/h`,
+   `k_max2 = 7.0/h` and the boolean mask built from them stay outside the
+   traced graph -- these mirror CLASS-PT's own hardcoded cuts
+   (`nonlinear_pt.c:5322`), not a clax approximation.
+2. **RSD FFTLog basis inputs (PHASE-2 FREEZE).** Explicit `stop_gradient`,
+   deferred out of this branch's scope; verified below to be immaterial to
+   the `pk_mm_real` observable these tests exercise.
+
+**Before/after (GPU jobs 14146 @322a6ab and 14147 @470dbba, V100 igpu
+cluster, bit-for-bit identical across both runs):**
+
+| Metric | Before | After | Change |
+|---|---|---|---|
+| ln10A_s end-to-end AD-vs-FD | 1.39% (job 13132) | **1.8231e-07** | ~76,000x smaller (0.0139/1.8231e-07 ~= 76,244); bound 0.02 -> 4e-07 (~2.2x headroom) |
+| h end-to-end AD-vs-FD | 1.19% (job 14140) | **1.3831e-02 (1.38%)** | NOT closed; bound stays 0.03 |
+| Per-k d(pk_mm)/dh stage median | 3.294e-02 (job 14140) | **9.825e-03** | bound 0.05 -> 0.02 |
+| Stage-level ln10A_s (frozen bg/pt) | -- | **1.8231e-07** | bound <5e-3 |
+| jvp == vjp (ln10A_s, from CosmoParams) | -- | **3.52e-16** | required <1e-6 |
+
+**h attribution.** The h non-closure *falsifies* the hypothesis that the h
+residual is the same frozen-`pk_nw` class the ln10A_s test collapsed (if it
+were, h would have closed too). Leading attributed suspect: the
+**h-dependent static freezes** -- the DST grid endpoints (`7e-5/h`, `7/h`)
+and the static `in_range` mask, which move under central-FD perturbation of
+`h` but stay pinned under AD, so the "boundary-term derivative content is
+negligible" justification evidently fails at the ~1% level specifically for
+`h`. The RSD-basis freeze is *ruled out* for this residual: `pk_mm_real`
+never reads the FFTLog basis. Full-pipeline FD discretization noise is a
+secondary contributor. The endpoint/mask freeze is the concrete phase-2
+follow-up item.
+
+**Full-suite sweep (phase e, job 14146):** `pytest tests/ --fast -q`
+completed with exactly one failure,
+`test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5`
+(max-steps), confirmed pre-existing and owned by Track 1 (`chore/th-z-max-preset`
+lineage) -- zero file overlap with this branch's commits.
+
 ### Sep 1, 2026: Trace the k_mpc h-channel and fix the hardcoded growth rate in EPT (issue #30, item 4)
 
 **Two AD-blocking bugs in `compute_ept_from_clax`'s h-gradient path, both hiding
