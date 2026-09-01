@@ -695,7 +695,7 @@ def _ir_resummation_numpy(
 def _ir_resummation_jax(
     pk_lin_h: Float[Array, "N"],
     k_h_static: np.ndarray,
-    rs_h,
+    rs_h: Float[Array, ""],
     h_conc: float,
 ) -> tuple[Float[Array, "N"], Float[Array, "N"], Float[Array, ""], Float[Array, ""]]:
     """Traced JAX counterpart of :func:`_ir_resummation_numpy`.
@@ -723,9 +723,15 @@ def _ir_resummation_jax(
     ln10A_s-class residual (job 13132): pk_nw structurally dropping
     d(pk_nw)/d(pk_lin_h) is exactly the derivative this function restores;
     `test_pk_nw_gradient_exists_and_matches_fd` in
-    tests/test_ir_resummation_jax.py checks it directly against FD. The
-    remaining frozen channel is the RSD FFTLog basis (phase 2, pinned
-    explicitly at compute_ept's `_ir_precomputed` RSD consumption) --
+    tests/test_ir_resummation_jax.py checks it directly against FD. TWO
+    frozen channels survive this closure, consistent with
+    `compute_ept_from_clax`'s docstring (~2221-2231): (1) THIS function's
+    own DST grid endpoints (k_min2/k_max2 above, built from a concrete
+    h_conc) and the static `in_range` mask derived from them -- now the
+    leading suspect for the measured h end-to-end residual (see the CAVEAT
+    on the ENDPOINTS DELIBERATELY STATIC comment below, and the h FINDING
+    in tests/test_ept_gradients.py); and (2) the RSD FFTLog basis (phase 2,
+    pinned explicitly at compute_ept's `_ir_precomputed` RSD consumption) --
     unaffected by this function, which sits one level upstream of that
     split.
 
@@ -758,6 +764,15 @@ def _ir_resummation_jax(
     # ENDPOINTS DELIBERATELY STATIC: CLASS-PT-hardcoded cuts (nonlinear_pt.c:5322);
     # their h-derivative is a boundary term with negligible content (P·k weight
     # ~0 at both cuts). Everything BETWEEN the cuts is traced.
+    # CAVEAT (measured, not closed by the above): this "negligible content"
+    # argument covers only the boundary VALUES. The h-derivative of the GRID
+    # ITSELF -- not just its endpoints -- shifts the whole interior
+    # discretization that pk_nw is extracted on under central FD (h_conc is a
+    # genuinely different float at h0+eps vs h0-eps), while under AD at fixed
+    # h this snapshot is a constant with zero gradient by construction. That
+    # mismatch measured a 1.3831e-02 residual on the h end-to-end gradient
+    # (job 14146); this is the concrete phase-2 item -- see the h FINDING in
+    # tests/test_ept_gradients.py.
     k_ir = np.linspace(k_min2, k_max2, N_IR)
 
     # Interpolate P_lin to the linear grid (log-log interpolation)
@@ -1659,11 +1674,19 @@ def compute_ept(
                   (float or scalar jnp array; may be traced -- stored as an
                   EPTComponents pytree leaf)
         prec:     EPT precision parameters (static)
-        _ir_precomputed: optional tuple (pk_nw_np, pk_w_np, sigma2_bao) from
-                  _ir_resummation_numpy(), pre-computed outside the JAX trace.
-                  When provided, only pk_nw_np and sigma2_bao are used; the
-                  wiggle component is recomputed as pk_w = pk_lin_h - pk_nw
-                  (JAX-traced), so that gradients flow:
+        _ir_precomputed: optional tuple (pk_nw, pk_w, sigma2_bao[, delta_sigma2_bao])
+                  precomputed outside this function's own IR-resummation branch.
+                  Two kinds of caller supply this tuple, and both are supported:
+                  (1) ``compute_ept_from_clax`` now builds it from the TRACED
+                  ``_ir_resummation_jax`` splitter, so pk_nw/pk_w/sigma2_bao are
+                  jnp arrays and d(pk_nw)/d(params), d(sigma2_bao)/d(params) both
+                  flow through; (2) a caller may still pass the legacy tuple from
+                  ``_ir_resummation_numpy()`` (concrete numpy, computed outside
+                  the JAX trace) -- see the example below. Either way, only
+                  pk_nw and sigma2_bao are used as-is; the wiggle component is
+                  recomputed as pk_w = pk_lin_h - pk_nw (JAX-traced through
+                  pk_lin_h regardless of which kind of pk_nw was supplied), so
+                  that gradients flow:
                     pk_resummed = pk_nw + (pk_lin_h - pk_nw) * exp(-Σ²k²)
                                 = pk_lin_h × exp(-Σ²k²) + pk_nw × (1 - exp(-Σ²k²))
                   Use this to enable jax.grad() through the IR resummation path:
@@ -1674,10 +1697,16 @@ def compute_ept(
                                              _ir_precomputed=(pk_nw_np, pk_w_np, sigma2, delta_sigma2))
                       grad = jax.grad(f)(pk_lin_ept)  # works!
 
-                  Physically correct: the no-wiggle template pk_nw is a property
-                  of the broadband shape at fixed cosmology. For a perturbation
-                  δpk around the fiducial, the wiggle component changes as
-                  δpk_w = δpk_lin, and the resummed spectrum damps it by exp(-Σ²k²).
+                  Physically-correct-freeze justification (applies ONLY to the
+                  concrete-numpy caller, kind (2) above): the no-wiggle template
+                  pk_nw is a property of the broadband shape at fixed cosmology,
+                  so for a perturbation δpk around the fiducial, the wiggle
+                  component changes as δpk_w = δpk_lin, and the resummed
+                  spectrum damps it by exp(-Σ²k²) -- this is what justifies
+                  freezing pk_nw when the caller never re-derives it under AD.
+                  For the traced caller (kind (1), ``compute_ept_from_clax``),
+                  no such freeze is needed or applied: d(pk_nw)/d(params) flows
+                  from ``_ir_resummation_jax`` itself.
         rs_h:     Sound horizon at drag epoch times h, in Mpc (i.e. r_s(z_d) * h,
                   NOT r_s/h).  Default 99.0 ≈ Planck 2018 fiducial; for
                   cosmology-varying values, prefer ``compute_ept_from_clax`` which
@@ -1714,8 +1743,11 @@ def compute_ept(
     # --- IR resummation ---
     if _ir_precomputed is not None:
         # Use caller-supplied precomputed decomposition (enables jax.grad).
-        # pk_nw_np is fixed (not traced); pk_w is derived from pk_lin_h so that
-        # gradients flow through pk_lin_h → pk_w → pk_resummed → P13/P22.
+        # pk_nw_np may be TRACED jnp (compute_ept_from_clax's _ir_resummation_jax
+        # tuple, gradients flow through it too) or concrete numpy (the legacy
+        # _ir_resummation_numpy() tuple, effectively fixed for this branch); pk_w
+        # is always derived from pk_lin_h so that gradients flow through
+        # pk_lin_h → pk_w → pk_resummed → P13/P22 either way.
         #
         # KEY: pk_w = pk_lin_h - pk_nw  (JAX-traced, depends on pk_lin_h)
         # pk_resummed = pk_nw + pk_w × exp(-Σ²k²)
@@ -1768,9 +1800,13 @@ def compute_ept(
     # CLASS-PT uses x_nw = cmsym_nw × k^etam for all RSD loop quadratic forms.
     # Wiggle correction uses x_w = cmsym_w × k^etam (×2 for P22, ×1 for P13).
     # cf. nonlinear_pt.c lines 8215, 8246, 8562, 8586.
-    # Always use NUMPY arrays for _fftlog_decompose (it uses np.fft internally).
-    # In the _ir_precomputed path, pk_w may be JAX-traced, so use _ir_precomputed[1]
-    # (the original numpy wiggle) rather than the traced pk_w = pk_lin_h - pk_nw.
+    # NOTE: _fftlog_decompose is jnp.fft internally (jnp.fft.fft, see its
+    # definition above), NOT numpy -- it accepts and can differentiate through
+    # traced inputs just fine. The `_pk_nw_np_rsd`/`_pk_w_np_rsd` naming below
+    # is legacy; what actually happens is that the RSD path deliberately reads
+    # the PINNED (stop_gradient) snapshot of _ir_precomputed[0]/[1] rather than
+    # the traced pk_nw/pk_w computed above, per the PHASE-2 FREEZE noted just
+    # below -- a deliberate gradient freeze, not a numpy/jax type requirement.
     if prec.ir_resummation:
         if _ir_precomputed is not None:
             # PHASE-2 FREEZE: the FFTLog cmsym basis is built from a pinned
