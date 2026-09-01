@@ -1,4 +1,6 @@
 """Parity + differentiability of the traced IR-resummation splitter."""
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -9,8 +11,6 @@ from clax.ept import (_ir_resummation_numpy, _ir_resummation_jax,
                       ept_kgrid, EPTPrecisionParams,
                       compute_ept_from_clax, pk_mm_real)
 
-REF = np.load("reference_data/lcdm_fiducial/pk.npz")
-
 
 @pytest.fixture(scope="module")
 def pk_setup():
@@ -18,9 +18,16 @@ def pk_setup():
     # (now per-species/per-redshift). "k" is in Mpc^-1, "pk_lin_z0" in
     # Mpc^3 -- converted to h-units (h/Mpc, (Mpc/h)^3) exactly as
     # tests/test_ept_gradients.py does for the same reference file.
+    # Path built off __file__ (not cwd) per tests/test_ept_gradients.py:49 --
+    # loading via a bare relative path broke pytest collection from any cwd
+    # other than the repo root.
+    ref = np.load(
+        os.path.join(os.path.dirname(__file__), "..", "reference_data",
+                     "lcdm_fiducial", "pk.npz")
+    )
     h = 0.6736
     k_h = ept_kgrid(EPTPrecisionParams())
-    lk, lp = np.log(REF["k"] / h), np.log(REF["pk_lin_z0"] * h ** 3)
+    lk, lp = np.log(ref["k"] / h), np.log(ref["pk_lin_z0"] * h ** 3)
     pk = np.exp(np.interp(np.log(k_h), lk, lp))
     return k_h, pk
 
