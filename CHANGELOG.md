@@ -8,6 +8,85 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Sep 1, 2026: Trace the k_mpc h-channel and fix the hardcoded growth rate in EPT (issue #30, item 4)
+
+**Two AD-blocking bugs in `compute_ept_from_clax`'s h-gradient path, both hiding
+behind `stop_gradient`.** Branch `fix/ept-traced-h-channels`, six commits
+(f03a779, 8bd9cdb, 064171b, 2ed9809, d9fa701, 8aa52f1).
+
+**1. Frozen `k_mpc` resampling channel (commit 8bd9cdb).** `compute_ept_from_clax`
+resampled onto `k_mpc = k_h * stop_gradient(h)`, dropping the h-dependence of the
+resampling from the AD graph. A GPU stage-level probe (job 13313) attributed
+-9.48e4 of the stage h-gradient to exactly this channel. Traced `k_mpc` through
+`h` properly. **Stage-level per-k `d(pk_mm)/dh` AD-vs-FD median rel err: 8.760e-01
+RED (job 14136, pre-fix) -> 3.294e-02 GREEN (job 14140, post-fix; max 1.702e-01
+over 31 modes in k in [0.05, 0.3]), under the new channel test's 0.05 bound.**
+
+**2. Growth rate `f` was silently the literal `0.8` for every cosmology and
+redshift (commit d9fa701).** `hasattr(bg, "Omega_m_of_z")` was always `False` --
+`BackgroundResult` has no such attribute -- so the `**0.55` branch never ran and
+every call fell through to the hardcoded fallback. Fixed to
+`f = bg.f_of_loga.evaluate(log(a))`, the real background growth-rate spline
+(giving f=0.5258 at LCDM z=0, vs the old constant 0.8). **Blast radius**
+(verified independently by two agents, spot-checked by the controller): only
+the stored `ept.f` leaf and the f-dependent `EPTComponents` leaves (the
+RSD-multipole spectra, e.g. `Pk_IFG2_0/2`) move; no in-repo consumer's *output*
+changes, because every in-repo `compute_ept_from_clax` caller
+(`clax/lensing.py`, `scripts/benchmark_ept.py`, `scripts/profile_compile_time.py`,
+the test suite) reads only f-free outputs (`pk_mm_real`, `pk_gg_real`,
+`Pk_loop`); every in-repo RSD-multipole caller uses `compute_ept` directly with
+an explicit `f`. This supersedes the originating plan's prediction that
+`benchmark_ept.py` multipoles would move -- they don't, because that script never
+imports `pk_*_l0/l2/l4`. External callers computing RSD multipoles from
+`compute_ept_from_clax` results will see corrected (previously f=0.8-wrong)
+values.
+
+**3. `EPTComponents` aux -> leaves migration (commit 2ed9809).** Scalar fields
+made ordinary pytree leaves (tracer-safety prerequisite for both fixes above --
+a traced `h`/`f` closed over as aux data would escape its trace the same way the
+Aug 25 scalar-PID leak did).
+
+**End-to-end `d(sum(pk_mm_real))/dh` AD-vs-FD**: ~0.95% structural pre-fix
+(AD=4.0295939e6 vs FD=3.9915e6, measured post-#33) -> **1.1924e-02 (1.19%)
+post-fix** (job 14140: AD=4.039169e6, FD=3.991575e6; reconfirmed bit-identical
+on job 14143). The rise from 0.95% to 1.19% is real and expected, not a
+regression: pre-fix, the frozen `k_mpc` channel (-9.48e4 of the stage gradient,
+job 13313) partially *cancelled* the frozen-`pk_nw` residual (+3.27e4, opposite
+sign, same job) in the aggregate sum; post-fix the `k_mpc` channel is gone and
+the `pk_nw` residual stands alone -- exactly the "pk_nw share (~1-2%)" the
+originating plan anticipated as the post-fix floor.
+
+**Bound ratchet: `test_grad_h_end_to_end_from_cosmoparams_matches_fd`'s
+threshold 0.15 -> 0.03** (commit 8aa52f1). Per the plan's "never tighter than 2x
+measured" rule: 2 x 0.011924 = 0.023848, rounded up to one significant figure =
+0.03, overriding the plan's illustrative default of 0.02.
+
+**Deliberately stays frozen** (provenance corrected/documented, commit 064171b):
+the NumPy IR-resummation input (the DST grid endpoints `7e-5/h .. 7/h` feed
+`np.linspace`, which cannot accept tracers); the `rs_h` sound-horizon channel
+(job 13313 measured `rs_h` *together with* `f` and the then-frozen `h` argument
+at -1.0e2 of the stage h-gradient -- a bound on the bucket, not an isolated
+measurement of `rs_h` alone); `pk_nw`, the no-wiggle broadband split (the
+documented 1.39% ln10A_s-class residual, job 13132 -- `compute_ept_from_clax`
+computes it via plain NumPy on a `stop_gradient`-frozen snapshot of `pk_lin_h`).
+
+**Verified.** `tests/test_ept_h_channels.py` 3/3 green (job 14140);
+`tests/test_ept_gradients.py` 11/11 green under the new 0.03 bound (job 14143);
+`tests/test_ept_accuracy.py` green/untouched (job 14140 -- it feeds
+`compute_ept` directly with an explicit `f` from the reference NPZ, bypassing
+the traced channels this branch touches). `pytest tests/ --fast -q`: green
+except the single known pre-existing failure
+`test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5`
+(documented above under Aug 29, 2026, jobs 14019+14027, "no regressions";
+tracked separately as issue #30 item 5).
+
+**Stale cross-doc truth, superseded.** The Aug 29, 2026 entry's frozen-FD
+reference `4.029578e6` for `d(sum(pk_mm_real))/dh` predates this branch's
+traced `k_mpc` channel and no longer applies to that functional; the post-fix
+AD-graph value is **4.039169e6** (job 14140, reconfirmed bit-identical on job
+14143) -- future thermo reverse-mode probes must compare against the new value
+or re-freeze the channel.
+
 ### Aug 29, 2026: Reverse-mode-stable fused bg+thermo solve (issue #30, "vjp-through-jvp")
 
 **`jax.grad` through `thermodynamics_solve` carried a ~2% h-gradient error from

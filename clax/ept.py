@@ -222,8 +222,8 @@ class EPTComponents:
 
     # k-grid in h/Mpc
     kh: Float[Array, "Nk"]         # k values [h/Mpc]
-    h:  float                       # Hubble parameter (for unit conversion)
-    f:  float                       # growth rate d ln D/d ln a
+    h:  Float[Array, ""]            # Hubble parameter (for unit conversion)
+    f:  Float[Array, ""]            # growth rate d ln D/d ln a
 
     # Core matter components
     Pk_tree:  Float[Array, "Nk"]   # P_tree = IR-resummed linear P (index 14)
@@ -290,8 +290,8 @@ class EPTComponents:
     # Anisotropic IR resummation + higher-order RSD (added for Gauss quadrature)
     pk_nw: Float[Array, "Nk"]           # no-wiggle P(k) in (Mpc/h)³
     pk_w:  Float[Array, "Nk"]           # wiggle P(k) = pk_lin - pk_nw
-    sigma2_bao: float                    # isotropic BAO damping Σ²_BAO in (Mpc/h)²
-    delta_sigma2_bao: float              # anisotropic correction δΣ²_BAO in (Mpc/h)²
+    sigma2_bao: Float[Array, ""]         # isotropic BAO damping Σ²_BAO in (Mpc/h)²
+    delta_sigma2_bao: Float[Array, ""]   # anisotropic correction δΣ²_BAO in (Mpc/h)²
     P22_mu6_vv: Float[Array, "Nk"]      # P22 bare mu^6 vv coefficient
     P22_mu6_vd: Float[Array, "Nk"]      # P22 bare mu^6 vd coefficient
     P22_mu8:    Float[Array, "Nk"]      # P22 bare mu^8 coefficient
@@ -316,13 +316,25 @@ class EPTComponents:
             self.pk_nw, self.pk_w,                               # 43, 44
             self.P22_mu6_vv, self.P22_mu6_vd, self.P22_mu8, self.P13_mu6,  # 45-48
             self.Pk_2_dd, self.Pk_4_vd, self.Pk_4_dd,          # 49, 50, 51
+            # Scalars as leaves (tracer-safety for traced h/f/sigma2_bao/
+            # delta_sigma2_bao): these are the LAST FOUR leaves, in order
+            # h, f, sigma2_bao, delta_sigma2_bao -- see tree_unflatten below.
+            # Emitted bare (no jnp.asarray): the constructor already coerces,
+            # and transforming during flatten breaks eval_shape/vmap-sentinel
+            # round-trips.
+            self.h, self.f, self.sigma2_bao, self.delta_sigma2_bao,
         ]
-        aux = (self.h, self.f, self.sigma2_bao, self.delta_sigma2_bao)
+        aux = None
         return arrays, aux
 
     @classmethod
     def tree_unflatten(cls, aux, arrays):
-        h, f, sigma2_bao, delta_sigma2_bao = aux
+        # The four scalars are the LAST FOUR leaves, in order h, f,
+        # sigma2_bao, delta_sigma2_bao (matches tree_flatten above).
+        # Negative indexing so the tail stays correct if the array-leaf
+        # count above it changes.
+        h, f, sigma2_bao, delta_sigma2_bao = (
+            arrays[-4], arrays[-3], arrays[-2], arrays[-1])
         return cls(
             kh=arrays[0], h=h, f=f,
             Pk_tree=arrays[1], Pk_loop=arrays[2], Pk_ctr=arrays[3],
@@ -1446,8 +1458,8 @@ def _compute_bias_spectra(
 def compute_ept(
     pk_lin_h: Float[Array, "Nk"],
     k_h: Float[Array, "Nk"],
-    h: float,
-    f: float,
+    h: float | Float[Array, ""],
+    f: float | Float[Array, ""],
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     _ir_precomputed: Optional[tuple] = None,
     rs_h: float = 99.0,
@@ -1462,8 +1474,11 @@ def compute_ept(
                   Must be evaluated at k_h = EPT k-grid (prec.kmin_h to prec.kmax_h)
         k_h:      EPT k-grid [h/Mpc], shape (Nmax,)
                   Should match EPT_kgrid(prec) for best accuracy
-        h:        Hubble parameter h = H₀/100
+        h:        Hubble parameter h = H₀/100 (float or scalar jnp array;
+                  may be traced -- stored as an EPTComponents pytree leaf)
         f:        growth rate f = d ln D / d ln a at the target redshift
+                  (float or scalar jnp array; may be traced -- stored as an
+                  EPTComponents pytree leaf)
         prec:     EPT precision parameters (static)
         _ir_precomputed: optional tuple (pk_nw_np, pk_w_np, sigma2_bao) from
                   _ir_resummation_numpy(), pre-computed outside the JAX trace.
@@ -1624,18 +1639,18 @@ def compute_ept(
         pk_w=pk_w if prec.ir_resummation else None,
     )
 
-    _sigma2 = float(sigma2_bao) if sigma2_bao is not None else 0.0
-    _delta_sigma2 = float(delta_sigma2_bao) if delta_sigma2_bao is not None else 0.0
+    _sigma2 = sigma2_bao if sigma2_bao is not None else 0.0
+    _delta_sigma2 = delta_sigma2_bao if delta_sigma2_bao is not None else 0.0
 
     return EPTComponents(
-        kh=k_h, h=h, f=f,
+        kh=k_h, h=jnp.asarray(h), f=jnp.asarray(f),
         Pk_tree=Pk_tree,
         Pk_loop=Pk_loop,
         Pk_ctr=Pk_ctr,
         pk_nw=pk_nw,
         pk_w=pk_w,
-        sigma2_bao=_sigma2,
-        delta_sigma2_bao=_delta_sigma2,
+        sigma2_bao=jnp.asarray(_sigma2),
+        delta_sigma2_bao=jnp.asarray(_delta_sigma2),
         **bias,
     )
 
@@ -2008,6 +2023,32 @@ def compute_ept_from_clax(
 
     Returns:
         EPTComponents in h-units
+
+    Note (stop_gradient rationale): `h` is traced throughout, including the
+    k_mpc = k_h * h resampling of delta_m/the primordial spectrum onto the
+    EPT k-grid, so d(pk_h)/dh carries the k-resampling channel exactly as
+    finite differences do (issue #30 item 4; previously frozen at -9.48e4
+    of the stage h-gradient, GPU job 13313). Three channels remain
+    deliberately frozen via stop_gradient:
+      - the numpy IR-resummation input (`_ir_resummation_numpy` runs on a
+        stop_gradient snapshot of pk_h; its DST grid is built from
+        np.linspace(7e-5/h, 7/h, ...) at a concrete h) -- required because
+        that routine is plain NumPy/scipy, not JAX;
+      - the rs_h (sound-horizon) channel feeding compute_ept: job 13313
+        measured rs_h together with f and the then-frozen h argument at
+        -1.0e2 of the stage h-gradient, bounding the rs_h channel below
+        that; tracing it would require reimplementing the Sigma^2_BAO
+        integral in jnp;
+      - pk_nw, the no-wiggle broadband split inside the IR precompute,
+        which structurally drops d(pk_nw)/d(pk_lin_h) -- the documented
+        1.39% ln10A_s-class residual (job 13132; see
+        tests/test_ept_gradients.py::test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd),
+        plus the same frozen split reused by the RSD FFTLog bases downstream:
+        compute_ept's RSD 1-loop quadratic forms are built via
+        _fftlog_decompose on the numpy _ir_precomputed pk_nw/pk_w arrays
+        (~line 1594-1596), so RSD-multipole gradients also carry this
+        frozen-wiggle channel. pk_mm_real is unaffected -- it never reads
+        those FFTLog bases.
     """
     from clax.transfer import compute_pk_from_perturbations
     from clax.primordial import primordial_scalar_pk
@@ -2015,23 +2056,23 @@ def compute_ept_from_clax(
 
     from clax.background import sound_horizon_drag
 
-    h = params.h  # JAX scalar — keep traced so d(pk_h)/d(h) flows through h³ factor
-    # Concrete scalar for numpy IR resummation and compute_ept's h argument.
-    # stop_gradient is safe: rs_h and h_conc only enter damping/unit conversions,
-    # not the loop integrals that carry the gradient.
+    h = params.h  # traced: carries d(pk_h)/dh AND the k-resampling channel
+    # Concrete copies EXIST ONLY for the numpy IR-resummation call below,
+    # whose DST grid endpoints are 7e-5/h .. 7/h feeding np.linspace
+    # (must stay concrete). Do NOT reuse them anywhere else: reusing
+    # h_conc for k_mpc was the frozen resampling channel measured at
+    # -9.48e4 of the stage h-gradient (GPU job 13313, issue #30 item 4).
     h_conc = float(jax.lax.stop_gradient(h))
-    # Cosmology-consistent BAO sound horizon for IR resummation. Convention:
-    # rs_h := r_s_drag * h, in Mpc (matches CLASS-PT pth->rs_d * h numerically;
-    # see nonlinear_pt.c:5637 qint2 * rbao = k_h * rs_h_value).
     rs_h_value = float(jax.lax.stop_gradient(sound_horizon_drag(params))) * h_conc
 
-    # EPT k-grid in h/Mpc → convert to Mpc⁻¹ for clax
-    k_h = ept_kgrid(prec)  # h/Mpc, static numpy array
-    k_mpc = k_h * h_conc   # Mpc⁻¹; h_conc keeps k_mpc a plain numpy array
+    # EPT k-grid in h/Mpc (static shape source) -> Mpc^-1, TRACED in h so
+    # the delta_m/primordial sampling points move with h under AD exactly
+    # as they do under finite differences.
+    k_h = ept_kgrid(prec)              # static numpy array
+    k_mpc = jnp.asarray(k_h) * h       # traced jnp array
 
     # Get δ_m at each k, at redshift z, from perturbation result
     # Then P_lin(k) = 2π²/k³ × A_s × (k/k_pivot)^{n_s-1} × δ_m²
-    A_s = jnp.exp(params.ln10A_s) * 1e-10
     lnk_pt  = jnp.log(pt.k_grid)
     lnk_out = jnp.log(jnp.array(k_mpc))
 
@@ -2055,10 +2096,22 @@ def compute_ept_from_clax(
     pk_mpc3 = 2.0 * jnp.pi**2 / k_arr ** 3 * prim * delta_m_ept ** 2
 
     # Convert to h-units: P_h = P * h³,  k_h = k / h
-    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³ — h is JAX-traced here for d(pk_h)/d(h)
+    # NOTE: this explicit h**3 cancels exactly against the 1/k_arr**3
+    # prefactor in pk_mpc3 above (k_arr = k_mpc = k_h * h), so it contributes
+    # nothing to d(pk_h)/dh. The true h-derivative is carried entirely by
+    # the h-dependent k-resampling of the primordial spectrum and delta_m
+    # spline (k_mpc = k_h * h, traced above) -- which is why the pre-fix
+    # gradient (with that resampling frozen via stop_gradient) was spurious:
+    # amplitude-only, from this h**3 factor alone.
+    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³
 
-    # Growth rate f ≈ Ω_m(z)^0.55 (approximation; improve later)
-    f = float(jax.lax.stop_gradient(bg.Omega_m_of_z(z))) ** 0.55 if hasattr(bg, "Omega_m_of_z") else 0.8
+    # Growth rate from the background solve (f = dlnD/dlna spline),
+    # z-consistent and differentiable. The previous expression
+    # `float(sg(bg.Omega_m_of_z(z)))**0.55 if hasattr(...) else 0.8`
+    # ALWAYS took the fallback (BackgroundResult has no Omega_m_of_z):
+    # every multipole was computed with the literal f = 0.8 regardless
+    # of cosmology or redshift. cf. background.py:681 (f_of_loga).
+    f = bg.f_of_loga.evaluate(jnp.log(1.0 / (1.0 + z)))
 
     # Pre-compute IR resummation with a concrete (stop_gradient) snapshot of pk_h so
     # that compute_ept uses the _ir_precomputed path. In that path:
@@ -2068,6 +2121,9 @@ def compute_ept_from_clax(
     ir_pre = _ir_resummation_numpy(
         np.array(jax.lax.stop_gradient(pk_h)), k_h, rs_h=rs_h_value, h=h_conc,
     )
-
-    return compute_ept(pk_h, jnp.array(k_h), h=h_conc, f=f, prec=prec,
+    # h/rs_h are dead arguments on the _ir_precomputed path (audit
+    # 2026-08-31: h only reaches the pytree record, rs_h only the untaken
+    # numpy branch) -- pass the traced h for the record, keep rs_h at the
+    # concrete value the IR tuple was built with.
+    return compute_ept(pk_h, jnp.array(k_h), h=h, f=f, prec=prec,
                         rs_h=rs_h_value, _ir_precomputed=ir_pre)

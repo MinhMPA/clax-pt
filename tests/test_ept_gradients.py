@@ -649,6 +649,32 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     Heavy: 3 full perturbation solves (AD + FD+ + FD-) at the same
     fast_cl(k_max=5.0) precision as the shared ``pipeline_fast_cl_k5``
     fixture, so full mode only.
+
+    FINDING (post k_mpc-channel fix; real, explained, not a bug -- same
+    class as the ln10A_s FINDING above): before this branch,
+    ``compute_ept_from_clax`` resampled onto ``k_mpc = k_h *
+    stop_gradient(h)`` -- the h-dependence of that resampling was frozen out
+    of the AD graph entirely, and a GPU stage-level probe (job 13313)
+    attributed -9.48e4 of the stage gradient to exactly that channel. This
+    test measured AD-vs-FD rel_err ~0.95% against that bug (structural
+    coincidence: the frozen k_mpc channel and the frozen-pk_nw IR-split
+    residual, of opposite sign, partially cancelled in the ``sum``). Commit
+    8bd9cdb traced the k_mpc channel through h. A GPU run (job 14140)
+    post-fix measured AD=4.039169e6 vs FD=3.991575e6, rel_err=1.1924e-02
+    (1.19%) -- *not* smaller than the pre-fix ~0.95%, because the two
+    partially-cancelling errors are gone and only the frozen-pk_nw residual
+    remains (same class as the 1.39% ln10A_s finding above, job 13132: the
+    precomputed-IR split computes ``pk_nw`` via plain NumPy on a
+    ``stop_gradient``-frozen snapshot of ``pk_h``, so
+    ``d(pk_nw)/d(pk_lin_h)`` is structurally dropped). The stage-level
+    per-k companion test (``test_stage_grad_h_matches_fd_per_k`` in
+    ``tests/test_ept_h_channels.py``) is the cleaner signal that the k_mpc
+    fix itself worked: median per-k rel err dropped from 8.760e-01 (RED,
+    job 14136) to 3.294e-02 (GREEN, job 14140). The bound below (0.03) is
+    2x the measured 1.1924e-02 (=0.0238), rounded up to one significant
+    figure -- never tighter than 2x measured, per this branch's ratchet
+    rule -- not the plan's original placeholder 0.02, and not a value
+    picked to make the test pass.
     """
     if fast_mode:
         pytest.skip("3 full perturbation solves -- full mode only")
@@ -684,7 +710,13 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     print(f"\nd(sum(pk_mm_real))/dh [full CosmoParams pipeline]: "
           f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
 
-    assert rel_err < 0.15, (
+    # 3% = 2x the measured 1.1924e-02 (job 14140), rounded up to one
+    # significant figure -- never tighter than 2x measured. See FINDING in
+    # the docstring: post k_mpc-channel fix, the residual is the same
+    # frozen-pk_nw structural class as the 1.39% ln10A_s finding, not a bug.
+    assert rel_err < 0.03, (
         f"AD vs FD disagree for d(sum(pk_mm_real))/dh (full CosmoParams "
-        f"pipeline): AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%}"
+        f"pipeline): AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%} "
+        f"(expected <3%; see FINDING in this test's docstring -- the "
+        f"frozen-pk_nw IR-split residual, same class as the ln10A_s finding)"
     )

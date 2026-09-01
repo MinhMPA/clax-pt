@@ -12,7 +12,10 @@ true total is ~1e-3 or exactly 0, leaving exact-ULP residue (e.g. 2^-9).
 Measured upstream symptoms: end-to-end d(sum(pk_mm_real))/dh = 4.107387e6 vs
 truth 4.029578e6 (+1.9%); thermo-chain reverse probe 8.66e7 vs true 1.16e5
 (749x); on this file's CPU precision block, grad/jvp of sum(g^2) w.r.t. h
-disagree by a factor ~52 (measured 2026-08-29, login-node probe).
+disagree by a factor ~52 (measured 2026-08-29, login-node probe). NOTE: the
+4.029578e6 truth above predates the traced EPT k_mpc channel (branch
+fix/ept-traced-h-channels); the post-trace value for the same functional is
+4.039169e6 -- see CHANGELOG.md, Sep 1, 2026.
 
 The fix under test (issue #30 fix option 2): a fused entry point
 ``clax.thermodynamics.solve_background_and_thermo(params, prec)
