@@ -22,8 +22,17 @@ import pytest
 from dataclasses import replace as dc_replace
 
 from clax import PrecisionParams
-from clax.background import background_solve
-from clax.thermodynamics import thermodynamics_solve
+from clax.thermodynamics import solve_background_and_thermo
+
+# NOTE (measured, GPU job 14153): these tests MUST route through the fused
+# solve_background_and_thermo entry point. A first version called
+# background_solve + thermodynamics_solve directly -- which PR #33
+# deliberately leaves on the NATIVE reverse path -- and reproduced the
+# issue #30 catastrophic-cancellation garbage across the grid: reverse-vs-
+# forward rel errors of 1.9e4 (fiducial), 2.0e11 (omega_b_high), 8.9e3
+# (omega_cdm_low)... while h_high alone looked clean at 8.5e-10. That run
+# is itself the best argument for this rule: a single-cosmology test at
+# h_high would have certified a broken gradient path.
 
 _PREC = PrecisionParams.fast_cl()
 # Forward-mode arm: custom_vjp blocks jvp, and background's diffrax solve
@@ -41,8 +50,7 @@ _AD_CONSISTENCY_RTOL = 1e-4
 def _thermo_functional(prec):
     def f(h_val, base_params):
         p = base_params.replace(h=h_val)
-        bg = background_solve(p, prec)
-        th = thermodynamics_solve(p, prec, bg)
+        bg, th = solve_background_and_thermo(p, prec)
         # Scalar functional touching the recombination-era tables that
         # issue #30 implicated: quadratic so gradients weight the tables.
         return (jnp.sum(th.xe_of_loga.y ** 2)
@@ -78,7 +86,6 @@ def test_thermo_grad_matches_jvp_across_cosmologies(lcdm_cosmology):
 def test_thermo_primal_finite_across_cosmologies(lcdm_cosmology):
     """The thermo chain produces finite tables at every LCDM grid point."""
     name, params = lcdm_cosmology
-    bg = background_solve(params, _PREC)
-    th = thermodynamics_solve(params, _PREC, bg)
+    bg, th = solve_background_and_thermo(params, _PREC)
     for leaf in jax.tree_util.tree_leaves(th):
         assert jnp.all(jnp.isfinite(leaf)), f"[{name}] non-finite thermo leaf"
