@@ -20,14 +20,14 @@ from __future__ import annotations
 
 import functools
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from clax import constants as const
-from clax.background import BackgroundResult
+from clax.background import BackgroundResult, background_solve
 from clax.interpolation import CubicSpline
 from clax.params import CosmoParams, PrecisionParams
 
@@ -998,3 +998,177 @@ def _estimate_z_reio(tau_reio_target):
 def xe_of_z(th: ThermoResult, z: float) -> float:
     loga = jnp.log(1.0 / (1.0 + z))
     return th.xe_of_loga.evaluate(loga)
+
+
+# ---------------------------------------------------------------------------
+# Fused background + thermodynamics solve with reverse-mode-stable AD
+# (issue #30, fix option 2: "vjp-through-jvp")
+# ---------------------------------------------------------------------------
+#
+# Why this exists — https://github.com/smsharma/clax/issues/30:
+# reverse-mode AD (jax.grad) through thermodynamics_solve carries a ~2% error
+# on h-like parameters. The Peebles/RECFAST recombination rates contain
+# Boltzmann-exponential ratios (exp(B/kT) ~ e^52, cf. _recfast_dxHII_dlna:
+# Rup = Rdown*(CR*TM)^{3/2}*exp(-CDB/TM), wrap_recfast.c:133-134), so AD
+# intermediates reach ~1e13. Forward mode pairs huge x tiny factors locally
+# per grid point — nothing large is ever formed, and jax.jvp was verified
+# exact against converged finite differences six independent ways. Reverse
+# mode must contract thousands of +-1e13-scale cotangent terms through shared
+# scalars whose true total is ~1e-3 (or exactly 0); float64 keeps a
+# deterministic ULP residue (measured: xe.y full-table reverse "derivative"
+# = 2^-9 exactly; thermo-chain reverse 8.66e7 where the truth is 1.16e5).
+#
+# The fix: a custom reverse rule that computes the SAME mathematical object,
+# J^T ct, by re-association: (J^T ct)_i = <ct, J e_i>, evaluating the columns
+# J e_i with a batched forward-mode basis (jax.jacfwd) over the ~20 traced
+# CosmoParams leaves. This replaces the numerically pathological contraction
+# order with the proven-exact forward order — identical arithmetic content,
+# no approximation, no fudge factors. Cost: one extra primal + ~20 fused
+# forward tangent passes in the backward (a few times one bg+thermo solve;
+# negligible next to any perturbation solve).
+#
+# Both bg and th cotangents are handled here (hence the FUSED entry point):
+# the fused function's only differentiable input is CosmoParams, so the
+# entire bg -> th chain — including the bg-mediated channel whose reverse
+# health was never established — is covered by the forward basis.
+
+
+def _solve_bg_th_native(
+    params: CosmoParams,
+    prec: PrecisionParams,
+) -> tuple[BackgroundResult, ThermoResult]:
+    """Plain (native-AD) fused solve: background then thermodynamics.
+
+    Exactly the two-call sequence every pipeline entry point used before
+    issue #30; kept as a separate function so the stable custom_vjp wrapper
+    and the "native" mode share one primal implementation.
+    """
+    bg = background_solve(params, prec)
+    th = thermodynamics_solve(params, prec, bg)
+    return bg, th
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(1,))
+def _solve_bg_th_stable(
+    params: CosmoParams,
+    prec: PrecisionParams,
+) -> tuple[BackgroundResult, ThermoResult]:
+    """Fused solve wrapped in jax.custom_vjp (reverse-mode-stable rule).
+
+    Primal is identical to the native path. Only the reverse rule differs:
+    see _solve_bg_th_stable_bwd. NOTE: jax.custom_vjp blocks forward-mode
+    (jax.jvp raises TypeError); forward-mode users must select
+    th_grad_mode="native" (cf. tests/test_pk_forward_mode.py).
+    """
+    return _solve_bg_th_native(params, prec)
+
+
+def _solve_bg_th_stable_fwd(params, prec):
+    """custom_vjp forward rule: run the primal, save params as residual.
+
+    The backward pass re-derives everything it needs from params via the
+    forward basis, so params is the only residual (the primal outputs are
+    recomputed inside the batched jacfwd pass, sharing one primal across
+    all ~20 tangent directions).
+    """
+    return _solve_bg_th_native(params, prec), params
+
+
+def _solve_bg_th_stable_bwd(prec, params, cotangents):
+    """custom_vjp backward rule: params cotangent via a forward-mode basis.
+
+    Computes bar_params = J^T ct where J = d(bg, th)/d(params), as
+        bar_theta_i = d/dtheta_i <ct, (bg, th)(theta)>,
+    i.e. the gradient of the scalar contraction of the (constant) output
+    cotangent with the fused solve, evaluated by jax.jacfwd over the stacked
+    CosmoParams leaves theta. This is mathematically identical to the native
+    VJP — the associativity of the chain-rule contraction is the ONLY thing
+    that changes — but every product huge*tiny is formed locally per grid
+    point (forward mode), so no +-1e13-scale partial sums ever exist. The
+    final <ct, tangent> reduction only sums output-sized, output-scaled
+    terms — the same benign reduction any VJP must perform.
+
+    ode_adjoint="direct" is forced INSIDE the basis only: background_solve's
+    production default RecursiveCheckpointAdjoint is an eqx.filter_custom_vjp
+    (diffrax/_adjoint.py:538) which blocks jvp, while DirectAdjoint supports
+    both AD modes. This does not alter caller-visible semantics: the primal
+    result the caller sees was produced under the caller's own prec, and the
+    adjoint choice only selects how derivatives are propagated, not the
+    solution. thermodynamics_solve itself is a semi-implicit lax.scan with
+    no diffrax solve, so it is jvp-transparent under any prec.
+
+    Verified (2026-08-29, CPU probe on the exact construction below):
+    grad(stable) matches jvp to 1.2e-16..8.1e-15 relative across
+    {sum(xe^2), random-linear, sum(g^2)} x {h, omega_b}, where the native
+    reverse showed 5.1e-11 (well-scaled) up to 5.2e+1 (near-zero-derivative)
+    relative error on the same block.
+    """
+    prec_fwd = dataclass_replace(prec, ode_adjoint="direct")
+    leaves, treedef = jax.tree_util.tree_flatten(params)
+    theta = jnp.stack([jnp.asarray(leaf) for leaf in leaves])
+
+    def contracted(theta_vec):
+        p = jax.tree_util.tree_unflatten(
+            treedef, [theta_vec[i] for i in range(len(leaves))]
+        )
+        out = _solve_bg_th_native(p, prec_fwd)
+        # <ct, out>: all BackgroundResult/ThermoResult leaves are float
+        # arrays or scalars (no integer leaves), so a plain vdot per leaf
+        # is well-defined. ct is treated as a constant here — its gradient
+        # contribution is exactly the VJP row we want.
+        products = jax.tree_util.tree_map(
+            lambda ct_leaf, out_leaf: jnp.vdot(ct_leaf, out_leaf),
+            cotangents, out,
+        )
+        return jax.tree_util.tree_reduce(lambda a, b: a + b, products)
+
+    grad_vec = jax.jacfwd(contracted)(theta)
+    params_bar = jax.tree_util.tree_unflatten(
+        treedef, [grad_vec[i] for i in range(len(leaves))]
+    )
+    return (params_bar,)
+
+
+_solve_bg_th_stable.defvjp(_solve_bg_th_stable_fwd, _solve_bg_th_stable_bwd)
+
+
+def solve_background_and_thermo(
+    params: CosmoParams,
+    prec: PrecisionParams = PrecisionParams(),
+) -> tuple[BackgroundResult, ThermoResult]:
+    """Fused background + thermodynamics solve, (params, prec) -> (bg, th).
+
+    The ONLY differentiable input is params (prec is static), which lets a
+    single custom reverse rule cover the whole bg -> th chain. Dispatch is
+    on the static flag prec.th_grad_mode:
+
+    - "stable" (default): jax.custom_vjp whose backward pass evaluates the
+      params cotangent for BOTH outputs via a batched forward-mode basis
+      ("vjp-through-jvp") — fixes the issue #30 recombination-era
+      catastrophic-cancellation error in native reverse mode. jax.jvp
+      through this mode raises TypeError (custom_vjp caveat).
+    - "native": plain background_solve + thermodynamics_solve — bitwise the
+      pre-issue-#30 behavior in both primal and AD; required for
+      forward-mode (jax.jvp / jax.jacfwd) users.
+
+    The primal outputs are identical in both modes. Existing public APIs
+    background_solve(params, prec) and thermodynamics_solve(params, prec,
+    bg) are unchanged and remain fully supported; this entry point is what
+    the main pipeline functions (clax.compute, clax.compute_pk_table,
+    clax.compute_pk) route through.
+
+    Args:
+        params: cosmological parameters (JAX-traced)
+        prec: precision parameters (static)
+
+    Returns:
+        (BackgroundResult, ThermoResult)
+    """
+    if prec.th_grad_mode == "stable":
+        return _solve_bg_th_stable(params, prec)
+    if prec.th_grad_mode == "native":
+        return _solve_bg_th_native(params, prec)
+    raise ValueError(
+        f"Unknown PrecisionParams.th_grad_mode: {prec.th_grad_mode!r} "
+        f"(expected 'stable' or 'native')"
+    )

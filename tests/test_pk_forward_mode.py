@@ -54,11 +54,19 @@ Why ``ode_adjoint="direct"`` is required (not optional):
     forward-mode JVP tests (``_thermo_jvp_fd_pair``, ``PREC_JVP``); this test
     mirrors that pattern one layer up, through the full perturbation solve.
 
-Note for the record: clax itself defines ZERO ``jax.custom_vjp`` rules. All
-four custom-AD-rule sites (``thermodynamics.py`` x2, ``shooting.py``,
-``perturbations.py``) are ``jax.custom_jvp``, which supports forward mode
-directly. The forward-mode blocker probed here is entirely inside
-``diffrax``'s ``RecursiveCheckpointAdjoint`` implementation, not a clax bug.
+Note for the record: at the time this file was written, clax defined ZERO
+``jax.custom_vjp`` rules — all four custom-AD-rule sites
+(``thermodynamics.py`` x2, ``shooting.py``, ``perturbations.py``) were
+``jax.custom_jvp``, which supports forward mode directly, so the
+forward-mode blocker probed here was entirely inside ``diffrax``'s
+``RecursiveCheckpointAdjoint`` implementation. Since the issue #30 fix,
+clax has exactly ONE ``jax.custom_vjp``: the reverse-mode-stable fused
+solve ``thermodynamics.solve_background_and_thermo`` routes through it when
+``PrecisionParams.th_grad_mode == "stable"`` (the default), and that rule —
+like any ``custom_vjp`` — blocks ``jax.jvp``. This file therefore sets
+``th_grad_mode="native"`` in its precision block to keep exercising the
+plain forward path end-to-end (the documented escape hatch for
+forward-mode users; cf. tests/test_thermo_reverse_composite.py).
 
 Precision mirrors ``diags/diag_grad_jvp_direct.py``, the probe that first
 established forward-mode ``jax.jvp`` works end-to-end through
@@ -85,6 +93,10 @@ _PROBE_PREC_DIRECT = PrecisionParams(
     pt_ode_rtol=1e-5, pt_ode_atol=1e-6,
     ode_max_steps=16384, pt_ode_solver="rodas5",
     ode_adjoint="direct",
+    # jax.jvp cannot cross the custom_vjp of the stable fused bg+thermo
+    # solve (issue #30 fix); "native" keeps the plain forward path this
+    # file exists to probe. See module docstring, "Note for the record".
+    th_grad_mode="native",
 )
 _PROBE_PREC_RECURSIVE = dataclasses.replace(
     _PROBE_PREC_DIRECT, ode_adjoint="recursive_checkpoint",

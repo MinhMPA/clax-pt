@@ -8,6 +8,331 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Sep 2, 2026: Multi-cosmology testing RULE (3-5 cosmologies, canonical grids + fixtures)
+
+**New project rule (CLAUDE.md "Test at many parameter points" is now
+binding):** every new or modified physics-facing test (values or gradients)
+must run at 3-5 distinct cosmologies. Motivated directly by issue #30: the
+2.34% h-gradient discrepancy was two independent AD errors whose signs
+nearly cancelled at fiducial LCDM — fiducial-only tests were structurally
+blind to both.
+
+- `tests/conftest.py`: canonical `COSMOLOGY_GRID_LCDM` (fiducial, h+10%,
+  omega_b+20%, omega_cdm-20%, ns+5% — locked to
+  `scripts/generate_multipoint_reference.py`) and `COSMOLOGY_GRID_NULCDM`
+  (m_ncdm = 0.06/0.15/0.3 eV) with parametrized fixtures `lcdm_cosmology` /
+  `nulcdm_cosmology` (fiducial-only under `--fast`), plus
+  `cosmology_reference_dir()` for reference-data lookup.
+- `tests/test_multicosmo_consistency.py`: reference implementation —
+  reverse-mode (stable custom-vjp) vs forward-mode (native+direct) AD
+  consistency and primal finiteness through background+thermodynamics at
+  every LCDM grid point.
+- Exemptions (cosmology-independent numerics) and cost guidance (slow-mark
+  expensive points, never shrink below 3 in full mode) documented in
+  CLAUDE.md.
+
+### Sep 2, 2026: Chebyshev k-sampling phase 1 (issue #31, opt-in)
+
+**Adds an opt-in Chebyshev-Lobatto k-grid + barycentric source interpolation
+path for C_l, alongside the existing log-uniform-grid + cubic-spline path.
+No default changes: `PrecisionParams.pt_k_grid_type` defaults to `"log"` and
+`k_interp_method` defaults to `"spline"` in every entry point; no preset
+sets either. ADR: `docs/adr/0002-chebyshev-k-sampling.md`.**
+
+Motivated by the open ℓ>1200 k-integration debt (`CHANGELOG.md` ~line 1312,
+`BENCHMARK.md:340`) and by arXiv:2608.24682 (Sletmoen 2026; method note at
+`docs/superpowers/plans/notes-2608.24682-method.md`, committed 605d8c8),
+which solves perturbation ODEs only at Chebyshev k-nodes and
+Chebyshev-interpolates the smooth source `S(τ,k)` — never `Δ_ℓ(k)` itself,
+which stays an explicit fine-grid quadrature with the exact Bessel function,
+matching clax's existing constraint recorded at `CHANGELOG.md:2192-2199`
+("must interpolate SOURCE functions, not `T_l(k)`").
+
+**New pieces:**
+- `clax/interpolation.py`: `chebyshev_lobatto_nodes(a, b, n)` (static numpy
+  grid constructor) + `ChebyshevInterpolant` (barycentric evaluation, JAX
+  pytree, `CubicSpline`-matching clip-saturating boundary policy).
+- `clax/params.py`: static `PrecisionParams.pt_k_grid_type: str = "log"`
+  (`"log" | "chebyshev"`).
+- `clax/perturbations.py`: `_k_grid()` honors the knob — `"chebyshev"`
+  places Lobatto nodes in `log10(k)` with the same count/endpoints as the
+  log path.
+- `clax/harmonic.py`: `_interp_sources_to_fine_k(..., method=)` gains a
+  `"chebyshev"` path (one dense barycentric matrix `_barycentric_matrix`,
+  applied as a single matmul per source), threaded as `k_interp_method=`
+  through `compute_cl_tt_interp`/`compute_cl_ee_interp`/`compute_cl_te_interp`/
+  `compute_cls_all_interp`/`compute_cls_all_fast`. `compute_cl_bb` keeps its
+  native inline spline (out of scope). Fine grid stays log-uniform +
+  trapezoid regardless of the knobs (four duplicate call sites consolidated
+  into one `_fine_log_k_grid` helper, pure refactor). Precondition, empirically
+  validated: `k_interp_method="chebyshev"` requires
+  `pt_k_grid_type="chebyshev"` (and the converse) — chebyshev grid + spline
+  interp is the worst combination measured (see below).
+
+**A/B results (GPU, V100, planck_cl base + `pt_k_max_cl=1.0`, ℓ_max=2000, vs
+CLASS reference, pct = (clax−CLASS)/|CLASS|·100; jobs 14138+14141):**
+
+| grid | kpd | interp | n_k | t_pt(s) | t_cl(s) | TT500 | TT1000 | TT1500 | TT2000 | EE500 | EE1000 | EE1500 | EE2000 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| log | 30 | spline | 150 | 5360 | 11.25 | -0.85 | -1.51 | -5.16 | -5.78 | -0.406 | 0.127 | -3.00 | -0.864 |
+| log | 60 | spline | 300 | 6397 | 3.48 | -0.778 | -0.907 | -3.21 | 0.47 | -0.386 | 0.286 | -1.70 | 0.997 |
+| chebyshev | 30 | spline | 150 | 5028 | 3.26 | -0.984 | -2.67 | -7.02 | -10.1 | -0.496 | -0.0832 | -5.37 | -2.47 |
+| chebyshev | 30 | chebyshev | 150 | 5117 | 4.23 | -0.727 | -0.83 | -3.09 | 2.01 | -1.16 | 0.285 | -0.587 | 2.68 |
+| chebyshev | 60 | spline | 300 | 5860 | 3.22 | -0.785 | -0.951 | -3.32 | 0.529 | -0.39 | 0.262 | -1.72 | 0.353 |
+| chebyshev | 60 | chebyshev | 300 | 5967 | 12.84 | -0.773 | -0.878 | -3.13 | 0.938 | -0.426 | 0.334 | -1.56 | 0.277 |
+
+(Full 18-column table with TT/EE20/100 in `docs/adr/0002-chebyshev-k-sampling.md`.
+All six cells share a common −0.8..−1.0% offset at ℓ≤1000 that cancels in
+every cheb-vs-log differential; predates this branch and is not
+investigated here — BENCHMARK.md's planck_cl <0.2% claim was not
+reproduced by this probe's configuration.)
+
+**Density-convergence diagnostic (job 14142; cheb/log C_l ratio−1, fast_cl base):**
+
+| kpd | n_k | TT20 | TT100 | TT500 | EE20 | EE100 | EE500 |
+|---|---|---|---|---|---|---|---|
+| 15 | 62 | +0.0220% | +0.0538% | +1.7003% | +2.3767% | -0.0039% | +0.2397% |
+| 30 | 125 | -0.0125% | +0.0026% | +0.0831% | -0.0422% | +0.0076% | +0.0212% |
+| 60 | 250 | +0.0003% | +0.0002% | +0.0049% | +0.0040% | -0.0000% | +0.0011% |
+
+**Verdicts (STOP-and-report; measured, not softened):**
+1. Strict no-regression FAILS at exactly one probed point: TT ℓ=2000,
+   matched n_k=300 (cheb 0.938% vs log 0.47%, the only point where log
+   passes the 0.5% gate and cheb doesn't). Elsewhere ℓ≤1500 differentials
+   are ≤0.16pp; EE ℓ=2000 improves (0.277% vs 0.997%, log fails there).
+2. No node-count reduction demonstrated at planck scale (n_k=300 needed to
+   match log's n_k=300 across sampled ℓ), but chebyshev degrades far more
+   gracefully at n_k=150 (TT2000 2.01% vs log's −5.78%).
+3. ℓ>1200 is NOT materially improved at matched density — the residual
+   high-ℓ error is common to both arms, so it lives outside the coarse-k
+   grid (likely the fine-grid/other stages), not closing the
+   `BENCHMARK.md:340` debt.
+4. Chebyshev grid + cubic spline is the worst combination (TT2000 −10.1%
+   at n_k=150) — confirms the Lobatto-grid/barycentric-interp precondition
+   both ways.
+5. **The committed GATE test `test_cls_chebyshev_path_matches_spline_path`
+   FAILS on GPU** (job 14138: TT ℓ=500 cheb/log ratio 1.0170 > 1.005 at
+   fast_cl density n_k=62) — the convergence table shows this is
+   discretization difference (1.70%→0.083%→0.005% as n_k rises), not an
+   implementation bug. Left as committed (fails without `--fast`); the
+   recommended recalibration to `pt_k_per_decade=30` (6x margin, ~10
+   min/arm) is NOT applied, pending maintainer ruling.
+6. Wall-clock: chebyshev is not slower (`t_pt` compile-dominated in fresh
+   processes; 5967 vs 6397s at n_k=300). Barycentric `t_cl` ≈ spline `t_cl`
+   once warm.
+7. GPU fastsuite hit its 3600s timeout in job 14138 with zero failures
+   observed up to the kill; per-file CPU runs during development were all
+   green (interpolation 11/11, chebyshev file 8/8, harmonic `--fast` 11/11,
+   harmonic+high_l 17/17).
+
+**Phase-2 backlog:**
+- ℓ-direction integer-rounded Chebyshev interpolation (paper §6; needs
+  non-integer-order-safe barycentric weight rebuild, not the closed form).
+- Preset flips (`fast_cl`/`planck_cl` defaulting to `pt_k_grid_type=
+  "chebyshev"`) — blocked on the open gate-density ruling and on closing
+  the ℓ>1200 gap this phase did not close.
+- `_cl_k_integral`/`_cl_k_integral_cross` `k_interp_factor>1` anti-pattern
+  (splines `T_l(k)` directly, contra `CHANGELOG.md:2192-2199` and the
+  paper) — needs its own design pass, likely "prefer the `*_interp` path"
+  rather than "Chebyshev-ify this function".
+- Investigate the −0.8..−1.0% ℓ≤1000 probe-config offset vs
+  `reference_data/lcdm_fiducial/cls.npz` (verdict 6 above) — orthogonal to
+  this PR, predates this branch.
+- Hybrid linear/log fine k-grid (`BENCHMARK.md:340`) remains the more
+  promising lead for the still-open ℓ>1200 debt (verdict 3).
+
+### Sep 2, 2026: Traced IR resummation -- no-wiggle split + Sigma^2 differentiable (issue #30)
+
+**The no-wiggle broadband split and IR-resummation damping (`Sigma^2`,
+`delta_Sigma^2`) inside `compute_ept_from_clax` ran through plain NumPy on a
+`stop_gradient`-frozen `pk_lin_h` -- the documented 1.39% ln10A_s-class
+residual (job 13132) left open by the Sep 1 h-channel fix.** Branch
+`fix/ir-resummation-traced`, six commits: `f71ef1a` (DST primitives),
+`01b5162` (traced splitter), `322a6ab` (wiring), `470dbba` (bound ratchets),
+`964754a` (h reattribution), `fa990b9` (ratio fix).
+
+**What was implemented.** New `_ir_resummation_jax`, a fully traced
+reimplementation of the CLASS-PT no-wiggle split: DST-II/IDST-II via
+`jnp.fft` odd-extension (scipy `ortho`-normalization parity ~1e-15;
+convention `sqrt(1/(2N))` per element, the `k=N-1` Nyquist term
+`sqrt(1/(4N))`; `idst2` implemented as the exact `jax.linear_transpose` of
+`dst2`, not a separate hand-derived inverse), clax's own `CubicSpline`
+(natural BC) for the low/high-order mode removal, and traced
+`Sigma^2`/`delta_Sigma^2` damping built from a traced
+`rs_h = sound_horizon_drag(params) * params.h`. Parity vs the original
+`_ir_resummation_numpy` at fiducial LCDM: `pk_nw` max rel err 1.95e-14,
+`sigma2`/`delta_sigma2` ~2e-15/~7e-15 -- numerically identical, now
+differentiable. `_ir_resummation_numpy` is untouched and remains the parity
+anchor; it continues to serve `compute_ept`'s direct/NumPy branch
+(`tests/test_ept_accuracy.py`: 9/9 passed, unchanged).
+
+**Two deliberate freezes remain (both documented in-line in `clax/ept.py`):**
+1. **DST grid endpoints + static `in_range` mask.** `k_min2 = 7e-5/h`,
+   `k_max2 = 7.0/h` and the boolean mask built from them stay outside the
+   traced graph -- these mirror CLASS-PT's own hardcoded cuts
+   (`nonlinear_pt.c:5322`), not a clax approximation.
+2. **RSD FFTLog basis inputs (PHASE-2 FREEZE).** Explicit `stop_gradient`,
+   deferred out of this branch's scope; verified below to be immaterial to
+   the `pk_mm_real` observable these tests exercise.
+
+**Before/after (GPU jobs 14146 @322a6ab and 14147 @470dbba, V100 igpu
+cluster, bit-for-bit identical across both runs):**
+
+| Metric | Before | After | Change |
+|---|---|---|---|
+| ln10A_s end-to-end AD-vs-FD | 1.39% (job 13132) | **1.8231e-07** | ~76,000x smaller (0.0139/1.8231e-07 ~= 76,244); bound 0.02 -> 4e-07 (~2.2x headroom) |
+| h end-to-end AD-vs-FD | 1.19% (job 14140) | **1.3831e-02 (1.38%)** | NOT closed; bound stays 0.03 |
+| Per-k d(pk_mm)/dh stage median | 3.294e-02 (job 14140) | **9.825e-03** | bound 0.05 -> 0.02 |
+| Stage-level ln10A_s (frozen bg/pt) | -- | **1.8231e-07** | bound <5e-3 |
+| jvp == vjp (ln10A_s, from CosmoParams) | -- | **3.52e-16** | required <1e-6 |
+
+**h attribution.** The h non-closure *falsifies* the hypothesis that the h
+residual is the same frozen-`pk_nw` class the ln10A_s test collapsed (if it
+were, h would have closed too). Leading attributed suspect: the
+**h-dependent static freezes** -- the DST grid endpoints (`7e-5/h`, `7/h`)
+and the static `in_range` mask, which move under central-FD perturbation of
+`h` but stay pinned under AD, so the "boundary-term derivative content is
+negligible" justification evidently fails at the ~1% level specifically for
+`h`. The RSD-basis freeze is *ruled out* for this residual: `pk_mm_real`
+never reads the FFTLog basis. Full-pipeline FD discretization noise is a
+secondary contributor. The endpoint/mask freeze is the concrete phase-2
+follow-up item.
+
+**Full-suite sweep (phase e, job 14146):** `pytest tests/ --fast -q`
+completed with exactly one failure,
+`test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5`
+(max-steps), confirmed pre-existing and owned by Track 1 (`chore/th-z-max-preset`
+lineage) -- zero file overlap with this branch's commits.
+
+### Sep 1, 2026: Trace the k_mpc h-channel and fix the hardcoded growth rate in EPT (issue #30, item 4)
+
+**Two AD-blocking bugs in `compute_ept_from_clax`'s h-gradient path, both hiding
+behind `stop_gradient`.** Branch `fix/ept-traced-h-channels`, six commits
+(f03a779, 8bd9cdb, 064171b, 2ed9809, d9fa701, 8aa52f1).
+
+**1. Frozen `k_mpc` resampling channel (commit 8bd9cdb).** `compute_ept_from_clax`
+resampled onto `k_mpc = k_h * stop_gradient(h)`, dropping the h-dependence of the
+resampling from the AD graph. A GPU stage-level probe (job 13313) attributed
+-9.48e4 of the stage h-gradient to exactly this channel. Traced `k_mpc` through
+`h` properly. **Stage-level per-k `d(pk_mm)/dh` AD-vs-FD median rel err: 8.760e-01
+RED (job 14136, pre-fix) -> 3.294e-02 GREEN (job 14140, post-fix; max 1.702e-01
+over 31 modes in k in [0.05, 0.3]), under the new channel test's 0.05 bound.**
+
+**2. Growth rate `f` was silently the literal `0.8` for every cosmology and
+redshift (commit d9fa701).** `hasattr(bg, "Omega_m_of_z")` was always `False` --
+`BackgroundResult` has no such attribute -- so the `**0.55` branch never ran and
+every call fell through to the hardcoded fallback. Fixed to
+`f = bg.f_of_loga.evaluate(log(a))`, the real background growth-rate spline
+(giving f=0.5258 at LCDM z=0, vs the old constant 0.8). **Blast radius**
+(verified independently by two agents, spot-checked by the controller): only
+the stored `ept.f` leaf and the f-dependent `EPTComponents` leaves (the
+RSD-multipole spectra, e.g. `Pk_IFG2_0/2`) move; no in-repo consumer's *output*
+changes, because every in-repo `compute_ept_from_clax` caller
+(`clax/lensing.py`, `scripts/benchmark_ept.py`, `scripts/profile_compile_time.py`,
+the test suite) reads only f-free outputs (`pk_mm_real`, `pk_gg_real`,
+`Pk_loop`); every in-repo RSD-multipole caller uses `compute_ept` directly with
+an explicit `f`. This supersedes the originating plan's prediction that
+`benchmark_ept.py` multipoles would move -- they don't, because that script never
+imports `pk_*_l0/l2/l4`. External callers computing RSD multipoles from
+`compute_ept_from_clax` results will see corrected (previously f=0.8-wrong)
+values.
+
+**3. `EPTComponents` aux -> leaves migration (commit 2ed9809).** Scalar fields
+made ordinary pytree leaves (tracer-safety prerequisite for both fixes above --
+a traced `h`/`f` closed over as aux data would escape its trace the same way the
+Aug 25 scalar-PID leak did).
+
+**End-to-end `d(sum(pk_mm_real))/dh` AD-vs-FD**: ~0.95% structural pre-fix
+(AD=4.0295939e6 vs FD=3.9915e6, measured post-#33) -> **1.1924e-02 (1.19%)
+post-fix** (job 14140: AD=4.039169e6, FD=3.991575e6; reconfirmed bit-identical
+on job 14143). The rise from 0.95% to 1.19% is real and expected, not a
+regression: pre-fix, the frozen `k_mpc` channel (-9.48e4 of the stage gradient,
+job 13313) partially *cancelled* the frozen-`pk_nw` residual (+3.27e4, opposite
+sign, same job) in the aggregate sum; post-fix the `k_mpc` channel is gone and
+the `pk_nw` residual stands alone -- exactly the "pk_nw share (~1-2%)" the
+originating plan anticipated as the post-fix floor.
+
+**Bound ratchet: `test_grad_h_end_to_end_from_cosmoparams_matches_fd`'s
+threshold 0.15 -> 0.03** (commit 8aa52f1). Per the plan's "never tighter than 2x
+measured" rule: 2 x 0.011924 = 0.023848, rounded up to one significant figure =
+0.03, overriding the plan's illustrative default of 0.02.
+
+**Deliberately stays frozen** (provenance corrected/documented, commit 064171b):
+the NumPy IR-resummation input (the DST grid endpoints `7e-5/h .. 7/h` feed
+`np.linspace`, which cannot accept tracers); the `rs_h` sound-horizon channel
+(job 13313 measured `rs_h` *together with* `f` and the then-frozen `h` argument
+at -1.0e2 of the stage h-gradient -- a bound on the bucket, not an isolated
+measurement of `rs_h` alone); `pk_nw`, the no-wiggle broadband split (the
+documented 1.39% ln10A_s-class residual, job 13132 -- `compute_ept_from_clax`
+computes it via plain NumPy on a `stop_gradient`-frozen snapshot of `pk_lin_h`).
+
+**Verified.** `tests/test_ept_h_channels.py` 3/3 green (job 14140);
+`tests/test_ept_gradients.py` 11/11 green under the new 0.03 bound (job 14143);
+`tests/test_ept_accuracy.py` green/untouched (job 14140 -- it feeds
+`compute_ept` directly with an explicit `f` from the reference NPZ, bypassing
+the traced channels this branch touches). `pytest tests/ --fast -q`: green
+except the single known pre-existing failure
+`test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5`
+(documented above under Aug 29, 2026, jobs 14019+14027, "no regressions";
+tracked separately as issue #30 item 5).
+
+**Stale cross-doc truth, superseded.** The Aug 29, 2026 entry's frozen-FD
+reference `4.029578e6` for `d(sum(pk_mm_real))/dh` predates this branch's
+traced `k_mpc` channel and no longer applies to that functional; the post-fix
+AD-graph value is **4.039169e6** (job 14140, reconfirmed bit-identical on job
+14143) -- future thermo reverse-mode probes must compare against the new value
+or re-freeze the channel.
+
+### Aug 29, 2026: Reverse-mode-stable fused bg+thermo solve (issue #30, "vjp-through-jvp")
+
+**`jax.grad` through `thermodynamics_solve` carried a ~2% h-gradient error from
+catastrophic FP cancellation in the recombination-era backward pass; forward
+mode is exact.** The Peebles/RECFAST Boltzmann-exponential ratios push AD
+intermediates to ~1e13; reverse mode contracts thousands of ±1e13-scale
+cotangent terms into shared scalars whose true total is ~1e-3 (or 0), leaving
+exact-ULP residue (measured: xe.y reverse "derivative" = 2^-9 exactly;
+thermo-chain reverse 8.66e7 vs true 1.16e5, 749x; end-to-end
+d(sum(pk_mm_real))/dh = 4.107e6 vs truth 4.0296e6).
+
+**Fix (issue #30 option 2).** New fused entry point
+`clax.thermodynamics.solve_background_and_thermo(params, prec) -> (bg, th)`
+whose only differentiable input is `CosmoParams`, wrapped in `jax.custom_vjp`
+and gated by the new static `PrecisionParams.th_grad_mode` flag
+(`"stable"` default | `"native"`, mirroring the `ode_adjoint` precedent).
+The stable backward computes the params cotangent for BOTH outputs as
+`(J^T ct)_i = <ct, J e_i>` via one batched `jax.jacfwd` basis over the ~20
+traced `CosmoParams` leaves — mathematically identical arithmetic, contraction
+re-associated into the proven-exact forward order; no approximation, no fudge
+factors. Inside the basis `ode_adjoint="direct"` is forced (diffrax's
+`RecursiveCheckpointAdjoint` is an `eqx.filter_custom_vjp` and blocks jvp)
+without changing caller-visible prec semantics. `clax.compute`,
+`clax.compute_pk_table`/`compute_pk_interpolator`, and `clax.compute_pk` route
+through the fused solve; `background_solve`/`thermodynamics_solve` public APIs
+are unchanged, and `clax.shooting` stays on its own custom_jvp path (its inner
+solves are closed over by an implicit-diff rule; not an acceptance path).
+
+**Caveat.** `jax.custom_vjp` blocks `jax.jvp`: forward-mode users must set
+`th_grad_mode="native"` (`tests/test_pk_forward_mode.py` now does; its
+"clax has zero custom_vjp rules" note is updated). ADR:
+`docs/adr/0001-thermo-reverse-mode-vjp-through-jvp.md`.
+
+**Verified (CPU, login node).** grad(stable) vs jvp: 1.2e-16..8.1e-15 rel
+across {sum(xe^2), random-linear, sum(g^2)} x {h, omega_b}, where native
+reverse measured 5.1e-11 up to 5.2e+1 (near-zero-derivative visibility
+functional). New tests: `tests/test_thermo_reverse_composite.py` (contract,
+consistency, routing wiring, and a slow GPU pipeline delta_m test).
+
+**Verified (GPU, V100 jobs 14019+14027, fast_cl(k_max=5, chunk 20), d/dh).**
+EPT functional sum(pk_mm_real): grad(stable) = 4.0295938682e6 vs frozen-FD
+truth 4.029578e6 (+3.9e-6; vs jvp 1.75e-6), where the native (before-fix)
+grad measured 4.1073874308e6 (+1.93%) in the same worktree. delta_m
+functional sum(delta_m[:,-1]^2): grad(stable) vs jvp relgap 2.654e-6
+(criterion <1e-5; native before-fix gap 4.146e-3). jvp arms reproduce the
+issue #30 oracle values (-7.9674839484e10; EPT jvp-vs-truth +2.2e-6).
+test_pk_forward_mode passed on GPU (mutual AD agreement <=6.2e-4, FD
+<=0.064%); fast suite: only the known pre-existing rosenbrock-vs-kvaerno5
+failure, no regressions.
+
 ### Aug 25, 2026: Fix a real tracer leak in the scalar PID controller (`UnexpectedTracerError`)
 
 **The filtered-norm weights were captured in a lambda closure instead of being
@@ -1491,7 +1816,7 @@ methodology. Each entry logs implementations, bugs found/fixed, and measured acc
 
 Reference: `reference_data/classpt_z0.38_fullrange.npz` — CLASS-PT on ept_kgrid (256 pts, 5e-5–100 h/Mpc).
 
-#### 2026-04-09 (revised, no fudge factor) — ALL 9 SPECTRA PASS
+#### Apr 9, 2026 (revised, no fudge factor) — ALL 9 SPECTRA PASS
 
 | Observable    | k range [h/Mpc] | Max error  | Mean error | Metric      | Status | Target |
 |---------------|----------------|------------|------------|-------------|--------|--------|
@@ -1510,7 +1835,7 @@ cancellation between P_b4 (~-800) and tree+loop (~937). Relative error blows up 
 even with excellent absolute accuracy. `abs/max(ref)` = |Δ|/max(|ref| at k<0.3) is
 the robust criterion; any absolute error < 2% of the spectrum's characteristic scale.
 
-#### 2026-04-04 (before redesign)
+#### Apr 4, 2026 (before redesign)
 
 | Observable    | k range [h/Mpc] | Max |ΔP/P| | Status |
 |---------------|----------------|------------|--------|
@@ -1558,7 +1883,7 @@ the robust criterion; any absolute error < 2% of the spectrum's characteristic s
 
 ---
 
-### 2026-04-08: RSD Redesign Decision — Assemble P(k,μ) + GL integrate
+### Apr 8, 2026: RSD Redesign Decision — Assemble P(k,μ) + GL integrate
 
 **Status: PLANNED (not yet implemented)**
 
@@ -2185,7 +2510,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
 - **Phase 5-6**: Gradients + API (compute(), shooting, sparse l) -- COMPLETE
 - **Phase 7**: Diagnostics + bug fixes (21 bugs found and fixed) -- COMPLETE
 - **Phase 8**: Sub-percent accuracy (RECFAST, source interp, T0+T1+T2) -- COMPLETE
-### 2026-04-06: Add CLASS-style `ncdm_fluid_approximation`
+### Apr 6, 2026: Add CLASS-style `ncdm_fluid_approximation`
 
 - Added `PrecisionParams.ncdm_fluid_approximation` with supported modes
   `"mb"`, `"hu"`, `"class"`, and `"none"`, plus
@@ -2197,7 +2522,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   `ncdm_fluid_approximation="none"`.
 - Added a smoke test covering all four CLASS `ncdmfa` modes in the public API.
 
-### 2026-04-07: Roll back public scalar PID filter selection API
+### Apr 7, 2026: Roll back public scalar PID filter selection API
 
 - Removed the public `pt_pid_filter_indices` and `pt_pid_filter_weights_mode`
   kwargs from `perturbations_solve()`, `compute_pk()`, `compute_pk_table()`,
@@ -2211,7 +2536,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   public PK APIs, plus fixed-layout/weight tests for the internal DISCO-EB
   filter recipe.
 
-### 2026-04-07: Simplify `test_pk_accuracy.py` solver usage
+### Apr 7, 2026: Simplify `test_pk_accuracy.py` solver usage
 
 - Refactored `tests/test_pk_accuracy.py` into a pure CLASS-reference output test:
   one cached table solve per mode is now reused for both `z=0` and `z=0.5`.
@@ -2223,7 +2548,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   and into `tests/test_perturbations.py`, where direct single-mode perturbation
   behavior is already covered.
 
-### 2026-04-07: Add dedicated `mPk` perturbation backend for public PK APIs
+### Apr 7, 2026: Add dedicated `mPk` perturbation backend for public PK APIs
 
 - Added `MatterPerturbationResult` plus a new `perturbations_solve_mpk()` path
   that computes and stores only `delta_m(k, tau)` for the public matter-power APIs.
@@ -2246,7 +2571,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   integer-valued ODE metadata into Diffrax/Optimistix under autodiff and broke
   `jax.grad` for both direct `compute_pk()` and the table-backed public PK path.
 
-### 2026-04-08: Cut perturbation memory by saving outputs directly and auto-batching `k`
+### Apr 8, 2026: Cut perturbation memory by saving outputs directly and auto-batching `k`
 
 - Refactored both scalar perturbation solvers to use `diffrax.SaveAt(fn=...)`
   so they store requested outputs directly instead of saving full state
@@ -2261,7 +2586,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   public `mPk` path use the same bounded-memory execution strategy.
 - Updated `tests/test_pk_accuracy.py` to stop forcing full-`vmap`; the forward
   CLASS-accuracy test now relies on the default memory-managed batching policy.
-### 2026-04-10: Restore exact-path `P(k)` gradients under `ncdmfa_none`
+### Apr 10, 2026: Restore exact-path `P(k)` gradients under `ncdmfa_none`
 
 - Fixed a regression introduced by the new `ncdm_fluid_approximation` support:
   the exact hierarchy path (`ncdm_fluid_approximation="none"`) was still

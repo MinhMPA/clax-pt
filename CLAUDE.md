@@ -231,6 +231,8 @@ it, agents waste time re-discovering what's done and what's broken.
 **Rules:**
 - Update CHANGELOG.md after every meaningful unit of work.
 - Check off completed items with dates.
+- Date headings use the `Mon D, YYYY` format (e.g. `### Sep 2, 2026: ...`),
+  never ISO `YYYY-MM-DD` — one format, file-wide.
 - Note what worked, what didn't, what's blocked.
 - **Record failed approaches** so they aren't re-attempted. E.g.:
   "Tried using Tsit5 for perturbation ODE -- doesn't work, system is too
@@ -437,10 +439,36 @@ theta_b_prime = -a_prime_over_a * theta_b + cs2 * k2 * delta_b \
 
 This makes it possible to review term-by-term and catch missing terms.
 
-### Test at many parameter points, not just fiducial
+### Test at many parameter points, not just fiducial (RULE)
 
 A fudge factor or bug that cancels at fiducial LCDM will show up when
-parameters change. The reference data suite must include:
+parameters change. This is not hypothetical: issue #30's 2.34% h-gradient
+discrepancy was two independent AD errors whose signs happened to nearly
+cancel at fiducial on one functional — fiducial-only tests were
+structurally blind to both.
+
+**RULE — multi-cosmology testing:** every new or modified physics-facing
+test (values against CLASS, or gradients: AD-vs-FD, grad-vs-jvp,
+finiteness) MUST run at **3-5 distinct cosmologies**, not just fiducial:
+
+- Use the canonical grids and fixtures in `tests/conftest.py`:
+  `COSMOLOGY_GRID_LCDM` via the `lcdm_cosmology` fixture for LCDM-scope
+  changes; `COSMOLOGY_GRID_NULCDM` via `nulcdm_cosmology` when the change
+  touches massive neutrinos / the ncdm sector.
+- Grid values are locked to `scripts/generate_multipoint_reference.py`
+  (same names/offsets), so value tests find reference data under
+  `reference_data/<name>/` (`cosmology_reference_dir(name)` tells you if a
+  point has data). Consistency tests need no reference data.
+- Under `--fast`, the fixtures prune to fiducial only; the full sweep runs
+  in full mode (GPU validation jobs and the full suite). Where a single
+  grid point is GPU-expensive, mark the parametrized test `slow` — never
+  shrink the grid below 3 points in full mode.
+- **Exempt**: cosmology-independent numerics (interpolation/DST parity,
+  toy-ODE solver unit tests, pytree plumbing). State the exemption in the
+  test docstring.
+- Reference implementation: `tests/test_multicosmo_consistency.py`.
+
+The reference data suite must include:
 - Fiducial LCDM (Planck 2018 best-fit)
 - High/low omega_b (±20%)
 - High/low omega_cdm (±20%)

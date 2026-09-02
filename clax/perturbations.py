@@ -1860,9 +1860,22 @@ def _mpk_tau_n_points(prec: PrecisionParams) -> int:
 
 
 def _k_grid(prec: PrecisionParams) -> Float[Array, "Nk"]:
-    """Generate logarithmic k-grid for perturbation integration."""
+    """Generate the k-grid for perturbation integration.
+
+    "log": log-uniform (historical default, bit-identical). "chebyshev":
+    Chebyshev-Lobatto nodes in log10(k) -- same count and endpoints,
+    spectral placement so downstream barycentric source interpolation
+    converges spectrally (issue #31). Every consumer treats the result
+    as an opaque ascending array, so the knob is safe by construction.
+    """
     n_k = int(math.log10(prec.pt_k_max_cl / prec.pt_k_min) * prec.pt_k_per_decade)
-    return jnp.logspace(math.log10(prec.pt_k_min), math.log10(prec.pt_k_max_cl), n_k)
+    if prec.pt_k_grid_type == "chebyshev":
+        from clax.interpolation import chebyshev_lobatto_nodes
+        log_nodes = chebyshev_lobatto_nodes(
+            math.log10(prec.pt_k_min), math.log10(prec.pt_k_max_cl), n_k)
+        return jnp.asarray(10.0 ** log_nodes)
+    return jnp.logspace(math.log10(prec.pt_k_min),
+                        math.log10(prec.pt_k_max_cl), n_k)
 
 
 def _perturbation_solve_setup(params, prec, bg, th, *, n_tau_override=None, tau_max_factor=0.999):

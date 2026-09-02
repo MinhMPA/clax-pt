@@ -146,12 +146,25 @@ class PrecisionParams:
     th_z_max: float = 5e4           # max redshift for recombination
     th_n_points: int = 20000        # number of z grid points
     th_tol: float = 1e-5            # ODE tolerance
+    # Reverse-mode AD rule for the fused background+thermodynamics solve
+    # (clax.thermodynamics.solve_background_and_thermo), issue #30:
+    #   "stable" — jax.custom_vjp whose backward pass computes the params
+    #              cotangent via a batched forward-mode basis (jacfwd over
+    #              the CosmoParams leaves). Fixes the ~2% h-gradient error
+    #              from catastrophic cancellation in the recombination-era
+    #              native backward pass. Forward-mode (jax.jvp) through the
+    #              fused solve is BLOCKED in this mode (custom_vjp caveat).
+    #   "native" — plain background_solve + thermodynamics_solve calls;
+    #              required for jax.jvp/jacfwd through the fused solve.
+    # Mirrors the ode_adjoint precedent below (static string flag).
+    th_grad_mode: str = "stable"    # or "native"
 
     # Perturbations
     pt_k_min: float = 1e-5          # Mpc^-1
     pt_k_max_cl: float = 5.0        # Mpc^-1 (for C_l computation)
     pt_k_max_pk: float = 50.0       # Mpc^-1 (for P(k) output)
     pt_k_per_decade: int = 30
+    pt_k_grid_type: str = "log"     # "log" | "chebyshev" (Lobatto nodes in log10 k; issue #31)
     pt_l_max_g: int = 17            # photon Boltzmann hierarchy
     pt_l_max_pol_g: int = 17        # photon polarization hierarchy
     pt_l_max_ur: int = 17           # massless neutrino hierarchy
