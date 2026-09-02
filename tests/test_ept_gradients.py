@@ -546,33 +546,45 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
     normal fixture parameter, since pytest resolves fixture parameters
     before the test body -- and before the skip -- runs.
 
-    FINDING (real, explained, not a bug -- see CHANGELOG for the same note):
-    A GPU run (job 13132) measured AD=1.303912e6 vs FD=1.322284e6,
-    rel_err=1.39%, comfortably outside the project's usual <1% gradient
-    target. The jvp-vs-vjp companion test above passes to 5.36e-16, so AD is
-    internally self-consistent -- this is not a forward/reverse-mode bug.
-    Root cause, traced to ``clax/ept.py::compute_ept_from_clax``: the
-    IR-resummation split that makes ``jax.grad`` tractable through the
-    FFTLog/loop-integral pipeline computes the no-wiggle (smooth/broadband)
-    component ``pk_nw`` via plain NumPy on a ``stop_gradient``-frozen
-    snapshot of ``pk_h``:
-        ir_pre = _ir_resummation_numpy(np.array(stop_gradient(pk_h)), ...)
-    Inside ``compute_ept``, only the wiggle part ``pk_w = pk_lin_h - pk_nw``
-    carries a gradient w.r.t. ``pk_lin_h`` (``pk_nw`` is a frozen constant
-    there), so ``d(pk_resummed)/d(pk_lin_h) = exp(-Sigma^2 k^2)`` only --
-    the ``d(pk_nw)/d(pk_lin_h)`` contribution is dropped by construction
-    (see that function's own in-line comment). For a pure amplitude
-    parameter like ``ln10A_s``, which rescales ``pk_h`` uniformly at every
-    k, the TRUE derivative tracks the full (nw + wiggle) spectrum, so AD
-    systematically UNDER-estimates it by roughly the smooth/broadband
-    power's share of the total -- consistent with the measured direction
-    (AD < FD) and the ~1% magnitude (BAO wiggles are a ~5-10% ripple on a
-    dominant smooth continuum). This is an accepted, documented tradeoff of
-    the precomputed-IR trick (comment in ``compute_ept_from_clax`` already
-    flags the dropped term), not a regression to chase here -- and out of
-    scope for this tests-only branch regardless (would need a clax/ source
-    change to close). The bound below is the measurement (1.39%) plus real
-    margin, not a value picked to make the test pass.
+    FINDING (CLOSED -- job 13132's 1.39% frozen-pk_nw finding superseded):
+    ``clax/ept.py::compute_ept_from_clax`` used to compute the no-wiggle
+    (smooth/broadband) component ``pk_nw`` via plain NumPy on a
+    ``stop_gradient``-frozen snapshot of ``pk_h``, structurally dropping
+    ``d(pk_nw)/d(pk_lin_h)`` from the AD graph. This branch (commit 01b5162:
+    traced ``_ir_resummation_jax`` splitter; commit 322a6ab: wired into
+    ``compute_ept_from_clax``) replaces that NumPy splitter with a
+    differentiable JAX one, so ``pk_nw`` now carries a gradient too and the
+    dropped term is closed by construction -- not by a fudge factor.
+
+    Measured (GPU job 14146, full validation suite on
+    fix/ir-resummation-traced @ 322a6ab): AD=1.322286e+06, FD=1.322286e+06,
+    rel_err=1.8231e-07 -- ~76,000x smaller than the pre-closure 1.39%
+    (0.0139 / 1.8231e-07 ~= 76,244), and
+    consistent with plain central-FD truncation noise (eps=1e-3) rather than
+    a remaining structural gap. This test's frozen-bg/pt setup
+    (``pipeline_fast_cl_k5`` fixture, no perturbation re-solve) also means
+    ``pk_mm_real`` -- the real-space, non-RSD matter power spectrum --
+    never touches the RSD-basis freeze still deferred elsewhere in
+    ``compute_ept_from_clax`` (that freeze only matters for redshift-space
+    multipoles), so this particular test path has no other residual channel
+    left to show. Contrast the ``h`` end-to-end test below, which re-solves
+    the full background/thermodynamics/perturbations pipeline per probed
+    ``h`` and picks up real discretization noise from those re-solves on
+    top of any remaining channel -- its residual did not collapse the same
+    way. The bound below (4e-7) is 2x the measured 1.8231e-07
+    (=3.6462e-07), rounded up to one significant figure -- never tighter
+    than 2x measured, per this branch's ratchet rule, and confirmed green
+    on a second independent GPU run (see CHANGELOG for the confirm job ID).
+
+    Headroom note: 4e-7 is a THIN margin in absolute terms -- only ~2.2x
+    the single measured 1.8231e-07 (2x exactly would be 3.6462e-07; 4e-7 is
+    the next value with one significant figure at or above that, per the
+    ratchet rule's mechanical rounding, not a deliberately generous
+    margin). Accepted by the controller because the measurement reproduced
+    bit-for-bit identically across two independent GPU runs (jobs 14146 and
+    14147) -- this residual is FD-truncation noise from a fixed eps=1e-3,
+    not floating-point summation-order variance, so it is expected to be
+    stable run-to-run rather than a source of flakiness.
     """
     if fast_mode:
         pytest.skip("full k_max=5.0 perturbation solve fixture -- full mode only")
@@ -591,15 +603,17 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
     print(f"\nd(sum(pk_mm_real))/d(ln10A_s) [from CosmoParams]: "
           f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
 
-    # 2% = measured 1.39% (job 13132) + margin. See FINDING in the
-    # docstring: the precomputed-IR trick in compute_ept_from_clax
-    # structurally drops d(pk_nw)/d(pk_lin_h), so AD under-estimates a pure
-    # amplitude-parameter gradient by design, not by bug.
-    assert rel_err < 0.02, (
+    # 4e-7 = 2x the measured 1.8231e-07 (job 14146), rounded up to one
+    # significant figure -- never tighter than 2x measured. See FINDING in
+    # the docstring: the traced IR-resummation splitter closes the
+    # frozen-pk_nw gap that produced the old 1.39% (job 13132); the residual
+    # here is FD-truncation noise, not a structural gap.
+    assert rel_err < 4e-7, (
         f"AD vs FD disagree for d(sum(pk_mm_real))/d(ln10A_s) starting from "
-        f"CosmoParams: AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%} "
-        f"(expected <2%; see FINDING in this test's docstring -- the "
-        f"precomputed-IR split drops d(pk_nw)/d(pk_lin_h))"
+        f"CosmoParams: AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e} "
+        f"(expected <4e-7; see FINDING in this test's docstring -- the "
+        f"traced IR-resummation splitter should close the frozen-pk_nw gap "
+        f"in this frozen-bg/pt test path)"
     )
 
 
@@ -650,31 +664,71 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     fast_cl(k_max=5.0) precision as the shared ``pipeline_fast_cl_k5``
     fixture, so full mode only.
 
-    FINDING (post k_mpc-channel fix; real, explained, not a bug -- same
-    class as the ln10A_s FINDING above): before this branch,
-    ``compute_ept_from_clax`` resampled onto ``k_mpc = k_h *
-    stop_gradient(h)`` -- the h-dependence of that resampling was frozen out
-    of the AD graph entirely, and a GPU stage-level probe (job 13313)
-    attributed -9.48e4 of the stage gradient to exactly that channel. This
-    test measured AD-vs-FD rel_err ~0.95% against that bug (structural
-    coincidence: the frozen k_mpc channel and the frozen-pk_nw IR-split
-    residual, of opposite sign, partially cancelled in the ``sum``). Commit
-    8bd9cdb traced the k_mpc channel through h. A GPU run (job 14140)
-    post-fix measured AD=4.039169e6 vs FD=3.991575e6, rel_err=1.1924e-02
-    (1.19%) -- *not* smaller than the pre-fix ~0.95%, because the two
-    partially-cancelling errors are gone and only the frozen-pk_nw residual
-    remains (same class as the 1.39% ln10A_s finding above, job 13132: the
-    precomputed-IR split computes ``pk_nw`` via plain NumPy on a
-    ``stop_gradient``-frozen snapshot of ``pk_h``, so
-    ``d(pk_nw)/d(pk_lin_h)`` is structurally dropped). The stage-level
-    per-k companion test (``test_stage_grad_h_matches_fd_per_k`` in
-    ``tests/test_ept_h_channels.py``) is the cleaner signal that the k_mpc
-    fix itself worked: median per-k rel err dropped from 8.760e-01 (RED,
-    job 14136) to 3.294e-02 (GREEN, job 14140). The bound below (0.03) is
-    2x the measured 1.1924e-02 (=0.0238), rounded up to one significant
-    figure -- never tighter than 2x measured, per this branch's ratchet
-    rule -- not the plan's original placeholder 0.02, and not a value
-    picked to make the test pass.
+    FINDING (traced IR-resummation splitter closure; bound UNCHANGED --
+    measurement does not support tightening below the existing 0.03): the
+    k_mpc-channel fix (commit 8bd9cdb, pre-this-branch) traced
+    ``k_mpc = k_h * h`` through ``h``, closing the resampling channel that
+    job 13313 attributed -9.48e4 of the stage gradient to. This branch
+    additionally closes the frozen-pk_nw IR-split gap (commit 01b5162:
+    traced ``_ir_resummation_jax`` splitter; commit 322a6ab: wired into
+    ``compute_ept_from_clax`` -- same closure documented in the ln10A_s
+    FINDING above, which collapsed 1.39% -> 1.8231e-07 for that parameter).
+
+    For ``h``, though, closing that same channel did NOT collapse the
+    residual the same way: a GPU run (job 14146, full validation suite on
+    fix/ir-resummation-traced @ 322a6ab) measured AD=4.046783e6 vs
+    FD=3.991575e6, rel_err=1.3831e-02 (1.38%) -- essentially unchanged from,
+    and marginally above, the pre-closure job-14140 measurement of 1.1924e-02
+    (1.19%) that set the current 0.03 bound. This measured non-closure
+    FALSIFIES the "same frozen-pk_nw class as ln10A_s" attribution: ln10A_s
+    -- same observable (``pk_mm_real``), same commit -- collapsed to
+    1.8231e-07, proving the traced splitter is exact wherever no other
+    h-dependent static enters the computation, so whatever survives here is
+    NOT the pk_nw channel. The RSD-basis freeze is also RULED OUT for this
+    test specifically: ``compute_ept_from_clax``'s own in-line comment
+    states plainly that ``pk_mm_real`` "is unaffected -- it never reads
+    those FFTLog bases" (that freeze only matters for redshift-space
+    multipoles, which this test's real-space observable never touches).
+
+    Leading suspect (concrete PHASE-2 item, same designation the codebase
+    already uses for the RSD-basis freeze): the DST grid endpoints inside
+    ``_ir_resummation_jax`` -- ``k_min2 = 7e-5/h_conc``,
+    ``k_max2 = 7.0/h_conc`` -- and the static ``in_range`` mask built from
+    them, all constructed from a concrete ``h_conc = stop_gradient(h)``.
+    That function's own in-line comment justifies freezing these endpoints
+    on the grounds that "their h-derivative is a boundary term with
+    negligible content (P*k weight ~0 at both cuts)". Under AD at a fixed
+    ``h``, this snapshot is a constant with zero gradient contribution by
+    construction. Under central FD, though, ``h_conc`` is a genuinely
+    different concrete float at ``h0+eps`` and ``h0-eps``, so the entire
+    DST grid -- not just its endpoint values -- shifts between the FD+ and
+    FD- evaluations, changing the discretization ``pk_nw`` is extracted on
+    for every k, not only near the cuts. This is a real h-dependent channel
+    the traced splitter does not (and structurally cannot, without
+    re-deriving ``_ir_resummation_jax`` with a variable-shape grid) close.
+    The measured 1.3831e-02 (job 14146) is the concrete evidence that the
+    "negligible content" argument, while true of the boundary VALUES in
+    isolation, does not extend to the grid-shift's effect on the interior
+    discretization at the ~1% level for ``h``. Secondary contributor: this
+    test also re-solves the FULL pipeline (background -> thermodynamics ->
+    perturbations -> compute_ept_from_clax) via central FD for every probed
+    ``h``, unlike the frozen-bg/pt ln10A_s test, so it picks up ODE
+    re-solve discretization noise on top of the DST-grid channel (out of
+    scope for this tests-only branch either way; closing the DST-grid
+    channel would need a clax/ source change). The per-k companion test
+    (``test_stage_grad_h_matches_fd_per_k`` in
+    ``tests/test_ept_h_channels.py``, which freezes bg/pt like the ln10A_s
+    test does -- isolating the DST-grid channel from full-pipeline
+    discretization noise) DID collapse sharply on this same job -- median
+    per-k rel err 9.825e-03 vs the prior 3.294e-02 -- confirming the traced
+    splitter closed most of the gap; the residual measured here (both
+    channels combined) is not a sign the closure failed.
+
+    Ratchet arithmetic: 2x the measured 1.3831e-02 (=0.027662), rounded up
+    to one significant figure, is 0.03 -- identical to the current bound.
+    Per this branch's ratchet rule (>= 2x measured, never loosened), the
+    bound below stays at 0.03: this measurement does not license tightening
+    it further, and it is already exactly at the 2x-measured floor.
     """
     if fast_mode:
         pytest.skip("3 full perturbation solves -- full mode only")
@@ -710,13 +764,21 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     print(f"\nd(sum(pk_mm_real))/dh [full CosmoParams pipeline]: "
           f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
 
-    # 3% = 2x the measured 1.1924e-02 (job 14140), rounded up to one
-    # significant figure -- never tighter than 2x measured. See FINDING in
-    # the docstring: post k_mpc-channel fix, the residual is the same
-    # frozen-pk_nw structural class as the 1.39% ln10A_s finding, not a bug.
+    # 3% UNCHANGED post traced-IR-splitter closure: job 14146 measured
+    # rel_err=1.3831e-02, and 2x that (=0.027662) rounds up to the SAME
+    # 0.03 -- this measurement does not license tightening further. See
+    # FINDING in the docstring: the surviving residual is NOT the closed
+    # frozen-pk_nw channel (ln10A_s, same observable, collapsed to
+    # 1.8231e-07) and NOT the RSD-basis freeze (pk_mm_real never reads
+    # those FFTLog bases, per compute_ept_from_clax's own comment). Leading
+    # suspect: the h-dependent DST grid endpoints/in_range mask inside
+    # _ir_resummation_jax (built from a concrete stop_gradient(h) snapshot,
+    # PHASE-2 item), plus full-pipeline re-solve discretization noise.
     assert rel_err < 0.03, (
         f"AD vs FD disagree for d(sum(pk_mm_real))/dh (full CosmoParams "
         f"pipeline): AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%} "
-        f"(expected <3%; see FINDING in this test's docstring -- the "
-        f"frozen-pk_nw IR-split residual, same class as the ln10A_s finding)"
+        f"(expected <3%; see FINDING in this test's docstring -- leading "
+        f"suspect is the frozen DST-grid-endpoint/in_range channel in "
+        f"_ir_resummation_jax, not the closed frozen-pk_nw channel and not "
+        f"the RSD-basis freeze, which pk_mm_real never reads)"
     )

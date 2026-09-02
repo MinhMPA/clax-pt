@@ -3,8 +3,14 @@
 GPU job 13313 attributed the stage-level AD-vs-FD h-gradient gap to the
 frozen k_mpc = k_h * stop_gradient(h) resampling channel (-9.48e4 of the
 stage gradient), with the frozen-pk_nw IR split (+3.27e4) as the
-documented residual (same class as the 1.39% ln10A_s finding) and the
-rs_h/f/h-arg channels negligible (-1.0e2). These tests pin the fix.
+documented residual and the rs_h/f/h-arg channels negligible (-1.0e2).
+These tests pin the fix.
+
+CLOSURE UPDATE (job 14146, fix/ir-resummation-traced @ 322a6ab): the
+frozen-pk_nw IR split is now closed too (commit 01b5162 traced
+``_ir_resummation_jax``; commit 322a6ab wired it into
+``compute_ept_from_clax``), on top of the pre-existing k_mpc fix. See
+``test_stage_grad_h_matches_fd_per_k`` below for the measured effect.
 """
 import jax
 import jax.numpy as jnp
@@ -36,8 +42,29 @@ def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
 
     RED before the k_mpc channel is traced: FD carries the resampling
     term dP/dlnk * (1/h) which AD drops entirely, giving order-unity
-    per-k relative errors at BAO scales. GREEN after: residual is the
-    documented frozen-pk_nw share (~1-2%)."""
+    per-k relative errors at BAO scales. GREEN after the k_mpc fix
+    (job 14140): residual was the frozen-pk_nw share, median 3.294e-02.
+
+    FURTHER CLOSED (job 14146, fix/ir-resummation-traced @ 322a6ab): with
+    the frozen-pk_nw IR split also traced through JAX now (commit 01b5162,
+    wired in by 322a6ab), this frozen-bg/pt stage test (no full pipeline
+    re-solve, so no discretization noise -- unlike the end-to-end h test in
+    ``tests/test_ept_gradients.py``) measured median rel 9.825e-03
+    (max 3.619e-02) over 31 modes in [0.05,0.3] -- ~3.35x lower than the
+    prior 3.294e-02. The bound below (0.02) is 2x the measured 9.825e-03
+    (=0.01965), rounded up to one significant figure -- never tighter than
+    2x measured, per this branch's ratchet rule.
+
+    Note on the surviving 9.825e-03: it is NOT a further-openable share of
+    the now-closed frozen-pk_nw channel (that channel's own d(pk_nw)/dh
+    contribution flows exactly through the traced splitter). This test
+    computes ``pk_mm_real`` through ``compute_ept_from_clax`` with the same
+    frozen-bg/pt setup as ``test_grad_h_end_to_end_from_cosmoparams_matches_fd``
+    in ``tests/test_ept_gradients.py``, so it shares that test's leading
+    suspect: the DST grid endpoints/``in_range`` mask inside
+    ``_ir_resummation_jax``, built from a concrete
+    ``h_conc = stop_gradient(h)`` that moves under central FD but is pinned
+    under AD (see that test's FINDING docstring for the full mechanism)."""
     if fast_mode:
         pytest.skip("uses the shared full-mode pipeline fixture")
     params, bg, pt = request.getfixturevalue("stage_setup")
@@ -55,9 +82,18 @@ def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
     med = float(np.median(rel))
     print(f"\nper-k d(pk_mm)/dh AD-vs-FD: median rel {med:.3e} "
           f"(max {float(rel.max()):.3e}) over {int(sel.sum())} modes in [0.05,0.3]")
-    assert med < 0.05, (
-        f"median per-k AD-vs-FD rel err {med:.3e} >= 0.05: the k_mpc "
-        f"resampling channel is still frozen (job 13313: -9.48e4)")
+    # 0.02 = 2x the measured 9.825e-03 (job 14146), rounded up to one
+    # significant figure -- never tighter than 2x measured. See docstring:
+    # the traced IR-resummation splitter closed most of the frozen-pk_nw
+    # share on top of the pre-existing k_mpc fix; the surviving median is
+    # attributed to the frozen DST-grid-endpoint/in_range channel, not a
+    # further pk_nw share.
+    assert med < 0.02, (
+        f"median per-k AD-vs-FD rel err {med:.3e} >= 0.02: either the "
+        f"k_mpc resampling channel (job 13313: -9.48e4), the frozen-pk_nw "
+        f"IR split (closed by commit 01b5162/322a6ab), or the DST-grid-"
+        f"endpoint/in_range channel (see the FINDING in "
+        f"tests/test_ept_gradients.py's h end-to-end test) has regressed")
 
 
 def test_growth_rate_is_not_hardcoded(request, fast_mode):
