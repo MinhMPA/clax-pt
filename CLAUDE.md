@@ -231,6 +231,8 @@ it, agents waste time re-discovering what's done and what's broken.
 **Rules:**
 - Update CHANGELOG.md after every meaningful unit of work.
 - Check off completed items with dates.
+- Date headings use the `Mon D, YYYY` format (e.g. `### Sep 2, 2026: ...`),
+  never ISO `YYYY-MM-DD` — one format, file-wide.
 - Note what worked, what didn't, what's blocked.
 - **Record failed approaches** so they aren't re-attempted. E.g.:
   "Tried using Tsit5 for perturbation ODE -- doesn't work, system is too
