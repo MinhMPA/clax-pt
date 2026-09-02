@@ -1683,7 +1683,7 @@ methodology. Each entry logs implementations, bugs found/fixed, and measured acc
 
 Reference: `reference_data/classpt_z0.38_fullrange.npz` — CLASS-PT on ept_kgrid (256 pts, 5e-5–100 h/Mpc).
 
-#### 2026-04-09 (revised, no fudge factor) — ALL 9 SPECTRA PASS
+#### Apr 9, 2026 (revised, no fudge factor) — ALL 9 SPECTRA PASS
 
 | Observable    | k range [h/Mpc] | Max error  | Mean error | Metric      | Status | Target |
 |---------------|----------------|------------|------------|-------------|--------|--------|
@@ -1702,7 +1702,7 @@ cancellation between P_b4 (~-800) and tree+loop (~937). Relative error blows up 
 even with excellent absolute accuracy. `abs/max(ref)` = |Δ|/max(|ref| at k<0.3) is
 the robust criterion; any absolute error < 2% of the spectrum's characteristic scale.
 
-#### 2026-04-04 (before redesign)
+#### Apr 4, 2026 (before redesign)
 
 | Observable    | k range [h/Mpc] | Max |ΔP/P| | Status |
 |---------------|----------------|------------|--------|
@@ -1750,7 +1750,7 @@ the robust criterion; any absolute error < 2% of the spectrum's characteristic s
 
 ---
 
-### 2026-04-08: RSD Redesign Decision — Assemble P(k,μ) + GL integrate
+### Apr 8, 2026: RSD Redesign Decision — Assemble P(k,μ) + GL integrate
 
 **Status: PLANNED (not yet implemented)**
 
@@ -2377,7 +2377,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
 - **Phase 5-6**: Gradients + API (compute(), shooting, sparse l) -- COMPLETE
 - **Phase 7**: Diagnostics + bug fixes (21 bugs found and fixed) -- COMPLETE
 - **Phase 8**: Sub-percent accuracy (RECFAST, source interp, T0+T1+T2) -- COMPLETE
-### 2026-04-06: Add CLASS-style `ncdm_fluid_approximation`
+### Apr 6, 2026: Add CLASS-style `ncdm_fluid_approximation`
 
 - Added `PrecisionParams.ncdm_fluid_approximation` with supported modes
   `"mb"`, `"hu"`, `"class"`, and `"none"`, plus
@@ -2389,7 +2389,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   `ncdm_fluid_approximation="none"`.
 - Added a smoke test covering all four CLASS `ncdmfa` modes in the public API.
 
-### 2026-04-07: Roll back public scalar PID filter selection API
+### Apr 7, 2026: Roll back public scalar PID filter selection API
 
 - Removed the public `pt_pid_filter_indices` and `pt_pid_filter_weights_mode`
   kwargs from `perturbations_solve()`, `compute_pk()`, `compute_pk_table()`,
@@ -2403,7 +2403,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   public PK APIs, plus fixed-layout/weight tests for the internal DISCO-EB
   filter recipe.
 
-### 2026-04-07: Simplify `test_pk_accuracy.py` solver usage
+### Apr 7, 2026: Simplify `test_pk_accuracy.py` solver usage
 
 - Refactored `tests/test_pk_accuracy.py` into a pure CLASS-reference output test:
   one cached table solve per mode is now reused for both `z=0` and `z=0.5`.
@@ -2415,7 +2415,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   and into `tests/test_perturbations.py`, where direct single-mode perturbation
   behavior is already covered.
 
-### 2026-04-07: Add dedicated `mPk` perturbation backend for public PK APIs
+### Apr 7, 2026: Add dedicated `mPk` perturbation backend for public PK APIs
 
 - Added `MatterPerturbationResult` plus a new `perturbations_solve_mpk()` path
   that computes and stores only `delta_m(k, tau)` for the public matter-power APIs.
@@ -2438,7 +2438,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   integer-valued ODE metadata into Diffrax/Optimistix under autodiff and broke
   `jax.grad` for both direct `compute_pk()` and the table-backed public PK path.
 
-### 2026-04-08: Cut perturbation memory by saving outputs directly and auto-batching `k`
+### Apr 8, 2026: Cut perturbation memory by saving outputs directly and auto-batching `k`
 
 - Refactored both scalar perturbation solvers to use `diffrax.SaveAt(fn=...)`
   so they store requested outputs directly instead of saving full state
@@ -2453,7 +2453,7 @@ Result: g(tau_star) from -2.6% to **-0.04%**.
   public `mPk` path use the same bounded-memory execution strategy.
 - Updated `tests/test_pk_accuracy.py` to stop forcing full-`vmap`; the forward
   CLASS-accuracy test now relies on the default memory-managed batching policy.
-### 2026-04-10: Restore exact-path `P(k)` gradients under `ncdmfa_none`
+### Apr 10, 2026: Restore exact-path `P(k)` gradients under `ncdmfa_none`
 
 - Fixed a regression introduced by the new `ncdm_fluid_approximation` support:
   the exact hierarchy path (`ncdm_fluid_approximation="none"`) was still
