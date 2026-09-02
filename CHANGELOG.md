@@ -8,7 +8,7 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
-### 2026-09-02: Chebyshev k-sampling phase 1 (issue #31, opt-in)
+### Sep 2, 2026: Chebyshev k-sampling phase 1 (issue #31, opt-in)
 
 **Adds an opt-in Chebyshev-Lobatto k-grid + barycentric source interpolation
 path for C_l, alongside the existing log-uniform-grid + cubic-spline path.
