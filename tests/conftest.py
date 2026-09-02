@@ -112,6 +112,69 @@ def fast_mode(request):
     return request.config.getoption("--fast")
 
 
+# ---------------------------------------------------------------------------
+# Multi-cosmology test grids (PROJECT RULE, see CLAUDE.md "Test at many
+# parameter points": physics-facing value/gradient tests run at 3-5
+# cosmologies, not just fiducial).
+#
+# Motivation (issue #30): the 2.34% h-gradient discrepancy was a SIGNED
+# CANCELLATION of two independent errors that happened to nearly cancel at
+# fiducial LCDM on one functional. Errors that cancel at one point in
+# parameter space do not cancel elsewhere; fiducial-only tests structurally
+# cannot see them.
+#
+# Values MUST stay in lockstep with scripts/generate_multipoint_reference.py
+# (same names, same offsets) so matching reference data exists under
+# reference_data/<name>/ for value tests. Consistency tests (grad-vs-jvp,
+# finiteness, parity) need no reference data and may use any grid point.
+# ---------------------------------------------------------------------------
+COSMOLOGY_GRID_LCDM = {
+    # name -> CosmoParams overrides (empty = fiducial)
+    "lcdm_fiducial": {},
+    "h_high": {"h": 0.6736 * 1.10},
+    "omega_b_high": {"omega_b": 0.02237 * 1.20},
+    "omega_cdm_low": {"omega_cdm": 0.1200 * 0.80},
+    "ns_high": {"n_s": 0.9649 * 1.05},
+}
+
+# For changes touching massive neutrinos / the ncdm sector, the rule uses
+# this grid instead (CLAUDE.md's reference suite: 0.06, 0.15, 0.3 eV).
+# Only massive_nu_015 has CLASS reference data today; the other masses are
+# for consistency tests. Massive-nu solves conventionally set
+# ncdm_fluid_approximation="none" (cf. tests/test_multipoint.py PREC).
+COSMOLOGY_GRID_NULCDM = {
+    "lcdm_fiducial": {},
+    "massive_nu_006": {"m_ncdm": 0.06},
+    "massive_nu_015": {"m_ncdm": 0.15},
+    "massive_nu_030": {"m_ncdm": 0.30},
+}
+
+
+def cosmology_reference_dir(name):
+    """Path to reference_data/<name> if CLASS reference data exists, else None."""
+    path = os.path.join(REFERENCE_DIR, name)
+    return path if os.path.isdir(path) else None
+
+
+def _make_cosmology_fixture(grid):
+    from clax import CosmoParams
+
+    @pytest.fixture(params=list(grid.items()), ids=list(grid.keys()))
+    def _fixture(request):
+        """(name, CosmoParams) per grid point. Under --fast only fiducial
+        runs (the rule's full sweep belongs to full-mode/GPU runs)."""
+        name, overrides = request.param
+        if request.config.getoption("--fast") and overrides:
+            pytest.skip(f"--fast runs fiducial only (skipping {name})")
+        return name, CosmoParams(**overrides)
+
+    return _fixture
+
+
+lcdm_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_LCDM)
+nulcdm_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_NULCDM)
+
+
 @pytest.fixture
 def lcdm_bg_ref():
     """Load LCDM fiducial background reference data."""
