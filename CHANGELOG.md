@@ -8,6 +8,116 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### 2026-09-02: Chebyshev k-sampling phase 1 (issue #31, opt-in)
+
+**Adds an opt-in Chebyshev-Lobatto k-grid + barycentric source interpolation
+path for C_l, alongside the existing log-uniform-grid + cubic-spline path.
+No default changes: `PrecisionParams.pt_k_grid_type` defaults to `"log"` and
+`k_interp_method` defaults to `"spline"` in every entry point; no preset
+sets either. ADR: `docs/adr/0002-chebyshev-k-sampling.md`.**
+
+Motivated by the open ℓ>1200 k-integration debt (`CHANGELOG.md` ~line 1312,
+`BENCHMARK.md:340`) and by arXiv:2608.24682 (Sletmoen 2026; method note at
+`docs/superpowers/plans/notes-2608.24682-method.md`, committed 605d8c8),
+which solves perturbation ODEs only at Chebyshev k-nodes and
+Chebyshev-interpolates the smooth source `S(τ,k)` — never `Δ_ℓ(k)` itself,
+which stays an explicit fine-grid quadrature with the exact Bessel function,
+matching clax's existing constraint recorded at `CHANGELOG.md:2192-2199`
+("must interpolate SOURCE functions, not `T_l(k)`").
+
+**New pieces:**
+- `clax/interpolation.py`: `chebyshev_lobatto_nodes(a, b, n)` (static numpy
+  grid constructor) + `ChebyshevInterpolant` (barycentric evaluation, JAX
+  pytree, `CubicSpline`-matching clip-saturating boundary policy).
+- `clax/params.py`: static `PrecisionParams.pt_k_grid_type: str = "log"`
+  (`"log" | "chebyshev"`).
+- `clax/perturbations.py`: `_k_grid()` honors the knob — `"chebyshev"`
+  places Lobatto nodes in `log10(k)` with the same count/endpoints as the
+  log path.
+- `clax/harmonic.py`: `_interp_sources_to_fine_k(..., method=)` gains a
+  `"chebyshev"` path (one dense barycentric matrix `_barycentric_matrix`,
+  applied as a single matmul per source), threaded as `k_interp_method=`
+  through `compute_cl_tt_interp`/`compute_cl_ee_interp`/`compute_cl_te_interp`/
+  `compute_cls_all_interp`/`compute_cls_all_fast`. `compute_cl_bb` keeps its
+  native inline spline (out of scope). Fine grid stays log-uniform +
+  trapezoid regardless of the knobs (four duplicate call sites consolidated
+  into one `_fine_log_k_grid` helper, pure refactor). Precondition, empirically
+  validated: `k_interp_method="chebyshev"` requires
+  `pt_k_grid_type="chebyshev"` (and the converse) — chebyshev grid + spline
+  interp is the worst combination measured (see below).
+
+**A/B results (GPU, V100, planck_cl base + `pt_k_max_cl=1.0`, ℓ_max=2000, vs
+CLASS reference, pct = (clax−CLASS)/|CLASS|·100; jobs 14138+14141):**
+
+| grid | kpd | interp | n_k | t_pt(s) | t_cl(s) | TT500 | TT1000 | TT1500 | TT2000 | EE500 | EE1000 | EE1500 | EE2000 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| log | 30 | spline | 150 | 5360 | 11.25 | -0.85 | -1.51 | -5.16 | -5.78 | -0.406 | 0.127 | -3.00 | -0.864 |
+| log | 60 | spline | 300 | 6397 | 3.48 | -0.778 | -0.907 | -3.21 | 0.47 | -0.386 | 0.286 | -1.70 | 0.997 |
+| chebyshev | 30 | spline | 150 | 5028 | 3.26 | -0.984 | -2.67 | -7.02 | -10.1 | -0.496 | -0.0832 | -5.37 | -2.47 |
+| chebyshev | 30 | chebyshev | 150 | 5117 | 4.23 | -0.727 | -0.83 | -3.09 | 2.01 | -1.16 | 0.285 | -0.587 | 2.68 |
+| chebyshev | 60 | spline | 300 | 5860 | 3.22 | -0.785 | -0.951 | -3.32 | 0.529 | -0.39 | 0.262 | -1.72 | 0.353 |
+| chebyshev | 60 | chebyshev | 300 | 5967 | 12.84 | -0.773 | -0.878 | -3.13 | 0.938 | -0.426 | 0.334 | -1.56 | 0.277 |
+
+(Full 18-column table with TT/EE20/100 in `docs/adr/0002-chebyshev-k-sampling.md`.
+All six cells share a common −0.8..−1.0% offset at ℓ≤1000 that cancels in
+every cheb-vs-log differential; predates this branch and is not
+investigated here — BENCHMARK.md's planck_cl <0.2% claim was not
+reproduced by this probe's configuration.)
+
+**Density-convergence diagnostic (job 14142; cheb/log C_l ratio−1, fast_cl base):**
+
+| kpd | n_k | TT20 | TT100 | TT500 | EE20 | EE100 | EE500 |
+|---|---|---|---|---|---|---|---|
+| 15 | 62 | +0.0220% | +0.0538% | +1.7003% | +2.3767% | -0.0039% | +0.2397% |
+| 30 | 125 | -0.0125% | +0.0026% | +0.0831% | -0.0422% | +0.0076% | +0.0212% |
+| 60 | 250 | +0.0003% | +0.0002% | +0.0049% | +0.0040% | -0.0000% | +0.0011% |
+
+**Verdicts (STOP-and-report; measured, not softened):**
+1. Strict no-regression FAILS at exactly one probed point: TT ℓ=2000,
+   matched n_k=300 (cheb 0.938% vs log 0.47%, the only point where log
+   passes the 0.5% gate and cheb doesn't). Elsewhere ℓ≤1500 differentials
+   are ≤0.16pp; EE ℓ=2000 improves (0.277% vs 0.997%, log fails there).
+2. No node-count reduction demonstrated at planck scale (n_k=300 needed to
+   match log's n_k=300 across sampled ℓ), but chebyshev degrades far more
+   gracefully at n_k=150 (TT2000 2.01% vs log's −5.78%).
+3. ℓ>1200 is NOT materially improved at matched density — the residual
+   high-ℓ error is common to both arms, so it lives outside the coarse-k
+   grid (likely the fine-grid/other stages), not closing the
+   `BENCHMARK.md:340` debt.
+4. Chebyshev grid + cubic spline is the worst combination (TT2000 −10.1%
+   at n_k=150) — confirms the Lobatto-grid/barycentric-interp precondition
+   both ways.
+5. **The committed GATE test `test_cls_chebyshev_path_matches_spline_path`
+   FAILS on GPU** (job 14138: TT ℓ=500 cheb/log ratio 1.0170 > 1.005 at
+   fast_cl density n_k=62) — the convergence table shows this is
+   discretization difference (1.70%→0.083%→0.005% as n_k rises), not an
+   implementation bug. Left as committed (fails without `--fast`); the
+   recommended recalibration to `pt_k_per_decade=30` (6x margin, ~10
+   min/arm) is NOT applied, pending maintainer ruling.
+6. Wall-clock: chebyshev is not slower (`t_pt` compile-dominated in fresh
+   processes; 5967 vs 6397s at n_k=300). Barycentric `t_cl` ≈ spline `t_cl`
+   once warm.
+7. GPU fastsuite hit its 3600s timeout in job 14138 with zero failures
+   observed up to the kill; per-file CPU runs during development were all
+   green (interpolation 11/11, chebyshev file 8/8, harmonic `--fast` 11/11,
+   harmonic+high_l 17/17).
+
+**Phase-2 backlog:**
+- ℓ-direction integer-rounded Chebyshev interpolation (paper §6; needs
+  non-integer-order-safe barycentric weight rebuild, not the closed form).
+- Preset flips (`fast_cl`/`planck_cl` defaulting to `pt_k_grid_type=
+  "chebyshev"`) — blocked on the open gate-density ruling and on closing
+  the ℓ>1200 gap this phase did not close.
+- `_cl_k_integral`/`_cl_k_integral_cross` `k_interp_factor>1` anti-pattern
+  (splines `T_l(k)` directly, contra `CHANGELOG.md:2192-2199` and the
+  paper) — needs its own design pass, likely "prefer the `*_interp` path"
+  rather than "Chebyshev-ify this function".
+- Investigate the −0.8..−1.0% ℓ≤1000 probe-config offset vs
+  `reference_data/lcdm_fiducial/cls.npz` (verdict 6 above) — orthogonal to
+  this PR, predates this branch.
+- Hybrid linear/log fine k-grid (`BENCHMARK.md:340`) remains the more
+  promising lead for the still-open ℓ>1200 debt (verdict 3).
+
 ### Sep 2, 2026: Traced IR resummation -- no-wiggle split + Sigma^2 differentiable (issue #30)
 
 **The no-wiggle broadband split and IR-resummation damping (`Sigma^2`,

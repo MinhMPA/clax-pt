@@ -408,6 +408,16 @@ def compute_cl_te(
 # Source-interpolated C_l (robust against oscillatory T_l(k))
 # ---------------------------------------------------------------------------
 
+
+def _fine_log_k_grid(log_k_coarse, n_k_fine):
+    """The dense log-uniform evaluation grid for the C_l k-integral.
+    Single definition for the four former inline copies. The integration
+    grid deliberately stays log-uniform + trapezoid: T_l(k) is
+    oscillatory, and density -- not spacing -- controls its integral
+    (CHANGELOG.md:2142-2163)."""
+    return jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+
+
 @jax.jit
 def _interp_single_source(src, log_k_coarse, log_k_fine):
     """Interpolate a single source array from coarse to fine k-grid (JIT-cached).
@@ -424,7 +434,24 @@ def _interp_single_source(src, log_k_coarse, log_k_fine):
     return jax.vmap(interp_one_tau)(jnp.arange(src.shape[1])).T
 
 
-def _interp_sources_to_fine_k(sources_list, log_k_coarse, log_k_fine):
+def _barycentric_matrix(log_k_coarse, log_k_fine):
+    """Dense barycentric evaluation matrix B with (B @ y) equal to
+    Chebyshev interpolation of y from Lobatto nodes log_k_coarse to
+    log_k_fine. Built once per C_l call; applied to each source as a
+    single matmul (replaces one Thomas solve per (source, tau))."""
+    n = log_k_coarse.shape[0]
+    w = jnp.where(jnp.arange(n) % 2 == 0, 1.0, -1.0)
+    w = w.at[0].mul(0.5).at[-1].mul(0.5)
+    d = log_k_fine[:, None] - log_k_coarse[None, :]
+    hit = jnp.abs(d) < 1e-14 * jnp.abs(log_k_coarse[-1] - log_k_coarse[0])
+    d_safe = jnp.where(hit, 1.0, d)
+    c = w[None, :] / d_safe
+    bary = c / jnp.sum(c, axis=1, keepdims=True)
+    row_hit = jnp.any(hit, axis=1, keepdims=True)
+    return jnp.where(row_hit, hit.astype(bary.dtype), bary)
+
+
+def _interp_sources_to_fine_k(sources_list, log_k_coarse, log_k_fine, method="spline"):
     """Interpolate source functions S(k,τ) from coarse to fine k-grid.
 
     Source functions vary slowly in k (BAO scale ~0.02 Mpc⁻¹), so
@@ -434,10 +461,19 @@ def _interp_sources_to_fine_k(sources_list, log_k_coarse, log_k_fine):
         sources_list: list of [n_k, n_tau] source arrays
         log_k_coarse: log(k) values of the perturbation k-grid
         log_k_fine: log(k) values of the fine output grid
+        method: "spline" (default, unchanged CubicSpline path) or
+            "chebyshev" -- builds one barycentric evaluation matrix
+            B = _barycentric_matrix(log_k_coarse, log_k_fine) and applies
+            it to every source as a matmul. Requires the perturbation
+            solve to have used pt_k_grid_type="chebyshev" (Lobatto nodes
+            in log k) -- the barycentric weights assume Lobatto spacing.
 
     Returns:
         list of [n_k_fine, n_tau] interpolated source arrays
     """
+    if method == "chebyshev":
+        B = _barycentric_matrix(log_k_coarse, log_k_fine)
+        return [B @ src for src in sources_list]
     return [_interp_single_source(src, log_k_coarse, log_k_fine) for src in sources_list]
 
 
@@ -447,6 +483,7 @@ def compute_cl_tt_interp(
     l_switch=_DEFAULT_L_SWITCH, delta_l=_DEFAULT_DELTA_L,
     tt_mode=None,
     l_limber=0,
+    k_interp_method="spline",
 ):
     """Compute C_l^TT with source interpolation to a fine k-grid.
 
@@ -462,13 +499,18 @@ def compute_cl_tt_interp(
         l_values: tuple of multipole values (must be tuple, not list, for JIT caching)
         n_k_fine: number of fine k-points (default 10000, converged for l≤1200)
         l_limber: use Limber for l >= this value (0=disabled)
+        k_interp_method: "spline" (default) or "chebyshev" -- passed through
+            to _interp_sources_to_fine_k. "chebyshev" requires the
+            perturbation solve to have used pt_k_grid_type="chebyshev"
+            (Lobatto nodes in log k) -- the barycentric weights assume
+            Lobatto spacing.
     """
     if tt_mode is None:
         tt_mode = _DEFAULT_TT_MODE
 
     # Fine k-grid
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     # Interpolate sources to fine grid
@@ -480,7 +522,8 @@ def compute_cl_tt_interp(
     if include_T2:
         sources_to_interp.append(pt.source_T2)
 
-    fine_sources = _interp_sources_to_fine_k(sources_to_interp, log_k_coarse, log_k_fine)
+    fine_sources = _interp_sources_to_fine_k(sources_to_interp, log_k_coarse, log_k_fine,
+                                              method=k_interp_method)
     source_T0_fine = fine_sources[0]
     source_T1_fine = fine_sources[1] if include_T1 else None
     source_T2_fine = fine_sources[1 + int(include_T1)] if include_T2 else None
@@ -512,13 +555,23 @@ def compute_cl_ee_interp(
     n_k_fine=5000,
     l_switch=_DEFAULT_L_SWITCH, delta_l=_DEFAULT_DELTA_L,
     l_limber=0,
+    k_interp_method="spline",
 ):
-    """Compute C_l^EE with source interpolation to a fine k-grid."""
+    """Compute C_l^EE with source interpolation to a fine k-grid.
+
+    Args:
+        k_interp_method: "spline" (default) or "chebyshev" -- passed
+            through to _interp_sources_to_fine_k. "chebyshev" requires
+            the perturbation solve to have used pt_k_grid_type="chebyshev"
+            (Lobatto nodes in log k) -- the barycentric weights assume
+            Lobatto spacing.
+    """
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
-    fine_sources = _interp_sources_to_fine_k([pt.source_E], log_k_coarse, log_k_fine)
+    fine_sources = _interp_sources_to_fine_k([pt.source_E], log_k_coarse, log_k_fine,
+                                              method=k_interp_method)
     source_E_fine = fine_sources[0]
 
     tau_0 = bg.conformal_age
@@ -543,13 +596,22 @@ def compute_cl_te_interp(
     l_switch=_DEFAULT_L_SWITCH, delta_l=_DEFAULT_DELTA_L,
     tt_mode=None,
     l_limber=0,
+    k_interp_method="spline",
 ):
-    """Compute C_l^TE with source interpolation to a fine k-grid."""
+    """Compute C_l^TE with source interpolation to a fine k-grid.
+
+    Args:
+        k_interp_method: "spline" (default) or "chebyshev" -- passed
+            through to _interp_sources_to_fine_k. "chebyshev" requires
+            the perturbation solve to have used pt_k_grid_type="chebyshev"
+            (Lobatto nodes in log k) -- the barycentric weights assume
+            Lobatto spacing.
+    """
     if tt_mode is None:
         tt_mode = _DEFAULT_TT_MODE
 
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     # Interpolate all needed sources
@@ -561,7 +623,8 @@ def compute_cl_te_interp(
     if include_T2:
         sources_to_interp.append(pt.source_T2)
 
-    fine_sources = _interp_sources_to_fine_k(sources_to_interp, log_k_coarse, log_k_fine)
+    fine_sources = _interp_sources_to_fine_k(sources_to_interp, log_k_coarse, log_k_fine,
+                                              method=k_interp_method)
     source_T0_fine = fine_sources[0]
     source_E_fine = fine_sources[1]
     source_T1_fine = fine_sources[2] if include_T1 else None
@@ -638,6 +701,7 @@ def compute_cls_all_interp(
     pt, params, bg, l_max=2500,
     n_k_fine=5000, tt_mode=None,
     l_limber=0,
+    k_interp_method="spline",
 ):
     """Compute all unlensed C_l spectra at l=2..l_max with source interpolation.
 
@@ -647,6 +711,11 @@ def compute_cls_all_interp(
 
     Args:
         l_limber: use Limber approximation for l >= this value (0=disabled)
+        k_interp_method: "spline" (default) or "chebyshev" -- forwarded to
+            compute_cl_tt_interp/compute_cl_ee_interp/compute_cl_te_interp.
+            "chebyshev" requires the perturbation solve to have used
+            pt_k_grid_type="chebyshev" (Lobatto nodes in log k) -- the
+            barycentric weights assume Lobatto spacing.
 
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
@@ -655,13 +724,16 @@ def compute_cls_all_interp(
 
     cl_tt_sparse = compute_cl_tt_interp(pt, params, bg, tuple(l_sparse.tolist()),
                                          n_k_fine=n_k_fine, tt_mode=tt_mode,
-                                         l_limber=l_limber)
+                                         l_limber=l_limber,
+                                         k_interp_method=k_interp_method)
     cl_ee_sparse = compute_cl_ee_interp(pt, params, bg, tuple(l_sparse.tolist()),
                                          n_k_fine=n_k_fine,
-                                         l_limber=l_limber)
+                                         l_limber=l_limber,
+                                         k_interp_method=k_interp_method)
     cl_te_sparse = compute_cl_te_interp(pt, params, bg, tuple(l_sparse.tolist()),
                                          n_k_fine=n_k_fine, tt_mode=tt_mode,
-                                         l_limber=l_limber)
+                                         l_limber=l_limber,
+                                         k_interp_method=k_interp_method)
 
     l_dense = jnp.arange(2, l_max + 1, dtype=jnp.float64)
     l_sp = jnp.array(l_sparse.astype(float))
@@ -689,6 +761,7 @@ _build_jl_table = build_jl_table
 def compute_cls_all_fast(
     pt, params, bg, l_max=1500,
     n_k_fine=5000, tt_mode=None,
+    k_interp_method="spline",
 ):
     """Fast C_l computation using precomputed j_l/j_l' tables + source interpolation.
 
@@ -715,18 +788,23 @@ def compute_cls_all_fast(
         l_max: maximum multipole (default 1500)
         n_k_fine: fine k-grid points for source interpolation (default 5000)
         tt_mode: unused (always uses T0+T1+T2)
+        k_interp_method: "spline" (default) or "chebyshev" -- passed
+            through to _interp_sources_to_fine_k. "chebyshev" requires
+            the perturbation solve to have used pt_k_grid_type="chebyshev"
+            (Lobatto nodes in log k) -- the barycentric weights assume
+            Lobatto spacing.
 
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
     """
     # 1. Source interpolation to fine k-grid
     log_k_coarse = jnp.log(pt.k_grid)
-    log_k_fine = jnp.linspace(log_k_coarse[0], log_k_coarse[-1], n_k_fine)
+    log_k_fine = _fine_log_k_grid(log_k_coarse, n_k_fine)
     k_fine = jnp.exp(log_k_fine)
 
     fine_sources = _interp_sources_to_fine_k(
         [pt.source_T0, pt.source_E, pt.source_T1, pt.source_T2],
-        log_k_coarse, log_k_fine
+        log_k_coarse, log_k_fine, method=k_interp_method
     )
     source_T0_fine = fine_sources[0]
     source_E_fine = fine_sources[1]
