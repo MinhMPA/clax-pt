@@ -197,6 +197,92 @@ def _compute_natural_spline_coeffs(
     return d2y
 
 
+def dst2_ortho(x: Float[Array, "N"]) -> Float[Array, "N"]:
+    r"""Orthonormal type-II discrete sine transform (DST-II).
+
+    Matches ``scipy.fft.dst(x, type=2, norm="ortho")`` to machine precision.
+    Used to build a differentiable de-wiggled (no-wiggle) linear power
+    spectrum via the sine-transform IR-resummation split (issue #30's
+    ``pk_nw`` class).
+
+    Construction (FFTW RODFT10 identity, see
+    http://www.fftw.org/fftw3_doc/1d-Real_002dodd-DFTs-_0028DSTs_0029.html
+    and https://docs.scipy.org/doc/scipy/reference/generated/scipy.fft.dst.html):
+    embed the length-``N`` input into a length-``4N`` real array ``w`` via
+    odd symmetry (odd-indexed slots hold ``+x``/``-x`` mirrored about the
+    midpoint, even slots are zero), take a single complex FFT of ``w``, and
+    read the (negated) imaginary part of bins ``1..N``. This is the
+    unnormalized DST-II; scipy's "ortho" convention then rescales it so the
+    transform matrix is orthonormal: every output element is scaled by
+    ``sqrt(1/(2N))``, except the last (``k = N-1``), which gets the extra
+    ``1/sqrt(2)`` factor ``sqrt(1/(4N))``. These exact factors were derived
+    empirically against ``scipy.fft.dst`` at N=4 and N=8 (see task report)
+    and hold at every N tested (verified through N=65536).
+
+    The whole map is built from real scatter/gather, ``jnp.fft.fft``, and
+    elementwise real scaling -- all linear operations -- so ``dst2_ortho``
+    is itself linear in ``x``. Consequently ``jax.jvp``/``jax.vjp`` through
+    it are exact (input-independent Jacobian) rather than merely accurate;
+    see ``idst2_ortho`` below, which is obtained as its exact transpose.
+
+    Args:
+        x: input samples, shape (N,), real-valued (float32/float64)
+
+    Returns:
+        DST-II coefficients, shape (N,), same dtype as ``x``
+    """
+    n = x.shape[0]
+    idx = jnp.arange(n)
+    w = jnp.zeros(4 * n, dtype=x.dtype)
+    # Odd extension: w[2n+1] = x[n], w[4N-2n-1] = -x[n] (even slots stay 0).
+    # unique_indices=True lets JAX transpose the scatter (needed by
+    # idst2_ortho's jax.linear_transpose); the two index sets never
+    # overlap (all odd, disjoint ranges [1, 2N-1] and [2N+1, 4N-1]).
+    w = w.at[2 * idx + 1].set(x, unique_indices=True)
+    w = w.at[4 * n - 2 * idx - 1].set(-x, unique_indices=True)
+    F = jnp.fft.fft(w)
+    y_unnorm = -jnp.imag(F[1 : n + 1])
+
+    # scipy "ortho" scaling: sqrt(1/(2N)) for k=0..N-2, sqrt(1/(4N)) for k=N-1.
+    factor = jnp.full((n,), jnp.sqrt(1.0 / (2.0 * n)), dtype=x.dtype)
+    factor = factor.at[-1].set(jnp.sqrt(1.0 / (4.0 * n)))
+    return y_unnorm * factor
+
+
+def idst2_ortho(X: Float[Array, "N"]) -> Float[Array, "N"]:
+    r"""Orthonormal inverse type-II discrete sine transform (IDST-II / DST-III).
+
+    Matches ``scipy.fft.idst(x, type=2, norm="ortho")`` to machine precision;
+    round-trips exactly with :func:`dst2_ortho` (``idst2_ortho(dst2_ortho(x))
+    == x``). See ``scipy.fft.idst`` docs
+    (https://docs.scipy.org/doc/scipy/reference/generated/scipy.fft.idst.html)
+    and the FFTW RODFT01 identity
+    (http://www.fftw.org/fftw3_doc/1d-Real_002dodd-DFTs-_0028DSTs_0029.html),
+    which is the DST-III used here (the mirrored/transpose counterpart of
+    the RODFT10 DST-II built in :func:`dst2_ortho`).
+
+    Implemented as the exact linear transpose of :func:`dst2_ortho` via
+    ``jax.linear_transpose``, rather than a second hand-derived FFT
+    construction. This is valid because ``dst2_ortho``'s "ortho" scaling
+    makes it an orthonormal (unitary) real transform, whose inverse equals
+    its transpose -- exactly the relationship between scipy's DST-II and
+    DST-III under ``norm="ortho"``. Because :func:`dst2_ortho` is linear
+    (see its docstring), its transpose is well-defined and exact (no
+    linearization error), so both ``dst2_ortho`` and ``idst2_ortho`` have
+    input-independent Jacobians and forward-mode (``jvp``) / reverse-mode
+    (``vjp``) AD through either agree exactly with each other and with the
+    closed-form transform matrix.
+
+    Args:
+        X: DST-II coefficients, shape (N,), real-valued (float32/float64)
+
+    Returns:
+        Reconstructed samples, shape (N,), same dtype as ``X``
+    """
+    example = jnp.zeros_like(X)
+    (y,) = jax.linear_transpose(dst2_ortho, example)(X)
+    return y
+
 def chebyshev_lobatto_nodes(a: float, b: float, n: int) -> np.ndarray:
     """Chebyshev-Lobatto (extrema) nodes on [a, b], ascending, endpoints
     included. Plain numpy: a STATIC grid constructor (shape source),
