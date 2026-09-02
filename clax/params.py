@@ -164,6 +164,7 @@ class PrecisionParams:
     pt_k_max_cl: float = 5.0        # Mpc^-1 (for C_l computation)
     pt_k_max_pk: float = 50.0       # Mpc^-1 (for P(k) output)
     pt_k_per_decade: int = 30
+    pt_k_grid_type: str = "log"     # "log" | "chebyshev" (Lobatto nodes in log10 k; issue #31)
     pt_l_max_g: int = 17            # photon Boltzmann hierarchy
     pt_l_max_pol_g: int = 17        # photon polarization hierarchy
     pt_l_max_ur: int = 17           # massless neutrino hierarchy

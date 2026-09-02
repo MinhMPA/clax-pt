@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float
 
 
@@ -281,3 +282,60 @@ def idst2_ortho(X: Float[Array, "N"]) -> Float[Array, "N"]:
     example = jnp.zeros_like(X)
     (y,) = jax.linear_transpose(dst2_ortho, example)(X)
     return y
+
+def chebyshev_lobatto_nodes(a: float, b: float, n: int) -> np.ndarray:
+    """Chebyshev-Lobatto (extrema) nodes on [a, b], ascending, endpoints
+    included. Plain numpy: a STATIC grid constructor (shape source),
+    mirroring how logspace grids are built. Requires n >= 2."""
+    j = np.arange(n)
+    t = -np.cos(np.pi * j / (n - 1))          # ascending in [-1, 1]
+    return 0.5 * (a + b) + 0.5 * (b - a) * t
+
+
+@jax.tree_util.register_pytree_node_class
+class ChebyshevInterpolant:
+    """Barycentric interpolation on Chebyshev-Lobatto nodes.
+
+    CONTRACT: ``x`` must be the output of :func:`chebyshev_lobatto_nodes`
+    (the barycentric weights (-1)^j * [1/2, 1, ..., 1, 1/2] are derived
+    from index parity, not from ``x``). Evaluation outside [x[0], x[-1]]
+    saturates to the endpoint values, matching CubicSpline's clip policy
+    (interpolation.py:67) -- barycentric formulas diverge off-interval.
+    Spectral accuracy for smooth y (Trefethen, Approximation Theory and
+    Approximation Practice, ch. 5); added for the C_l source
+    interpolation (issue #31, arXiv:2608.24682).
+    """
+
+    def __init__(self, x, y):
+        self.x = jnp.asarray(x)
+        self.y = jnp.asarray(y)
+        n = self.x.shape[0]
+        w = jnp.where(jnp.arange(n) % 2 == 0, 1.0, -1.0)
+        self.w = w.at[0].mul(0.5).at[-1].mul(0.5)
+
+    def evaluate(self, x_eval):
+        x_clamped = jnp.clip(x_eval, self.x[0], self.x[-1])
+
+        def _eval_one(xe):
+            d = xe - self.x
+            # removable singularity: an exact-node hit returns y there.
+            hit = jnp.abs(d) < 1e-14 * jnp.abs(self.x[-1] - self.x[0])
+            any_hit = jnp.any(hit)
+            d_safe = jnp.where(hit, 1.0, d)     # double-where: no inf enters
+            c = self.w / d_safe
+            bary = jnp.sum(c * self.y) / jnp.sum(c)
+            exact = jnp.sum(jnp.where(hit, self.y, 0.0))
+            return jnp.where(any_hit, exact, bary)
+
+        flat = jnp.ravel(jnp.asarray(x_clamped))
+        out = jax.vmap(_eval_one)(flat)
+        return jnp.reshape(out, jnp.shape(x_clamped))
+
+    def tree_flatten(self):
+        return (self.x, self.y, self.w), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        obj = object.__new__(cls)
+        obj.x, obj.y, obj.w = children
+        return obj
