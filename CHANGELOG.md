@@ -8,6 +8,29 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Sep 2, 2026: Multi-cosmology testing RULE (3-5 cosmologies, canonical grids + fixtures)
+
+**New project rule (CLAUDE.md "Test at many parameter points" is now
+binding):** every new or modified physics-facing test (values or gradients)
+must run at 3-5 distinct cosmologies. Motivated directly by issue #30: the
+2.34% h-gradient discrepancy was two independent AD errors whose signs
+nearly cancelled at fiducial LCDM — fiducial-only tests were structurally
+blind to both.
+
+- `tests/conftest.py`: canonical `COSMOLOGY_GRID_LCDM` (fiducial, h+10%,
+  omega_b+20%, omega_cdm-20%, ns+5% — locked to
+  `scripts/generate_multipoint_reference.py`) and `COSMOLOGY_GRID_NULCDM`
+  (m_ncdm = 0.06/0.15/0.3 eV) with parametrized fixtures `lcdm_cosmology` /
+  `nulcdm_cosmology` (fiducial-only under `--fast`), plus
+  `cosmology_reference_dir()` for reference-data lookup.
+- `tests/test_multicosmo_consistency.py`: reference implementation —
+  reverse-mode (stable custom-vjp) vs forward-mode (native+direct) AD
+  consistency and primal finiteness through background+thermodynamics at
+  every LCDM grid point.
+- Exemptions (cosmology-independent numerics) and cost guidance (slow-mark
+  expensive points, never shrink below 3 in full mode) documented in
+  CLAUDE.md.
+
 ### 2026-09-02: Chebyshev k-sampling phase 1 (issue #31, opt-in)
 
 **Adds an opt-in Chebyshev-Lobatto k-grid + barycentric source interpolation
