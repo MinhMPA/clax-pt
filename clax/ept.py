@@ -149,9 +149,10 @@ def _load_complex_triangular_lapack_l(filepath: str, n: int) -> np.ndarray:
 def _load_matrices(nmax: int) -> dict:
     """Load all CLASS-PT kernel matrices for the given N_max.
 
-    For N=256, CLASS-PT uses _packed.dat files in LAPACK 'L' column-major
-    lower-triangular packed format (cf. nonlinear_pt.c line 980, 982).
-    For other N, non-packed files use row-major lower-triangular packing.
+    CLASS-PT stores M22/M22basic in LAPACK 'L' column-major lower-triangular
+    packed format for EVERY N; only the file name varies (Nstr_M22 is
+    "N128" / "N512" / "N256_packed", nonlinear_pt.c:847-864, all read through
+    the same CONVERT_REAL_TO_COMPLEX_M22 macro at :895 into one P22 consumer).
 
     Returns a dict with keys:
       M13   : (nmax+1,) complex  — P13 kernel (matter)
@@ -164,28 +165,19 @@ def _load_matrices(nmax: int) -> dict:
     def mat_path(name):
         return os.path.join(_MATRIX_DIR, name)
 
-    # Check for _packed.dat files (N=256 in CLASS-PT uses these)
+    # One ordering for every N (see the docstring): choose the packed file
+    # when CLASS-PT ships one, otherwise the plain name, and read both with the
+    # LAPACK 'L' unpacker. Reading N128/N512 row-major instead gives a silently
+    # wrong M22 -- ~300% error with a negative monopole. M22oneline_N256.dat,
+    # the non-packed N=256 file, is legacy and CLASS-PT never reads it.
     packed_m22 = mat_path(f"M22oneline_N{nmax}_packed.dat")
     packed_m22b = mat_path(f"M22basiconeline_N{nmax}_packed.dat")
-    use_packed = os.path.exists(packed_m22)
-
-    if use_packed:
-        m22 = _load_complex_triangular_lapack_l(packed_m22, n)
-        m22b = _load_complex_triangular_lapack_l(packed_m22b, n)
-    else:
-        # Non-packed files: row-major lower triangular
-        def _load_rm(path):
-            n_tri = n * (n + 1) // 2
-            data = np.loadtxt(path)
-            tri = data[:n_tri] + 1j * data[n_tri:]
-            M = np.zeros((n, n), dtype=complex)
-            idx = 0
-            for i in range(n):
-                for j in range(i + 1):
-                    M[i, j] = tri[idx]; M[j, i] = tri[idx]; idx += 1
-            return M
-        m22 = _load_rm(mat_path(f"M22oneline_N{nmax}.dat"))
-        m22b = _load_rm(mat_path(f"M22basiconeline_N{nmax}.dat"))
+    m22_file = (packed_m22 if os.path.exists(packed_m22)
+                else mat_path(f"M22oneline_N{nmax}.dat"))
+    m22b_file = (packed_m22b if os.path.exists(packed_m22b)
+                 else mat_path(f"M22basiconeline_N{nmax}.dat"))
+    m22 = _load_complex_triangular_lapack_l(m22_file, n)
+    m22b = _load_complex_triangular_lapack_l(m22b_file, n)
 
     return {
         "M13":  _load_complex_vector(

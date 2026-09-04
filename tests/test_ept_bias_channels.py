@@ -23,6 +23,7 @@ Usage:
 """
 
 # Force CPU backend BEFORE importing JAX
+import dataclasses
 import os
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
 os.environ["JAX_PLATFORMS"] = "cpu"
@@ -190,3 +191,48 @@ def test_pytree_roundtrip_preserves_Pd2d2_0(ept_fz):
     assert float(rt.h) == float(ept_fz.h)
     assert float(rt.f) == float(ept_fz.f)
     assert np.allclose(np.asarray(rt.kh), np.asarray(ept_fz.kh))
+
+# ---------------------------------------------------------------------------
+# 6. The FFTLog resolution knob actually works
+# ---------------------------------------------------------------------------
+# EPTPrecisionParams.nmax advertises 128/256/512. CLASS-PT stores every one of
+# those matrices in the same LAPACK 'L' column-major packed order -- it picks
+# the filename with Nstr_M22 = "N128"/"N512"/"N256_packed" (nonlinear_pt.c:847-864)
+# and feeds all three through one CONVERT_REAL_TO_COMPLEX_M22 macro (:895) and
+# one P22 consumer. Reading a non-256 file with any other ordering yields a
+# silently wrong M22, which showed up as a ~300% error and a NEGATIVE monopole.
+# No reference data: this is clax against itself at three resolutions.
+
+
+@pytest.fixture(scope="module")
+def _nmax_baseline():
+    from clax.ept import ept_kgrid
+    k_h, pk_lin, h, fz = _load_pk_lin()
+    prec = dataclasses.replace(EPTPrecisionParams(), nmax=256, ir_resummation=False)
+    kg = np.asarray(ept_kgrid(prec))
+    pk = np.exp(np.interp(np.log(kg), np.log(np.asarray(k_h)), np.log(np.asarray(pk_lin))))
+    e = compute_ept(jnp.asarray(pk), jnp.asarray(kg), h=h, f=fz, prec=prec)
+    return kg, np.asarray(pk_gg_l0(e, 1.0, 0.0, 0.0, 0.0)), h, fz, k_h, pk_lin
+
+
+@pytest.mark.parametrize("nmax", [128, 512])
+def test_nmax_is_a_working_resolution_knob(_nmax_baseline, nmax):
+    """P_gg^(0) at nmax=128/512 must stay positive and track nmax=256.
+
+    The FFTLog grid genuinely changes with nmax, so exact agreement is not
+    expected; 3% bounds the honest discretisation difference while catching
+    the wrong-matrix failure, which is ~300% with a sign flip.
+    """
+    from clax.ept import ept_kgrid
+    kg0, P0, h, fz, k_h, pk_lin = _nmax_baseline
+    prec = dataclasses.replace(EPTPrecisionParams(), nmax=nmax, ir_resummation=False)
+    kg = np.asarray(ept_kgrid(prec))
+    pk = np.exp(np.interp(np.log(kg), np.log(np.asarray(k_h)), np.log(np.asarray(pk_lin))))
+    e = compute_ept(jnp.asarray(pk), jnp.asarray(kg), h=h, f=fz, prec=prec)
+    P = np.asarray(pk_gg_l0(e, 1.0, 0.0, 0.0, 0.0))
+    assert np.all(P > 0), (
+        f"nmax={nmax}: monopole goes negative (min {P.min():.4g}) -- "
+        "M22/M22b were read in the wrong triangular order")
+    kc = np.geomspace(0.02, 0.3, 60)
+    dev = np.max(np.abs(np.interp(kc, kg, P) / np.interp(kc, kg0, P0) - 1.0))
+    assert dev < 0.03, f"nmax={nmax}: max deviation from nmax=256 is {100*dev:.3f}%"
