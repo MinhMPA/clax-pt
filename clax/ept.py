@@ -1018,7 +1018,13 @@ def _compute_bias_spectra(
     # where k_0 = kdisc[0] = kmin.
     y2_base = x2 @ M22b
     raw_Id2d2 = 2.0 * jnp.real(k ** 3 * jnp.sum(x2 * y2_base, axis=-1))
-    Pk_Id2d2 = (jnp.abs(raw_Id2d2 - raw_Id2d2[0]) + 1e-6) * uv_damp
+    # No abs() here.  CLASS-PT's fabs() at this point belongs to its
+    # add-large-constant / log-spline / subtract machinery, not to the physical
+    # spectrum: the P_Id2d2 it returns is negative (P_d2d2(k->0) is the maximum,
+    # so P_d2d2(k) - P_d2d2(0) <= 0).  Taking the absolute value flipped the sign
+    # of the 0.25*b2^2*Pk_Id2d2 term in every galaxy spectrum, real space
+    # included; the ratio to CLASS-PT was exactly -1.000 at every k.
+    Pk_Id2d2 = (raw_Id2d2 - raw_Id2d2[0]) * uv_damp
 
     # Exact bias spectra from modified M22basic matrices
     # From nonlinear_pt.c lines 12095-12493 (all use x2 with b=-1.6 basis)
