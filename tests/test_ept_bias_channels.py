@@ -584,3 +584,41 @@ def test_pk_gg_l4_omits_the_two_rows_classy_omits(label, pk_scale, f_scale):
         f"[{label}] pk_gg_l4 still reads Pk_4_b1b2 / Pk_4_b1bG2; classy.pyx:"
         f"4925-4931 has no pm[40]/pm[41] term (max shift "
         f"{np.max(np.abs(got[m] - base[m])) / scale:.3e} of the hexadecapole)")
+
+
+# ---------------------------------------------------------------------------
+# 9. Scale-dependent stochastic terms a0, a2
+# ---------------------------------------------------------------------------
+# classy.pyx:4910 adds  Pshot + a0*(kh/0.45)^2 + a2*(1/3)*(kh/0.45)^2  to the
+# monopole and :4921 adds  a2*(2/3)*(kh/0.45)^2  to the quadrupole. All three
+# are pre-divided by nbar. The hexadecapole and the real-space spectra have no
+# scale-dependent stochastic term. Differencing in a0/a2 isolates them exactly.
+
+
+def test_stochastic_a0_a2_match_classy(ept_fz):
+    """a0 and a2 enter l=0 with weights 1 and 1/3, and l=2 with 2/3."""
+    kh = np.asarray(ept_fz.kh)
+    shape = (kh / 0.45) ** 2
+    m = _band(ept_fz)
+    args = (2.0, 0.5, 0.1, -0.2)
+    base0 = np.asarray(pk_gg_l0(ept_fz, *args))
+    d_a0 = np.asarray(pk_gg_l0(ept_fz, *args, a0=7.0)) - base0
+    d_a2 = np.asarray(pk_gg_l0(ept_fz, *args, a2=9.0)) - base0
+    # The stochastic term is O(1) inside a monopole of O(1e4), so recovering it
+    # by differencing is limited by float64 cancellation on the FULL spectrum,
+    # not on the term: the floor is ~1e-16 * max|P_l|, measured at 7e-12 here.
+    # Bound the absolute error by that scale rather than by the small term.
+    for got, want, base, name in ((d_a0, 7.0 * shape, base0, "l0/a0"),
+                                  (d_a2, 9.0 * shape / 3.0, base0, "l0/a2")):
+        assert np.max(np.abs(got[m] - want[m])) < 1e-12 * np.max(np.abs(base[m])), name
+    base2 = np.asarray(pk_gg_l2(ept_fz, *args))
+    d2 = np.asarray(pk_gg_l2(ept_fz, *args, a2=9.0)) - base2
+    want2 = 9.0 * 2.0 / 3.0 * shape
+    assert np.max(np.abs(d2[m] - want2[m])) < 1e-12 * np.max(np.abs(base2[m])), "l2/a2"
+
+
+def test_hexadecapole_has_no_stochastic_term(ept_fz):
+    """classy.pyx:4925-4931 gives pk_gg_l4 no a0/a2 term, so clax must not
+    accept one -- a silently ignored kwarg would be worse than a TypeError."""
+    with pytest.raises(TypeError):
+        pk_gg_l4(ept_fz, 2.0, 0.5, 0.1, -0.2, a2=1.0)

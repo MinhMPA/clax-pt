@@ -2389,6 +2389,8 @@ def pk_gg_l0(
     cs0: float = 0.0,
     Pshot: float = 0.0,
     b4: float = 0.0,
+    a0: float = 0.0,
+    a2: float = 0.0,
 ) -> Float[Array, "Nk"]:
     """Redshift-space galaxy-galaxy monopole (ℓ=0).
 
@@ -2436,7 +2438,12 @@ def pk_gg_l0(
     # as b2^2.  NB pk_gg_real deliberately does NOT carry it (CLASS-PT
     # classy.pyx:4827 omits it there too); the constant is absorbed into Pshot.
     return ((new_l0_tree + P_loop_l0 + P_bias_l0 + 2.0 * cs0 * ept.Pk_ctr0)
-            + Pshot + P_b4 + 0.25 * b2 ** 2 * ept.Pd2d2_0)
+            + Pshot + P_b4 + 0.25 * b2 ** 2 * ept.Pd2d2_0
+            # classy.pyx:4910: the scale-dependent stochastic terms, already
+            # divided by nbar. a2 enters the monopole with weight 1/3 and the
+            # quadrupole with 2/3 -- the Legendre moments of its mu^2 shape.
+            + a0 * (ept.kh / 0.45) ** 2
+            + a2 * (1.0 / 3.0) * (ept.kh / 0.45) ** 2)
 
 
 def pk_gg_l2(
@@ -2447,6 +2454,7 @@ def pk_gg_l2(
     bGamma3: float,
     cs2: float = 0.0,
     b4: float = 0.0,
+    a2: float = 0.0,
 ) -> Float[Array, "Nk"]:
     """Redshift-space galaxy-galaxy quadrupole (ℓ=2).
 
@@ -2483,7 +2491,9 @@ def pk_gg_l2(
         * ept.Pk_ctr4
     )
 
-    return (new_l2_tree + P_loop_l2 + P_bias_l2 + 2.0 * cs2 * ept.Pk_ctr2) + P_b4
+    return ((new_l2_tree + P_loop_l2 + P_bias_l2 + 2.0 * cs2 * ept.Pk_ctr2) + P_b4
+            # classy.pyx:4921: a2 enters the quadrupole with weight 2/3.
+            + a2 * (2.0 / 3.0) * (ept.kh / 0.45) ** 2)
 
 
 def pk_gg_l4(
