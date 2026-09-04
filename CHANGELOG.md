@@ -8,6 +8,77 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Sep 4, 2026: Fix four bugs in the EPT quadratic-bias (b2, bG2) channels
+
+**`pk_gg_l0/l2/l4` disagreed with CLASS-PT by up to 5481% in the quadratic-bias
+sector. Four independent bugs; all fixed. Worst-case agreement across all
+channels over 0.01 < k < 0.20 is now 0.44% (l=0), 0.80% (l=2), 1.55% (l=4).**
+
+Found while fitting AbacusPNG c000 halo multipoles (V = 8 (Gpc/h)^3 x 2 phases,
+z = 0.5, M > 1e12 Msun/h). clax returned b1 = 1.3099 against a ground truth of
+1.2531 +- 0.006 (real-space P_hm/P_mm, k->0) — a 3-sigma failure — with an
+unphysical negative stochastic amplitude. CLASS-PT, given the identical data,
+covariance and linear P_cb, returned b1 = 1.2518. After these fixes clax returns
+**b1 = 1.2571 +- 0.0079 (+0.32%)**, 0.27 sigma from the CLASS-PT arm.
+
+1. **`nu1`/`nu2` silently rebound to the wrong FFTLog basis** (`ept.py`). They
+   are defined near the top of `_compute_bias_spectra` in the b = -1.6 bias
+   basis (`etam2`) — the comment there even says "for RSD bias kernels" — but
+   the RSD 1-loop multipole block ~110 lines later rebinds them to the b = -0.3
+   matter basis (`etam`). The RSD bias kernels, ~420 lines further down, then
+   consumed the matter-basis values while being contracted with `x2`, the
+   b = -1.6 FFTLog vector. The real-space bias channels (`Pk_Id2`, `Pk_IG2`,
+   `Pk_Id2G2`, `Pk_IG2G2`) are computed *before* the rebinding, which is why
+   they always agreed with CLASS-PT to 1.000 and the bug stayed hidden.
+   The kernels themselves are transcribed correctly — all four were diffed
+   character-by-character against `nonlinear_pt.c:5063-5075`.
+
+2. **Spurious `jnp.abs()` on `Pk_Id2d2`.** CLASS-PT's `fabs()` at that point
+   belongs to its add-large-constant / log-spline / subtract machinery, not to
+   the physical spectrum; the `P_Id2d2` it returns is negative. Taking the
+   absolute value flipped the sign of the `0.25*b2^2*Pk_Id2d2` term in every
+   galaxy spectrum, real space included. Ratio to CLASS-PT was exactly -1.000.
+
+3. **Missing bG2 negation.** CLASS-PT negates `pk_mult[32, 33, 36, 37, 39]`
+   when unpacking (`classy.pyx:4721-4731`) = `0_b1bG2, 0_bG2, 2_b1bG2, 2_bG2,
+   4_bG2`. Both codes then use `+ b1*bG2*<channel>`, so clax must carry the
+   same sign. All five bG2 channels were sign-flipped (exactly -1.000);
+   `Pk_4_b1bG2` (index 41) is correctly *not* negated.
+
+4. **Missing zero-lag `Pd2d2_0` in `pk_gg_l0`.** CLASS-PT adds
+   `0.25*b2^2*Pd2d2_0` (`classy.pyx:4911`), where
+   `Pd2d2_0 = (1/pi^2) * int P_lin^2 k^3 dln k` is the `k->0` limit that the
+   `Pk_Id2d2` subtraction removes. It is *not* degenerate with `Pshot` once
+   `b2` floats, since it scales as `b2^2`. Added as a new scalar pytree leaf on
+   `EPTComponents` (appended last, so no array-leaf index shifts).
+   `pk_gg_real` deliberately does **not** carry it, matching CLASS-PT
+   (`classy.pyx:4827`), where the constant is absorbed into `Pshot`.
+   NB CLASS-PT evaluates this integral on the *user's output grid*
+   (`classy.pyx:4813`), leaving it badly under-converged for a narrow k-range
+   (2253 vs 2840 (Mpc/h)^3 on a 0.01-0.3 h/Mpc grid); clax integrates over the
+   full EPT grid, which is converged.
+
+**Why `scripts/accuracy_classpt.py` never caught any of this:** its reference
+`reference_data/classpt_z0.38_fullrange.npz` was generated with
+`b2 = bG2 = bGamma3 = cs = cs0 = cs2 = cs4 = Pshot = 0` and only
+`b1 = 2, b4 = 500` — precisely the two channels that were already correct.
+Every quadratic-bias channel is multiplied by zero. **The reference should be
+regenerated with all parameters non-zero.**
+
+**New:** `tests/test_ept_bias_channels.py` (16 tests, no new reference data
+needed — every assertion is an algebraic invariant of the model). All four bugs
+were verified to make these tests fail before the fix:
+- At `f = 0` redshift space *is* real space, so `Pk_0_b1b2(f=0) / Pk_Id2 == 1`
+  and `Pk_0_b1bG2(f=0) / Pk_IG2 == 2` (the factor 2 is CLASS-PT's convention:
+  `pk_gg_real` carries `2.*b1*bG2*pk_mult[3]`, `pk_gg_l0` carries
+  `b1*bG2*pk_mult[32]`). Pre-fix these ranged -0.05..20171 and -6937..7.9.
+- Every kernel with an explicit factor of `f` vanishes identically at `f = 0`.
+- `Pk_Id2d2 < 0` throughout the loop regime (pre-fix max was +2701).
+- `Pd2d2_0` equals the analytic integral (exact with IR resummation off), and
+  a second-difference in `b2` isolates `0.25*b2^2*(Pk_Id2d2 + Pd2d2_0)` in
+  `pk_gg_l0`.
+- `EPTComponents` pytree round-trip preserves the new scalar leaf.
+
 ### Sep 2, 2026: Multi-cosmology testing RULE (3-5 cosmologies, canonical grids + fixtures)
 
 **New project rule (CLAUDE.md "Test at many parameter points" is now
