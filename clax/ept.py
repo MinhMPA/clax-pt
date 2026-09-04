@@ -532,7 +532,10 @@ def _ir_resummation_numpy(
     BAO oscillation band, then reconstructs P_nw. The Σ_BAO² damping
     scale is computed from P_nw using the CLASS-PT filter formula.
 
-    Mirrors: nonlinear_pt.c lines 5315–5776 (DST-based BAO extraction).
+    Mirrors: `nonlinear_pt_ir_resummation()`, nonlinear_pt.c:2711-3015 at
+    CLASS-PT `09d5531a` (every anchor below re-verified at that commit; the
+    5xxx line numbers this docstring used to cite are from a layout that no
+    longer exists).
 
     CRITICAL: CLASS-PT uses a LINEAR k-grid (not log-spaced) for the DST.
     Modes 120–240 of a linear-k DST target k-space oscillation periods
@@ -543,15 +546,39 @@ def _ir_resummation_numpy(
     CLASS-PT splits DST modes into odd and even sub-arrays (cmodd/cmeven)
     and applies natural cubic spline interpolation to each separately when
     removing modes 120–240. This gives ~3× more accurate P_nw than simple
-    linear interpolation across the full DST. cf. nonlinear_pt.c:5404–5520.
+    linear interpolation across the full DST. cf. nonlinear_pt.c:2815-2860.
 
-    For k outside [k_min2, k_max2], CLASS-PT sets P_nw = P_lin and P_w = 0.
-    cf. nonlinear_pt.c lines 5739–5748.
+    The linear spectrum is put onto the DST grid by a NATURAL CUBIC SPLINE of
+    ln P against ln k (nonlinear_pt.c:2782), in CLASS-PT's own 1/Mpc, Mpc^3
+    units (:2784) — both details matter at the 1 % level in the RSD one-loop
+    rows; see the block comment on the DST input below.
+
+    Outside the SOURCE TABLE (``k_h``), ln P is continued as a power law, as
+    CLASS-PT does at nonlinear_pt.c:2779 (below the table) and :2788 (above),
+    rather than left to the interpolator's out-of-range convention — scipy's
+    CubicSpline continues the end cubic while `clax.interpolation.CubicSpline`
+    clamps, so relying on either would put the two twins on different footing
+    there. ONE DELIBERATE DEPARTURE: CLASS-PT's low-k branch uses ``ppm->n_s``,
+    which is not an input to this function and cannot be made one without a
+    signature change, so the first-interval ln-slope stands in. The substitution
+    is INERT — neither branch is reachable for any grid clax feeds this
+    function. The DST grid is [7e-5/h, 7/h] = [1.039e-4, 10.39] h/Mpc, while
+    ``ept_kgrid`` spans [5e-5, 100] h/Mpc and CLASS-PT's own ``lnk_l`` spans
+    [1.05e-5, 105] h/Mpc at each of the three campaign cosmologies: both source
+    tables strictly bracket the DST grid on both sides (measured, not assumed).
+
+    For k outside [k_min2, k_max2] — the DST grid, not the source table —
+    CLASS-PT sets P_nw = P_lin and P_w = 0. cf. nonlinear_pt.c:2991-2997.
+    Keeping that branch is not cosmetic: replacing it with a clamped
+    extrapolation of P_nw injects up to 452× the linear power at k > 10.4 h/Mpc,
+    and a correspondingly bogus P_w where CLASS-PT has exactly zero, into both
+    RSD FFTLogs (ept.py:1393-1394) — measured; it is what made D1 §5.9 read the
+    cubic-spline fix as a 3× regression.
 
     The Σ_BAO² formula uses a spherical Bessel j_2 filter to suppress
     the contribution of modes below the BAO scale:
       Σ_BAO² = (1/6π²) ∫₀^{ks} P_nw(q) × [1 - 3j₁(qr)/qr + ...] × q d(ln q)
-    cf. nonlinear_pt.c lines 5605–5640 (IntegrandBAO).
+    cf. nonlinear_pt.c:2919-2947 (IntegrandBAO).
 
     Args:
         pk_lin_h: P_lin(k) in (Mpc/h)³, shape (N,)
@@ -562,7 +589,7 @@ def _ir_resummation_numpy(
                   use ``clax.background.sound_horizon_drag(params) * params.h``.
                   This product enters the j_2-filter argument
                   ``x = k_int [h/Mpc] * rs_h [Mpc*h] = k [1/Mpc] * r_s [Mpc]``,
-                  matching CLASS-PT nonlinear_pt.c:5637 ``qint2 * rbao``.
+                  matching CLASS-PT nonlinear_pt.c:2936 ``qint2[index_ir] * rbao``.
         h:        Hubble parameter h = H₀/100 (needed to match CLASS-PT DST grid
                   which is hardcoded in 1/Mpc: kmin2=0.00007 1/Mpc, kmax2=7 1/Mpc)
 
@@ -573,11 +600,13 @@ def _ir_resummation_numpy(
     """
     try:
         from scipy.fft import dst, idst
+        from scipy.interpolate import CubicSpline
     except ImportError:
         return _ir_resummation_gaussian(pk_lin_h, k_h)
 
-    # LINEAR k-grid matching CLASS-PT nonlinear_pt.c:5322-5323 which hardcodes
-    # kmin2=0.00007 1/Mpc and kmax2=7 1/Mpc (in physical 1/Mpc units).
+    # LINEAR k-grid matching CLASS-PT nonlinear_pt.c:2748-2749 which hardcodes
+    # kmin2=0.00007 1/Mpc and kmax2=7 1/Mpc (in physical 1/Mpc units), sampled
+    # at Nir=65536 points (:2744) with kstep=(kmax2-kmin2)/(Nir-1) (:2764).
     # Converting to h-units: kmin2_h = 0.00007/h h/Mpc, kmax2_h = 7/h h/Mpc.
     # Using the exact CLASS-PT values is critical: the DST mode number for the
     # BAO oscillation is n_BAO ≈ kmax2/BAO_period, so a 4% kmax2 difference
@@ -587,36 +616,75 @@ def _ir_resummation_numpy(
     k_max2 = 7.0 / h    # 7 1/Mpc in h/Mpc (CLASS-PT kmax2)
     k_ir = np.linspace(k_min2, k_max2, N_IR)
 
-    # Interpolate P_lin to the linear grid (log-log interpolation)
-    log_k_in = np.log(k_h)
-    log_pk_in = np.log(np.clip(pk_lin_h, 1e-300, None))
-    pk_ir = np.exp(np.interp(np.log(k_ir), log_k_in, log_pk_in))
+    # --- DST input: ln(k P) on the linear grid ---------------------------------
+    # cf. nonlinear_pt.c:2775-2795, which builds logkPdiscr in three pieces:
+    #   :2779  k below the table   -> power law (CLASS-PT uses ppm->n_s)
+    #   :2782  inside the table    -> array_interpolate_spline(lnk_l, lnpk_l,
+    #                                 myddlnpk), a NATURAL cubic spline of ln P
+    #                                 against ln k (SPLINE_SETUP, :3212)
+    #   :2788  k above the table   -> power law with the last local ln-slope
+    # clax used a piecewise-LINEAR np.interp here, which alone accounted for
+    # ~2.5 pp of the 6.85 % of the BAO wiggle D1 measured as retained in pk_nw.
+    #
+    # UNITS (nonlinear_pt.c:2784, `log(_kbin2) + _logPbin2`): CLASS-PT forms
+    # ln(k P) with k in 1/Mpc and P in Mpc^3, while clax carries h-units and
+    # ln(k_h P_h) = ln(k P) + 2 ln h. That constant offset is NOT harmless. The
+    # band removal below is linear, but it does not reproduce a constant: the
+    # DST-II of a constant c is 2c / sin(pi (m+1) / 2N) on the even modes, a 1/m
+    # tail that the natural spline across the removed [120, 240) band cannot
+    # follow, so the offset comes back as a BAO-period ringing of ~3e-3 in
+    # ln P_nw (measured; ~2.7 pp of the retained wiggle). Transform in CLASS-PT's
+    # units and put the offset back after the inverse transform.
+    ln_h2 = 2.0 * np.log(h)
+    lnk_src = np.log(k_h)
+    lnpk_src = np.log(np.clip(pk_lin_h, 1e-300, None))
+    lnk_ir = np.log(k_ir)
+    lnpk_ir = CubicSpline(lnk_src, lnpk_src, bc_type="natural")(lnk_ir)
+    # Power-law extrapolation outside the source table, so the result never
+    # depends on the interpolator's out-of-range behaviour (scipy continues the
+    # end cubic; clax.interpolation.CubicSpline clamps -- the twins must agree).
+    # CLASS-PT uses ppm->n_s below the table (:2779); n_s is not an input here,
+    # so the first-interval slope stands in. Both branches are unreachable for
+    # every grid clax feeds this function (ept_kgrid and CLASS's own lnk_l both
+    # start below kmin2 and end above kmax2), so the substitution is inert.
+    slope_lo = (lnpk_src[1] - lnpk_src[0]) / (lnk_src[1] - lnk_src[0])
+    slope_hi = (lnpk_src[-1] - lnpk_src[-2]) / (lnk_src[-1] - lnk_src[-2])
+    lnpk_ir = np.where(lnk_ir < lnk_src[0],
+                       lnpk_src[0] + slope_lo * (lnk_ir - lnk_src[0]), lnpk_ir)
+    lnpk_ir = np.where(lnk_ir > lnk_src[-1],
+                       lnpk_src[-1] + slope_hi * (lnk_ir - lnk_src[-1]), lnpk_ir)
 
     # DST-II of log(k P(k)) — forward transform.
-    # CLASS-PT uses a custom FFT-based DST via DCT-like trick.
-    # cf. nonlinear_pt.c:5355-5398 (input_realv2 construction + FFT)
-    f_ir = np.log(k_ir * pk_ir)
+    # CLASS-PT packs (-1)^i logkPdiscr[i] into the odd slots of a length-4N real
+    # FFT (:2792-2794) and reads out_ir[j] = fft_or[N-1-j] (:2805); expanding the
+    # sum gives out_ir[j] = 2 sum_i f_i sin(pi (j+1)(2i+1) / 2N), i.e. exactly
+    # scipy's unnormalised dst(type=2) in the same mode ordering (D1 §4). The
+    # norm="ortho" constant cancels between dst and idst below.
+    f_ir = lnk_ir + lnpk_ir - ln_h2
     f_dst = dst(f_ir, type=2, norm="ortho")
 
     # Remove BAO modes 120–240 by cubic spline on odd and even modes separately.
     # CLASS-PT splits cmnew[2i] (odd) and cmnew[2i+1] (even), removes Nleft:Nright
-    # from each, then spline-interpolates back. This matches nonlinear_pt.c:5420-5520.
-    # cf. nonlinear_pt.c:5404-5413: cmodd[i] = out_ir[2*i], cmeven[i] = out_ir[2*i+1]
+    # from each, then spline-interpolates back. This matches nonlinear_pt.c:2815-2860.
+    # cf. nonlinear_pt.c:2817-2818: cmodd[i] = out_ir[2*i], cmeven[i] = out_ir[2*i+1];
+    # Nleft/Nright at :2823-2824.
     N_left  = 120
     N_right = 240
     N_IR_half = N_IR // 2  # = 32768
 
-    # Split full DST into odd and even indexed modes (over the half-spectrum)
-    # The actual CLASS-PT split works on the FFT output of their custom DST,
-    # which differs from scipy's DST-II by a sign/ordering. We approximate
-    # by splitting scipy DST modes directly into odd/even index.
+    # Split full DST into odd and even indexed modes (over the half-spectrum).
+    # out_ir is scipy's dst(type=2) mode for mode (see the forward transform
+    # above), so this split is CLASS-PT's :2817-2818 exactly, not an
+    # approximation. norm="ortho" scales every mode by sqrt(1/2N) except the
+    # last (sqrt(1/4N)); that last mode is a KEPT knot of the cmeven spline and
+    # so is reproduced exactly, and every mode the spline actually mixes carries
+    # the same constant -- the normalisation therefore cancels with idst below.
     cmodd  = f_dst[0:N_IR:2]   # even indices of DST (odd "mode" in CLASS-PT sense)
     cmeven = f_dst[1:N_IR:2]   # odd indices of DST
 
     # For each of odd and even, remove modes [N_left, N_right) via cubic spline.
     # Indices run from 0..N_IR_half-1, mapping to DST indices 0,2,4,...
     # The "throw" region is [N_left, N_right) in the sub-arrays.
-    from scipy.interpolate import CubicSpline
 
     def _remove_bao_modes(cm, n_left, n_right):
         """Cubic spline interpolation across [n_left, n_right) in cm array."""
@@ -642,9 +710,16 @@ def _ir_resummation_numpy(
     f_dst_nw[0:N_IR:2] = cmodd_nw
     f_dst_nw[1:N_IR:2] = cmeven_nw
 
-    # Inverse DST-II to recover log(k P_nw) on linear grid
+    # Inverse DST-II to recover log(k P_nw) on linear grid.
+    # CLASS-PT's inverse packing (:2867-2893) expands to
+    # out_2[i] = (-1)^i cmnew[N-1] + 2 sum_{p<N-1} cmnew[p] sin(pi (p+1)(2i+1)/2N),
+    # i.e. an unnormalised DST-III, and it divides by 2N at :2906 -- exactly
+    # scipy's idst(type=2). The +ln_h2 puts back the units offset removed before
+    # the forward transform (see the UNITS note above); :2906 divides by k in
+    # 1/Mpc, so P_nw comes out in Mpc^3 -> (Mpc/h)^3 = h^3 P_nw and k_h = k/h
+    # give exp(f_nw + 2 ln h) / k_h.
     f_nw_ir = idst(f_dst_nw, type=2, norm="ortho")
-    pk_nw_ir = np.exp(np.clip(f_nw_ir, -700, 700)) / k_ir
+    pk_nw_ir = np.exp(np.clip(f_nw_ir + ln_h2, -700, 700)) / k_ir
 
     # Map back to input k-grid; outside [k_min2, k_max2] set Pnw = Plin
     pk_nw = pk_lin_h.copy()
@@ -661,7 +736,7 @@ def _ir_resummation_numpy(
 
     # Σ_BAO² with CLASS-PT j₂-filter formula, integrating up to ks=0.2 h/Mpc.
     # IntegrandBAO = P_nw × [1 - 3sin(qr)/(qr) + 6(sin(qr)/(qr)³ - cos(qr)/(qr)²)]
-    # cf. nonlinear_pt.c:5614: ks = 0.2 * pba->h = 0.2 h/Mpc
+    # cf. nonlinear_pt.c:2926: ks = 0.2 * pba->h (1/Mpc) = 0.2 h/Mpc
     k_s = 0.2  # h/Mpc
     k_int = np.geomspace(k_min2, k_s, 1000)
     pk_nw_int = np.exp(
@@ -679,7 +754,7 @@ def _ir_resummation_numpy(
 
     # δΣ_BAO² (anisotropic second damping scale):
     # IntegrandBAO2 = -Pnw * (3*cos(qr)*r*q + (-3+(qr)²)*sin(qr)) / (qr)³
-    # cf. nonlinear_pt.c line 5639; normalization 1/(2π²) vs 1/(6π²) for Σ_BAO²
+    # cf. nonlinear_pt.c:2940; normalization 1/(2π²) vs 1/(6π²) for Σ_BAO²
     bao_filter2 = -1.0 * (
         3.0 * np.cos(x_bao) * x_bao + (-3.0 + x_bao ** 2) * np.sin(x_bao)
     ) / x_bao ** 3
@@ -710,8 +785,22 @@ def _ir_resummation_jax(
     :class:`clax.interpolation.CubicSpline` (natural-BC, same math as the
     scipy `CubicSpline(bc_type='natural')` used in the numpy version).
 
-    Mirrors: nonlinear_pt.c lines 5315-5776 (DST-based BAO extraction), same
-    as `_ir_resummation_numpy`.
+    Mirrors: `nonlinear_pt_ir_resummation()`, nonlinear_pt.c:2711-3015 at
+    CLASS-PT `09d5531a`, same as `_ir_resummation_numpy`.
+
+    Outside the SOURCE TABLE (``k_h_static``), ln P is continued as a power law
+    via ``jnp.where`` — CLASS-PT's :2779 (below) and :2788 (above) — rather than
+    left to the interpolator, precisely so the twins agree there: scipy's
+    CubicSpline continues the end cubic while
+    :class:`clax.interpolation.CubicSpline` clamps. Same deliberate departure as
+    the numpy twin: CLASS-PT's low-k branch uses ``ppm->n_s``, not an input
+    here, so the first-interval ln-slope stands in. INERT — neither branch is
+    reachable for any grid clax feeds this function (DST grid [1.039e-4, 10.39]
+    h/Mpc against ``ept_kgrid``'s [5e-5, 100] and CLASS-PT's ``lnk_l``
+    [1.05e-5, 105] at all three campaign cosmologies), and both are ``jnp.where``
+    on statically-shaped arrays, so nothing branches on a traced value.
+    The separate out-of-DST-grid rule (P_nw = P_lin, P_w = 0, :2991-2997) is
+    kept as in the numpy twin; see there for why dropping it is not cosmetic.
 
     Wired into `compute_ept_from_clax` (Task 3), this retires two of the
     three stop_gradient channels its "stop_gradient rationale" note used to
@@ -750,8 +839,9 @@ def _ir_resummation_jax(
     """
     from clax.interpolation import dst2_ortho, idst2_ortho, CubicSpline
 
-    # LINEAR k-grid matching CLASS-PT nonlinear_pt.c:5322-5323 which hardcodes
-    # kmin2=0.00007 1/Mpc and kmax2=7 1/Mpc (in physical 1/Mpc units).
+    # LINEAR k-grid matching CLASS-PT nonlinear_pt.c:2748-2749 which hardcodes
+    # kmin2=0.00007 1/Mpc and kmax2=7 1/Mpc (in physical 1/Mpc units), sampled
+    # at Nir=65536 points (:2744) with kstep=(kmax2-kmin2)/(Nir-1) (:2764).
     # Converting to h-units: kmin2_h = 0.00007/h h/Mpc, kmax2_h = 7/h h/Mpc.
     # Using the exact CLASS-PT values is critical: the DST mode number for the
     # BAO oscillation is n_BAO ≈ kmax2/BAO_period, so a 4% kmax2 difference
@@ -759,7 +849,7 @@ def _ir_resummation_jax(
     N_IR = 65536
     k_min2 = 7e-5 / h_conc   # 0.00007 1/Mpc in h/Mpc (CLASS-PT kmin2)
     k_max2 = 7.0 / h_conc    # 7 1/Mpc in h/Mpc (CLASS-PT kmax2)
-    # ENDPOINTS DELIBERATELY STATIC: CLASS-PT-hardcoded cuts (nonlinear_pt.c:5322);
+    # ENDPOINTS DELIBERATELY STATIC: CLASS-PT-hardcoded cuts (nonlinear_pt.c:2748);
     # their h-derivative is a boundary term with negligible content (P·k weight
     # ~0 at both cuts). Everything BETWEEN the cuts is traced.
     # CAVEAT (measured, not closed by the above): this "negligible content"
@@ -773,29 +863,50 @@ def _ir_resummation_jax(
     # tests/test_ept_gradients.py.
     k_ir = np.linspace(k_min2, k_max2, N_IR)
 
-    # Interpolate P_lin to the linear grid (log-log interpolation)
-    log_k_in = np.log(k_h_static)
-    log_pk_in = jnp.log(jnp.clip(pk_lin_h, 1e-300, None))
-    pk_ir = jnp.exp(jnp.interp(jnp.log(k_ir), log_k_in, log_pk_in))
+    # --- DST input: ln(k P) on the linear grid ---------------------------------
+    # Line for line with `_ir_resummation_numpy`; see the long block comment
+    # there for the CLASS-PT anchors (:2775-2795) and, in particular, for why
+    # the natural cubic spline and CLASS-PT's 1/Mpc, Mpc^3 units are both
+    # required. The knots (`lnk_src`) are static grid arithmetic; the values
+    # (`lnpk_src`) are traced, so clax.interpolation.CubicSpline carries the
+    # derivative through, as it already does for the mode-removal spline below.
+    ln_h2 = 2.0 * np.log(h_conc)
+    lnk_src = np.log(k_h_static)
+    lnpk_src = jnp.log(jnp.clip(pk_lin_h, 1e-300, None))
+    lnk_ir = np.log(k_ir)
+    lnpk_ir = CubicSpline(jnp.asarray(lnk_src), lnpk_src).evaluate(jnp.asarray(lnk_ir))
+    # Power-law extrapolation outside the source table (nonlinear_pt.c:2779 with
+    # ppm->n_s, :2788 with the last local slope); unreachable for every clax
+    # grid, and stated explicitly so the two twins cannot drift on the
+    # interpolators' differing out-of-range conventions (scipy continues the end
+    # cubic, clax.interpolation.CubicSpline clamps).
+    slope_lo = (lnpk_src[1] - lnpk_src[0]) / (lnk_src[1] - lnk_src[0])
+    slope_hi = (lnpk_src[-1] - lnpk_src[-2]) / (lnk_src[-1] - lnk_src[-2])
+    lnpk_ir = jnp.where(lnk_ir < lnk_src[0],
+                        lnpk_src[0] + slope_lo * (lnk_ir - lnk_src[0]), lnpk_ir)
+    lnpk_ir = jnp.where(lnk_ir > lnk_src[-1],
+                        lnpk_src[-1] + slope_hi * (lnk_ir - lnk_src[-1]), lnpk_ir)
 
     # DST-II of log(k P(k)) — forward transform.
-    # CLASS-PT uses a custom FFT-based DST via DCT-like trick.
-    # cf. nonlinear_pt.c:5355-5398 (input_realv2 construction + FFT)
-    f_ir = jnp.log(k_ir * pk_ir)
+    # CLASS-PT packs (-1)^i logkPdiscr[i] into the odd slots of a length-4N real
+    # FFT (:2792-2794) and reads out_ir[j] = fft_or[N-1-j] (:2805), which expands
+    # to the unnormalised dst(type=2) in the same mode ordering (D1 §4).
+    f_ir = lnk_ir + lnpk_ir - ln_h2
     f_dst = dst2_ortho(f_ir)
 
     # Remove BAO modes 120–240 by cubic spline on odd and even modes separately.
     # CLASS-PT splits cmnew[2i] (odd) and cmnew[2i+1] (even), removes Nleft:Nright
-    # from each, then spline-interpolates back. This matches nonlinear_pt.c:5420-5520.
-    # cf. nonlinear_pt.c:5404-5413: cmodd[i] = out_ir[2*i], cmeven[i] = out_ir[2*i+1]
+    # from each, then spline-interpolates back. This matches nonlinear_pt.c:2815-2860.
+    # cf. nonlinear_pt.c:2817-2818: cmodd[i] = out_ir[2*i], cmeven[i] = out_ir[2*i+1];
+    # Nleft/Nright at :2823-2824.
     N_left  = 120
     N_right = 240
     N_IR_half = N_IR // 2  # = 32768
 
-    # Split full DST into odd and even indexed modes (over the half-spectrum)
-    # The actual CLASS-PT split works on the FFT output of their custom DST,
-    # which differs from scipy's DST-II by a sign/ordering. We approximate
-    # by splitting scipy DST modes directly into odd/even index.
+    # Split full DST into odd and even indexed modes (over the half-spectrum).
+    # out_ir is scipy's dst(type=2) mode for mode (see the forward transform
+    # above), so this split is CLASS-PT's :2817-2818 exactly, not an
+    # approximation; the ortho normalisation cancels against idst2_ortho below.
     cmodd  = f_dst[0:N_IR:2]   # even indices of DST (odd "mode" in CLASS-PT sense)
     cmeven = f_dst[1:N_IR:2]   # odd indices of DST
 
@@ -833,9 +944,11 @@ def _ir_resummation_jax(
     # Reconstruct no-wiggle DST coefficients: interleave odd and even
     f_dst_nw = jnp.zeros(N_IR).at[0::2].set(cmodd_nw).at[1::2].set(cmeven_nw)
 
-    # Inverse DST-II to recover log(k P_nw) on linear grid
+    # Inverse DST-II to recover log(k P_nw) on linear grid. CLASS-PT's inverse
+    # packing (:2867-2893) plus the 1/(2N) at :2906 is scipy's idst(type=2);
+    # +ln_h2 restores the units offset removed before the forward transform.
     f_nw_ir = idst2_ortho(f_dst_nw)
-    pk_nw_ir = jnp.exp(jnp.clip(f_nw_ir, -700, 700)) / k_ir
+    pk_nw_ir = jnp.exp(jnp.clip(f_nw_ir + ln_h2, -700, 700)) / k_ir
 
     # Map back to input k-grid; outside [k_min2, k_max2] set Pnw = Plin
     in_range = (k_h_static >= k_min2) & (k_h_static <= k_max2)
@@ -855,7 +968,7 @@ def _ir_resummation_jax(
 
     # Σ_BAO² with CLASS-PT j₂-filter formula, integrating up to ks=0.2 h/Mpc.
     # IntegrandBAO = P_nw × [1 - 3sin(qr)/(qr) + 6(sin(qr)/(qr)³ - cos(qr)/(qr)²)]
-    # cf. nonlinear_pt.c:5614: ks = 0.2 * pba->h = 0.2 h/Mpc
+    # cf. nonlinear_pt.c:2926: ks = 0.2 * pba->h (1/Mpc) = 0.2 h/Mpc
     k_s = 0.2  # h/Mpc
     k_int = np.geomspace(k_min2, k_s, 1000)
     pk_nw_int = jnp.exp(
@@ -873,7 +986,7 @@ def _ir_resummation_jax(
 
     # δΣ_BAO² (anisotropic second damping scale):
     # IntegrandBAO2 = -Pnw * (3*cos(qr)*r*q + (-3+(qr)²)*sin(qr)) / (qr)³
-    # cf. nonlinear_pt.c line 5639; normalization 1/(2π²) vs 1/(6π²) for Σ_BAO²
+    # cf. nonlinear_pt.c:2940; normalization 1/(2π²) vs 1/(6π²) for Σ_BAO²
     bao_filter2 = -1.0 * (
         3.0 * jnp.cos(x_bao) * x_bao + (-3.0 + x_bao ** 2) * jnp.sin(x_bao)
     ) / x_bao ** 3
