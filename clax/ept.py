@@ -1960,12 +1960,13 @@ def pk_gm_real(
 ) -> Float[Array, "Nk"]:
     """Real-space galaxy-matter cross-power spectrum.
 
-    P_gm(k) = b1*(P_tree + P_loop) + (cs*b1 + cs0)*P_CTR/h²
+    P_gm(k) = b1*(P_tree + P_loop) + (2*cs*b1 + cs0)*P_CTR/h²
               + b2/2 P_Id2 + bG2 P_IG2
               + (bG2 + 0.4 bΓ3) P_IFG2
 
     EPTComponents are in (Mpc/h)³, so no h³ conversion needed.
-    cf. CLASS-PT classy.pyx::pk_gm_real()
+    cf. CLASS-PT classy.pyx::pk_gm_real(), return at classy.pyx:4834:
+    the matter counterterm enters as (2*cs*b1 + cs0), not (cs*b1 + cs0).
 
     Args:
         ept:       EPTComponents from compute_ept()
@@ -1979,7 +1980,7 @@ def pk_gm_real(
     """
     return (
         b1 * (ept.Pk_tree + ept.Pk_loop)
-        + (cs * b1 + cs0) * ept.Pk_ctr
+        + (2.0 * cs * b1 + cs0) * ept.Pk_ctr   # classy.pyx:4834
         + (b2 / 2.0) * ept.Pk_Id2
         + bG2 * ept.Pk_IG2
         + (bG2 + 0.4 * bGamma3) * ept.Pk_IFG2

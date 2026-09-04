@@ -37,7 +37,7 @@ jax.config.update("jax_platform_name", "cpu")
 
 import jax.numpy as jnp
 
-from clax.ept import compute_ept, pk_gg_l0, EPTPrecisionParams
+from clax.ept import compute_ept, pk_gg_l0, pk_gm_real, EPTPrecisionParams
 
 
 REF = os.path.join(os.path.dirname(__file__), "..", "reference_data",
@@ -236,3 +236,24 @@ def test_nmax_is_a_working_resolution_knob(_nmax_baseline, nmax):
     kc = np.geomspace(0.02, 0.3, 60)
     dev = np.max(np.abs(np.interp(kc, kg, P) / np.interp(kc, kg0, P0) - 1.0))
     assert dev < 0.03, f"nmax={nmax}: max deviation from nmax=256 is {100*dev:.3f}%"
+
+
+# ---------------------------------------------------------------------------
+# 7. The galaxy-matter counterterm coefficient
+# ---------------------------------------------------------------------------
+
+
+def test_gm_counterterm_carries_the_factor_two(ept_fz):
+    """P_gm's cs term is 2*cs*b1*P_ctr, per classy.pyx:4834.
+
+    Differencing in cs isolates that one term exactly, so this pins the
+    coefficient without any reference spectrum. With the pre-fix (cs*b1 + cs0)
+    the measured slope is half the required one.
+    """
+    b1, cs = 1.9, 3.0
+    d = np.asarray(pk_gm_real(ept_fz, b1, 0.0, 0.0, 0.0, cs0=0.0, cs=cs)) - \
+        np.asarray(pk_gm_real(ept_fz, b1, 0.0, 0.0, 0.0, cs0=0.0, cs=0.0))
+    want = 2.0 * cs * b1 * np.asarray(ept_fz.Pk_ctr)
+    m = _band(ept_fz)
+    rel = np.max(np.abs(d[m] - want[m])) / np.max(np.abs(want[m]))
+    assert rel < 1e-12, f"cs slope is off by {rel:.3e} of the expected 2*cs*b1*Pk_ctr"
