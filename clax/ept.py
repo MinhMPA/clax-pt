@@ -38,6 +38,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Complex
 
+from clax.interpolation import _compute_natural_spline_coeffs
+
 
 # ---------------------------------------------------------------------------
 # Constants and paths
@@ -910,6 +912,220 @@ def _ir_resummation_gaussian(
 
 
 # ---------------------------------------------------------------------------
+# Vectorized Gauss-Legendre mu-integration (the CLASS-PT in-loop block)
+# ---------------------------------------------------------------------------
+# Channel names consumed by _gl_multipoles. Each LOOP name is present in `chan`
+# twice, as "<name>_nw" and "<name>_w" (no-wiggle / wiggle FFTLog parts).
+# The 15 names are exactly the RSD loop channels CLASS-PT re-interpolates at
+# ktrue inside the AP loop (nonlinear_pt.c:4411-4440, local 09d5531a -- 30
+# AP_INTERP_FAST lines, the un-suffixed name = clax's "_nw", `_w` = "_w").
+_GL_CHANNELS_LOOP = (
+    "P22_mu0_dd", "P13_mu0_dd",
+    "P22_mu2_vd", "P22_mu2_dd", "P13_mu2_vd", "P13_mu2_dd",
+    "P22_mu4_vv", "P22_mu4_vd", "P22_mu4_dd", "P13_mu4_vv", "P13_mu4_vd",
+    "P22_mu6_vv", "P22_mu6_vd", "P13_mu6", "P22_mu8",
+)
+# The 14 bias channels CLASS-PT re-interpolates in its bias loop
+# (nonlinear_pt.c:5301-5314, AP_INTERP_EX_FAST on the `_new` copies).
+_GL_CHANNELS_BIAS = (
+    "Pk_0_b1b2", "Pk_2_b1b2", "Pk_0_b1bG2", "Pk_2_b1bG2",
+    "Pk_0_b2", "Pk_2_b2", "Pk_4_b2", "Pk_0_bG2", "Pk_2_bG2", "Pk_4_bG2",
+    "Pk_Id2d2", "Pk_Id2G2", "Pk_IG2G2", "Pk_IFG2",
+)
+# Linear spectra interpolated at ktrue in both loops (nonlinear_pt.c:4403-4404
+# RSD loop, 5279-5281 bias loop): Pnw, Pw and -- bias loop only -- Pbin
+# (= clax's `pk_disc`). Read by _channels_at through `chan`, which carries these
+# three plus _GL_CHANNELS_LOOP x2 and _GL_CHANNELS_BIAS = 47 keys in total; the
+# three are remapped to ktrue exactly like the other 44.
+_GL_CHANNELS_LIN = ("pk_nw", "pk_w", "pk_disc")
+
+
+def _channels_at(k, chan: dict, kq) -> dict:
+    """Every channel in `chan` (knots `k`, shape (Nk,)) evaluated at `kq`
+    (any shape, here (40, Nk) = ktrue) with a NATURAL cubic spline in LINEAR
+    k over the whole grid -- CLASS-PT's AP_SPLINE_SETUP
+    (nonlinear_pt.c:2356-2362, `array_spline_table_columns(kdisc, ...,
+    _SPLINE_NATURAL_)`). Outside [k[0], k[-1]] the end interval's cubic is
+    continued, as AP_BSEARCH_SETUP/AP_INTERP_FAST do (2372-2394: the interval
+    is clamped, the weights a, b are not). At kq == k the knot values are
+    returned exactly (a = 1, b = 0), which keeps alpha = 1 bit-identical.
+    Differentiable in kq (and through it in hratio, Dratio) and in the channel
+    values.
+    """
+    names = tuple(chan)
+    Y = jnp.stack([chan[n] for n in names])                                   # (C, Nk)
+    d2 = jax.vmap(_compute_natural_spline_coeffs, in_axes=(None, 0))(k, Y)    # (C, Nk)
+    n = k.shape[0]
+    idx = jnp.clip(jnp.searchsorted(k, kq, side="right") - 1, 0, n - 2)       # 2384-2388 bisection
+    hh = k[idx + 1] - k[idx]                                                  # 2389
+    b = (kq - k[idx]) / hh                                                    # 2390, unclamped
+    a = 1.0 - b                                                               # 2391
+    a3a, b3b, h2_6 = a ** 3 - a, b ** 3 - b, hh ** 2 / 6.0                    # 2392-2394
+
+    def one(y, dd):                                                           # 2373-2374 AP_INTERP_FAST
+        return a * y[idx] + b * y[idx + 1] + (a3a * dd[idx] + b3b * dd[idx + 1]) * h2_6
+
+    vals = jax.vmap(one)(Y, d2)                                               # (C, *kq.shape)
+    return dict(zip(names, vals))
+
+
+def _gl_multipoles(chan: dict, k, f, sigma2_bao, delta_sigma2_bao,
+                   hratio=1.0, Dratio=1.0) -> dict:
+    """40-node Gauss-Legendre mu-integration of every RSD channel, vectorized.
+
+    Mirrors the per-node body of CLASS-PT's AP/IR loop (local checkout
+    09d5531a): tree, 1-loop and counterterms `nonlinear_pt.c:4386-4562`,
+    bias and IFG2 `5225-5366`, with the AP remap of `4382-4394`
+    (hratio = H_true/H_fid, Dratio = D_A,true/D_A,fid; both 1 => CLASS-PT's
+    alpha=1 branch `4396-4397`, because
+    ap_fac = sqrt(1/Dr^2 + (hr^2 - 1/Dr^2) mu^2) is exactly 1.0 in IEEE double
+    there, so ktrue == k on the knots and `_channels_at` returns the channel
+    values unchanged). Axis 0 is the mu node (40), axis 1 is k.
+
+    This function is LINEAR in every entry of `chan`, so it is agnostic to the
+    leaf sign convention: feed it clax's leaves (the sign `classy.pyx`'s
+    `get_pk_mult` hands out) and every output comes back in the same
+    convention. The one exception is `Pk_4_b1bG2`, whose two parents
+    (`Pk_0_b1bG2` = pm[32], `Pk_2_b1bG2` = pm[36]) ARE negated by
+    classy.pyx:4721-4722 while its own row pm[41] (classy.pyx:4735) is NOT; the
+    caller flips it back. See `_compute_bias_spectra`.
+
+    Projections use the FIDUCIAL-mu Legendre weights
+    W_l = (2l+1)/2 * w * L_l(mu) (`4470-4471` fiducial L2/L4, `2565-2568`
+    LEGENDRE_PROJECT macro); every kernel mu-power and the IR damping
+    Sigma_tot(mu) (`4480`) use the "true" mu, and every channel is splined at
+    the "true" k (`_channels_at`, `4403-4440`, `5279-5314`).
+
+    `V = hratio/Dratio**2` (`4384`, written inline on every in-loop term,
+    `4494-4500`, `4503`/`4512`/`4521`, `5320-5328`) is folded into W0/W2/W4:
+    every output of this function goes through `proj(...)`, so one factor on
+    the projection weights is one factor on each accumulated term. An output
+    that ever bypasses `proj` must carry `V` explicitly.
+
+    chan: 47 arrays on the k grid -- `<name>_nw`/`<name>_w` for every
+          _GL_CHANNELS_LOOP name, the _GL_CHANNELS_BIAS spectra, and
+          pk_nw, pk_w (= 0 without IR), pk_disc (the FFTLog input spectrum,
+          CLASS-PT's `Pbin`, `nonlinear_pt.c:2989`).
+    Returns 39 multipole arrays (tree x9, loop x9, ctr x3, IFG2 x3,
+    Id2d2/Id2G2/IG2G2, bias x12).
+
+    Known deviation from CLASS-PT, inherited from clax's leaf layout: CLASS-PT
+    folds the tree into the mu^0/mu^2 brackets of `P1loopdd_ap_ir` (`4529`) /
+    `P1loopvd_ap_ir` (`4531`) before projecting l=2,4 (`4535` 2_dd, `4536`
+    4_dd, `4539` 4_vd), so its rows 26/28/29 carry tree+loop; clax projects
+    tree and loop separately into `Pk_l_dd` / `Pk_l_dd1`, whose sum is
+    identical (the projection is linear). The b1-weighted galaxy accessors
+    consume exactly that sum (`pk_gg_l2` / `pk_gg_l4` below).
+    """
+    mu = jnp.asarray(_GAUSS_NODES)                       # (40,)   gauss_x, 4388/5258
+    w = jnp.asarray(_GAUSS_WEIGHTS)                      # (40,)   gauss_w
+    hratio = jnp.asarray(hratio, dtype=k.dtype)
+    Dratio = jnp.asarray(Dratio, dtype=k.dtype)
+    inv_D2 = 1.0 / Dratio ** 2                                        # 4382 ap_inv_Dr2_
+    ap_fac = jnp.sqrt(inv_D2 + (hratio ** 2 - inv_D2) * mu ** 2)[:, None]   # 4392  (40, 1)
+    mu_k = mu[:, None] * hratio / ap_fac                 # 4393 mutrue  (40, 1)
+    kk = k[None, :] * ap_fac                             # 4394 ktrue   (40, Nk)
+    V = hratio / Dratio ** 2                             # 4384 ap_w_hr_Dr2_
+    mu2t = mu_k ** 2                                     # 4474-4477 mu2t..mu8t from mutrue
+    mu4t, mu6t, mu8t = mu2t ** 2, mu2t ** 3, mu2t ** 4
+    L2 = 0.5 * (3.0 * mu ** 2 - 1.0)                     # 4470 LegendreP2, FIDUCIAL mu
+    L4 = (35.0 * mu ** 4 - 30.0 * mu ** 2 + 3.0) / 8.0   # 4471 LegendreP4, FIDUCIAL mu
+    # 2565-2568 LEGENDRE_PROJECT weights x V (4494-4500, 4503/4512/4521, 5320-5328).
+    # Every leaf below is built by proj(), so V rides on the weights; the one
+    # AP-free real-space output of the module, `_pd2d2_0` (classy.pyx:4805-4813),
+    # is computed outside this function and deliberately takes no V and no proj.
+    W0, W2, W4 = 0.5 * w * V, 2.5 * w * L2 * V, 4.5 * w * L4 * V
+
+    def proj(val, W):
+        return jnp.einsum("m,mk->k", W, val)
+
+    at = _channels_at(k, chan, kk)       # 4403-4440, 5279-5314: all 47 channels at ktrue
+
+    def c(name):
+        return at[name]                                  # (40, Nk)
+
+    def nw(name):
+        return c(name + "_nw")
+
+    def wg(name):
+        return c(name + "_w")
+
+    # 4480 Sigmatot = SigmaBAO*(1 + f*mu2t*(2+f)) + f*f*mu2t*(mu2t-1)*deltaSigmaBAO
+    Sig = (sigma2_bao * (1.0 + f * mu2t * (2.0 + f))
+           + delta_sigma2_bao * f ** 2 * mu2t * (mu2t - 1.0))
+    Exp = jnp.exp(-Sig * kk ** 2)                                     # 4481
+    Pnw, Pw = c("pk_nw"), c("pk_w")
+    Pnw_safe = jnp.where(Pnw > 1e-100, Pnw, 1.0)
+    # 4485 P13ratio = 1 + (Pw/Pnw)*Exp (clax guards the Pnw -> 0 tail)
+    P13ratio = jnp.where(Pnw > 1e-100, 1.0 + (Pw / Pnw_safe) * Exp, 1.0)
+    p_tree = Pnw + (1.0 + Sig * kk ** 2) * Pw * Exp                   # 4483 p_tree
+    p_lin = Pnw + Pw * Exp                                            # 4498-4500, 5318 bracket
+
+    # 4503 P1loopvv: mu^4 + mu^6 + mu^8
+    Pvv = ((nw("P13_mu4_vv") * P13ratio + nw("P22_mu4_vv") + (wg("P22_mu4_vv") + wg("P13_mu4_vv")) * Exp) * mu4t
+           + (nw("P13_mu6") * P13ratio + nw("P22_mu6_vv") + (wg("P22_mu6_vv") + wg("P13_mu6")) * Exp) * mu6t
+           + (nw("P22_mu8") + wg("P22_mu8") * Exp) * mu8t)
+    # 4512 P1loopdd: mu^0 + mu^2 + mu^4
+    Pdd = ((nw("P22_mu0_dd") + nw("P13_mu0_dd") * P13ratio + (wg("P13_mu0_dd") + wg("P22_mu0_dd")) * Exp)
+           + (nw("P22_mu2_dd") + nw("P13_mu2_dd") * P13ratio + (wg("P22_mu2_dd") + wg("P13_mu2_dd")) * Exp) * mu2t
+           + (nw("P22_mu4_dd") + wg("P22_mu4_dd") * Exp) * mu4t)
+    # 4521 P1loopvd: mu^2 + mu^4 + mu^6
+    Pvd = ((nw("P13_mu2_vd") * P13ratio + nw("P22_mu2_vd") + (wg("P22_mu2_vd") + wg("P13_mu2_vd")) * Exp) * mu2t
+           + (nw("P13_mu4_vd") * P13ratio + nw("P22_mu4_vd") + (wg("P22_mu4_vd") + wg("P13_mu4_vd")) * Exp) * mu4t
+           + (nw("P22_mu6_vd") + wg("P22_mu6_vd") * Exp) * mu6t)
+    # 4494-4496 p_tree_vv/vd/dd = p_tree * {f^2 mu4t, 2 f mu2t, 1}
+    tree = {"vv": f ** 2 * mu4t * p_tree, "vd": 2.0 * f * mu2t * p_tree, "dd": p_tree}
+    loop = {"vv": Pvv, "vd": Pvd, "dd": Pdd}
+
+    out = {}
+    # 4533-4539 loop projections; 4554-4557 tree projections. CLASS-PT stores
+    # no Tree_2_dd / Tree_4_vd / Tree_4_dd row (they live inside the _ap_ir
+    # loop rows); clax keeps all nine tree multipoles as their own leaves.
+    for ell, W in ((0, W0), (2, W2), (4, W4)):
+        for ch in ("vv", "vd", "dd"):
+            out[f"Pk_{ell}_{ch}"] = proj(tree[ch], W)
+            out[f"Pk_{ell}_{ch}1"] = proj(loop[ch], W)
+
+    # 4498-4500 Pctr0/2/4 = ktrue^2 (Pnw + Pw Exp) * {1, f mu2t, f^2 mu4t},
+    # projected at 4550-4552. clax stores -P_CTR_l (= pm[11..13],
+    # classy.pyx:4694-4697). The closed forms this replaces -- -k^2 Pbin,
+    # -k^2 Pbin f 2/3, -k^2 Pbin f^2 8/35 -- are the isotropic Legendre moments,
+    # exact only if Exp were mu-independent; Sigmatot(mu) (4480) makes it not.
+    out["Pk_ctr0"] = -proj(kk ** 2 * p_lin, W0)
+    out["Pk_ctr2"] = -proj(kk ** 2 * p_lin * f * mu2t, W2)
+    out["Pk_ctr4"] = -proj(kk ** 2 * p_lin * f ** 2 * mu4t, W4)
+
+    # 5225-5366 bias block. 5318 p_lo = (Pnw + Pw Exp)/Pbin rescales P_IFG2
+    # (which carries a factor Pbin, `4987` / clax's pk_disc) from the isotropic
+    # FFTLog input to the anisotropic resummed linear spectrum.
+    Pbin = c("pk_disc")
+    p_lo = p_lin / jnp.where(Pbin > 1e-100, Pbin, 1.0)
+    IFG2_in = p_lo * c("Pk_IFG2")                                     # 5320
+    out["Pk_IFG2_0b1"] = proj(IFG2_in, W0)                            # 5344
+    out["Pk_IFG2_0"] = proj(IFG2_in * f * mu2t, W0)                   # 5345
+    out["Pk_IFG2_2"] = proj(IFG2_in * f * mu2t, W2)                   # 5346
+    # 5322-5324 Pd2d2_in/Pd2G2_in/PG2G2_in, projected at 5347-5349; clax keeps
+    # the l=0 moment only (CLASS-PT rows 42-47, the l=2/4 moments, are unused).
+    for name in ("Pk_Id2d2", "Pk_Id2G2", "Pk_IG2G2"):
+        out[name] = proj(c(name), W0)
+    L2t = 0.5 * (3.0 * mu2t - 1.0)                                    # 5273 LegendreP2true
+    L4t = (35.0 * mu4t - 30.0 * mu2t + 3.0) / 8.0                     # 5274 LegendreP4true
+    # 5325-5326 Pb1b2_in / Pb1bG2_in rebuild mu-dependence from the l=0,2
+    # inputs only; projecting at 5350-5351 GENERATES P_4_b1b2 / P_4_b1bG2
+    # (zero at alpha=1 by <L2 L4> = 0, non-zero once mutrue != mu).
+    for b in ("b1b2", "b1bG2"):
+        val = c(f"Pk_0_{b}") + L2t * c(f"Pk_2_{b}")
+        for ell, W in ((0, W0), (2, W2), (4, W4)):
+            out[f"Pk_{ell}_{b}"] = proj(val, W)
+    # 5327-5328 Pb2_in / PbG2_in use l=0,2,4 inputs; projected at 5352-5353.
+    for b in ("b2", "bG2"):
+        val = c(f"Pk_0_{b}") + L2t * c(f"Pk_2_{b}") + L4t * c(f"Pk_4_{b}")
+        for ell, W in ((0, W0), (2, W2), (4, W4)):
+            out[f"Pk_{ell}_{b}"] = proj(val, W)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Bias spectral cross-terms from M22basic (JAX-native)
 # ---------------------------------------------------------------------------
 
@@ -967,7 +1183,6 @@ def _compute_bias_spectra(
     cmsym2: Complex[Array, "Nmax+1"],
     etam2: Complex[Array, "Nmax+1"],
     f: float,
-    Pk_tree: Float[Array, "Nk"],
     cutoff_h: float,
     cmsym_nw: Optional[Complex[Array, "Nmax+1"]] = None,
     cmsym_w: Optional[Complex[Array, "Nmax+1"]] = None,
@@ -975,6 +1190,8 @@ def _compute_bias_spectra(
     sigma2_bao: Optional[float] = None,
     delta_sigma2_bao: Optional[float] = None,
     pk_w: Optional[Float[Array, "Nk"]] = None,
+    hratio: float | Float[Array, ""] = 1.0,
+    Dratio: float | Float[Array, ""] = 1.0,
 ) -> dict:
     """Compute bias cross-spectra and RSD multipole components.
 
@@ -987,6 +1204,12 @@ def _compute_bias_spectra(
 
     RSD 1-loop multipoles use the matter basis (etam, b=-0.3) with
     M22 × rational kernels in nu1,nu2,f (lines 6647, 6928, 7159, 7275).
+
+    Every μ-dependent output (tree, 1-loop, counterterm, IFG2 and bias
+    multipoles) is produced by the 40-node Gauss–Legendre loop in
+    `_gl_multipoles`, exactly as CLASS-PT does. hratio/Dratio are CLASS-PT's
+    Alcock–Paczynski ratios, forwarded to that loop; `compute_ept` does not
+    expose them yet and always leaves them at (1, 1) = no remap.
 
     Mirrors:
       nonlinear_pt.c lines 11880–12518 (bias spectra)
@@ -1085,48 +1308,12 @@ def _compute_bias_spectra(
     f13_IFG2 = jnp.sum(x2 * IFG2[None, :], axis=-1)
     Pk_IFG2 = jnp.real(k ** 3 * f13_IFG2 * pk_disc)  # sign: negative
 
-    # IFG2 RSD multipoles (no-AP path):
-    # From nonlinear_pt.c lines 12511–12535:
-    #   P_IFG2_0b1 = P_IFG2              (b1 × G2 cross, no f factor)
-    #   P_IFG2_0   = P_IFG2 × f/3        (monopole: f × <μ²> = f/3)
-    #   P_IFG2_2   = P_IFG2 × 2f/3       (quadrupole)
-    Pk_IFG2_0b1 = Pk_IFG2
-    Pk_IFG2_0   = Pk_IFG2 * f / 3.0
-    Pk_IFG2_2   = Pk_IFG2 * 2.0 * f / 3.0
-
-    # ===========================================================
-    # COUNTERTERM MULTIPOLES
-    # Pk_ctr_ℓ encodes the shape of the EFT counterterm for each multipole.
-    # Convention: P_ℓ^EFT = 2 cs_ℓ Pk_ctr_ℓ / h² (caller supplies cs_ℓ)
-    # From CLASS-PT line 7239: P_CTR_2 = k² Pbin × f × 2/3
-    # ===========================================================
-    Pk_ctr0 = -k ** 2 * pk_disc                    # monopole  (= -pk_CTR_0; pm[11] = -P_CTR_0)
-    Pk_ctr2 = -k ** 2 * pk_disc * f * (2.0 / 3.0) # quadrupole (pm[12] = -P_CTR_2; P_CTR_2 = k²Pbin f 2/3)
-    Pk_ctr4 = -k ** 2 * pk_disc * (8.0 / 35.0) * f ** 2  # hexadecapole (pm[13] = -P_CTR_4)
-
-    # ===========================================================
-    # RSD TREE-LEVEL MULTIPOLES (anisotropic IR resummation via GL quadrature)
-    # Following CLASS-PT AP path: compute the full P_tree(k,mu)
-    # with anisotropic Sigmatot(mu) at each GL node, then project onto Legendre
-    # multipoles.  The tree integrand at each GL node is:
-    #   p_tree(k,mu) = Pnw + Pw * exp(-Sigmatot(mu)*k²) * (1 + Sigmatot(mu)*k²)
-    # This matches the CLASS-PT AP path (nonlinear_pt.c line 9388).
-    # No empirical alpha factor needed.
-    #
-    # Storage convention: Pk_0_vv/vd/dd store the f-weighted components
-    # so that galaxy combination is:
-    #   P_0^gal = Pk_0_vv + b1 Pk_0_vd + b1² Pk_0_dd + 1-loop
-    # Accumulated in the GL loop below.
-    # ===========================================================
-    Pk_0_vv = jnp.zeros_like(k)
-    Pk_0_vd = jnp.zeros_like(k)
-    Pk_0_dd = jnp.zeros_like(k)
-    Pk_2_vv = jnp.zeros_like(k)
-    Pk_2_vd = jnp.zeros_like(k)
-    Pk_2_dd = jnp.zeros_like(k)
-    Pk_4_vv = jnp.zeros_like(k)
-    Pk_4_vd = jnp.zeros_like(k)
-    Pk_4_dd = jnp.zeros_like(k)
+    # IFG2 RSD multipoles, counterterms and every tree/1-loop multipole are
+    # computed inside the 40-node GL μ-loop -- see `_gl_multipoles` below.
+    # The closed forms that used to live here (P_IFG2_0 = P_IFG2 f/3,
+    # Pk_ctr0 = -k² Pbin, ...) are the isotropic Legendre moments, exact only
+    # while the IR damping is μ-independent; nonlinear_pt.c:4480 makes it not,
+    # and :5318 additionally rescales P_IFG2 by (Pnw + Pw Exp)/Pbin.
 
     # ===========================================================
     # RSD 1-LOOP MULTIPOLES (from M22 × kernel and M13)
@@ -1451,103 +1638,28 @@ def _compute_bias_spectra(
             return p13_nw, p13_w
         return p13_nw, jnp.zeros_like(p13_nw)
 
-    # Compute nw/w split for all mu-power channels
-    P22_mu0_dd_nw, P22_mu0_dd_w = qf_split(M22)
-    P13_mu0_dd_nw, P13_mu0_dd_w = p13_split(M13, UV_mu0_dd)
-    P22_mu2_vd_nw, P22_mu2_vd_w = qf_split(M22_mu2_vd_bare)
-    P22_mu2_dd_nw, P22_mu2_dd_w = qf_split(M22_mu2_dd_bare)
-    P13_mu2_vd_nw, P13_mu2_vd_w = p13_split(M13_mu2_vd_bare, UV_mu2_vd)
-    P13_mu2_dd_nw, P13_mu2_dd_w = p13_split(M13_mu2_dd_bare, UV_mu2_dd)
-    P22_mu4_vv_nw, P22_mu4_vv_w = qf_split(M22_mu4_vv_bare)
-    P22_mu4_vd_nw, P22_mu4_vd_w = qf_split(M22_mu4_vd_bare)
-    P22_mu4_dd_nw, P22_mu4_dd_w = qf_split(M22_mu4_dd_bare)
-    P13_mu4_vv_nw, P13_mu4_vv_w = p13_split(M13_mu4_vv_bare, UV_mu4_vv)
-    P13_mu4_vd_nw, P13_mu4_vd_w = p13_split(M13_mu4_vd_bare, UV_mu4_vd)
-    P22_mu6_vv_nw, P22_mu6_vv_w = qf_split(M22_mu6_vv_mat)
-    P22_mu6_vd_nw, P22_mu6_vd_w = qf_split(M22_mu6_vd_mat)
-    P13_mu6_nw,    P13_mu6_w    = p13_split(M13_mu6_mat, UV_mu6)
-    P22_mu8_nw,    P22_mu8_w    = qf_split(M22_mu8_mat)
+    # nw/w split of every μ-power channel, keyed for _gl_multipoles
+    split = {}
+    for name, M in (("P22_mu0_dd", M22), ("P22_mu2_vd", M22_mu2_vd_bare), ("P22_mu2_dd", M22_mu2_dd_bare),
+                    ("P22_mu4_vv", M22_mu4_vv_bare), ("P22_mu4_vd", M22_mu4_vd_bare), ("P22_mu4_dd", M22_mu4_dd_bare),
+                    ("P22_mu6_vv", M22_mu6_vv_mat), ("P22_mu6_vd", M22_mu6_vd_mat), ("P22_mu8", M22_mu8_mat)):
+        split[name + "_nw"], split[name + "_w"] = qf_split(M)
+    for name, M, UV in (("P13_mu0_dd", M13, UV_mu0_dd), ("P13_mu2_vd", M13_mu2_vd_bare, UV_mu2_vd),
+                        ("P13_mu2_dd", M13_mu2_dd_bare, UV_mu2_dd), ("P13_mu4_vv", M13_mu4_vv_bare, UV_mu4_vv),
+                        ("P13_mu4_vd", M13_mu4_vd_bare, UV_mu4_vd), ("P13_mu6", M13_mu6_mat, UV_mu6)):
+        split[name + "_nw"], split[name + "_w"] = p13_split(M, UV)
 
-    # EPTComponents still needs these combined (for _pk_mm_tree_mu68_at_mu)
-    P22_mu6_vv = P22_mu6_vv_nw + P22_mu6_vv_w * Exp
-    P22_mu6_vd = P22_mu6_vd_nw + P22_mu6_vd_w * Exp
-    P22_mu8    = P22_mu8_nw + P22_mu8_w * Exp
-    P13_mu6    = P13_mu6_nw + P13_mu6_w * Exp
-
-    # GL loop with anisotropic Sigmatot for 1-loop multipoles
-    # Replaces old analytic Pk_0/2/4_vv1 = P13_0/2/4_vv + P22_0/2/4_vv
-    Pk_0_vv1 = jnp.zeros_like(k)
-    Pk_2_vv1 = jnp.zeros_like(k)
-    Pk_4_vv1 = jnp.zeros_like(k)
-    Pk_0_vd1 = jnp.zeros_like(k)
-    Pk_2_vd1 = jnp.zeros_like(k)
-    Pk_4_vd1 = jnp.zeros_like(k)
-    Pk_0_dd1 = jnp.zeros_like(k)
-    Pk_2_dd1 = jnp.zeros_like(k)
-    Pk_4_dd1 = jnp.zeros_like(k)
+    # EPTComponents still needs these combined (for _pk_mm_tree_mu68_at_mu).
+    # These four keep the ISOTROPIC Exp (`Exp` above): they are consumed by the
+    # μ-resolved matter accessor, not by the GL loop.
+    P22_mu6_vv = split["P22_mu6_vv_nw"] + split["P22_mu6_vv_w"] * Exp
+    P22_mu6_vd = split["P22_mu6_vd_nw"] + split["P22_mu6_vd_w"] * Exp
+    P22_mu8    = split["P22_mu8_nw"] + split["P22_mu8_w"] * Exp
+    P13_mu6    = split["P13_mu6_nw"] + split["P13_mu6_w"] * Exp
 
     _pk_w_for_ratio = (jnp.asarray(pk_w) if pk_w is not None else jnp.zeros_like(k)) if use_ir_rsd else jnp.zeros_like(k)
-    _pk_nw_safe = jnp.where(pk_nw_arr > 1e-100, pk_nw_arr, jnp.ones_like(pk_nw_arr))
     _delta_sig2 = delta_sigma2_bao if delta_sigma2_bao is not None else 0.0
     _sig2_bao = sigma2_bao if sigma2_bao is not None else 0.0
-
-    for _mu_g, _w_g in zip(_GAUSS_NODES, _GAUSS_WEIGHTS):
-        _mu2 = float(_mu_g)**2
-        _Sig = _sig2_bao*(1 + f*_mu2*(2+f)) + _delta_sig2*f**2*_mu2*(_mu2-1)
-        _Eg  = jnp.exp(-_Sig * k**2)
-        _r13 = jnp.where(pk_nw_arr > 1e-100,
-                         1.0 + (_pk_w_for_ratio / _pk_nw_safe) * _Eg,
-                         jnp.ones_like(k))
-
-        # vv: mu^4 + mu^6 + mu^8
-        _Pvv = (
-            (P13_mu4_vv_nw * _r13 + P22_mu4_vv_nw + (P22_mu4_vv_w + P13_mu4_vv_w) * _Eg) * _mu2**2
-          + (P13_mu6_nw * _r13 + P22_mu6_vv_nw + (P22_mu6_vv_w + P13_mu6_w) * _Eg) * _mu2**3
-          + (P22_mu8_nw + P22_mu8_w * _Eg) * _mu2**4
-        )
-        # dd: mu^0 + mu^2 + mu^4
-        _Pdd = (
-            (P22_mu0_dd_nw + P13_mu0_dd_nw * _r13 + (P13_mu0_dd_w + P22_mu0_dd_w) * _Eg)
-          + (P22_mu2_dd_nw + P13_mu2_dd_nw * _r13 + (P22_mu2_dd_w + P13_mu2_dd_w) * _Eg) * _mu2
-          + (P22_mu4_dd_nw + P22_mu4_dd_w * _Eg) * _mu2**2
-        )
-        # vd: mu^2 + mu^4 + mu^6
-        _Pvd = (
-            (P13_mu2_vd_nw * _r13 + P22_mu2_vd_nw + (P22_mu2_vd_w + P13_mu2_vd_w) * _Eg) * _mu2
-          + (P13_mu4_vd_nw * _r13 + P22_mu4_vd_nw + (P22_mu4_vd_w + P13_mu4_vd_w) * _Eg) * _mu2**2
-          + (P22_mu6_vd_nw + P22_mu6_vd_w * _Eg) * _mu2**3
-        )
-
-        _L0 = 1.0
-        _L2 = 0.5 * (3*_mu2 - 1)
-        _L4 = (35*_mu2**2 - 30*_mu2 + 3) / 8.0
-
-        # Anisotropic tree: CLASS-PT AP path (nonlinear_pt.c line 9388)
-        # p_tree(k,mu) = Pnw + Pw * exp(-Sigmatot(mu)*k²) * (1 + Sigmatot(mu)*k²)
-        _p_tree = pk_nw_arr + _pk_w_for_ratio * _Eg * (1.0 + _Sig * k**2)
-        _tree_vv = f**2 * _mu2**2 * _p_tree
-        _tree_vd = 2.0 * f * _mu2 * _p_tree
-        _tree_dd = _p_tree
-
-        Pk_0_vv = Pk_0_vv + _w_g * 0.5 * _L0 * _tree_vv
-        Pk_2_vv = Pk_2_vv + _w_g * 2.5 * _L2 * _tree_vv
-        Pk_4_vv = Pk_4_vv + _w_g * 4.5 * _L4 * _tree_vv
-        Pk_0_vd = Pk_0_vd + _w_g * 0.5 * _L0 * _tree_vd
-        Pk_2_vd = Pk_2_vd + _w_g * 2.5 * _L2 * _tree_vd
-        Pk_4_vd = Pk_4_vd + _w_g * 4.5 * _L4 * _tree_vd
-        Pk_0_dd = Pk_0_dd + _w_g * 0.5 * _L0 * _tree_dd
-        Pk_2_dd = Pk_2_dd + _w_g * 2.5 * _L2 * _tree_dd
-        Pk_4_dd = Pk_4_dd + _w_g * 4.5 * _L4 * _tree_dd
-
-        Pk_0_vv1 = Pk_0_vv1 + _w_g * 0.5 * _L0 * _Pvv
-        Pk_2_vv1 = Pk_2_vv1 + _w_g * 2.5 * _L2 * _Pvv
-        Pk_4_vv1 = Pk_4_vv1 + _w_g * 4.5 * _L4 * _Pvv
-        Pk_0_dd1 = Pk_0_dd1 + _w_g * 0.5 * _L0 * _Pdd
-        Pk_2_dd1 = Pk_2_dd1 + _w_g * 2.5 * _L2 * _Pdd
-        Pk_4_dd1 = Pk_4_dd1 + _w_g * 4.5 * _L4 * _Pdd
-        Pk_0_vd1 = Pk_0_vd1 + _w_g * 0.5 * _L0 * _Pvd
-        Pk_2_vd1 = Pk_2_vd1 + _w_g * 2.5 * _L2 * _Pvd
-        Pk_4_vd1 = Pk_4_vd1 + _w_g * 4.5 * _L4 * _Pvd
 
     # ===========================================================
     # RSD BIAS CROSS-TERMS
@@ -1671,13 +1783,14 @@ def _compute_bias_spectra(
     )
     M_4_bG2 = M22b * k_4_bG2
 
-    # Compute RSD bias spectra via quadratic form
+    # Compute RSD bias spectra via quadratic form.
     # CLASS-PT negates the bG2 RSD channels when it unpacks them --
-    # classy.pyx:4721-4731, indices 32,33 (l=0 b1bG2,bG2), 36,37 (l=2), 39 (l=4):
+    # classy.pyx:4721-4722, 4727-4728, 4732, indices 32,33 (l=0 b1bG2,bG2),
+    # 36,37 (l=2), 39 (l=4):
     #     pk_mult[32] = -raw_pk[32] + large_b   etc.
     # Both codes then use "+ b1*bG2*<channel> + bG2*<channel>" in pk_gg_l*, so we
-    # must carry the same sign.  Index 41 (Pk_4_b1bG2) is NOT negated upstream --
-    # and is hard-zeroed below in the no-AP case anyway.
+    # must carry the same sign.  Index 41 (Pk_4_b1bG2) is NOT negated upstream;
+    # see the flip after the _gl_multipoles call below.
     Pk_0_b1b2  = qf2(M_0_b1b2)
     Pk_0_b2    = qf2(M_0_b2)
     Pk_0_b1bG2 = -qf2(M_0_b1bG2)
@@ -1688,31 +1801,33 @@ def _compute_bias_spectra(
     Pk_2_bG2   = -qf2(M_2_bG2)
     Pk_4_b2    = qf2(M_4_b2)
     Pk_4_bG2   = -qf2(M_4_bG2)
-    # Pk_4_b1b2 and Pk_4_b1bG2: populated via AP integration in CLASS-PT;
-    # zero in no-AP case (our reference was generated without AP).
-    Pk_4_b1b2  = jnp.zeros_like(k)
-    Pk_4_b1bG2 = jnp.zeros_like(k)
 
+    # The 47 channels the GL μ-loop consumes; _gl_multipoles remaps every one of
+    # them to ktrue before projecting (nonlinear_pt.c:4403-4440, 5279-5314).
+    chan = {
+        **split,
+        "pk_nw": pk_nw_arr, "pk_w": _pk_w_for_ratio, "pk_disc": pk_disc,
+        "Pk_IFG2": Pk_IFG2, "Pk_Id2d2": Pk_Id2d2, "Pk_Id2G2": Pk_Id2G2, "Pk_IG2G2": Pk_IG2G2,
+        "Pk_0_b1b2": Pk_0_b1b2, "Pk_2_b1b2": Pk_2_b1b2, "Pk_0_b1bG2": Pk_0_b1bG2, "Pk_2_b1bG2": Pk_2_b1bG2,
+        "Pk_0_b2": Pk_0_b2, "Pk_2_b2": Pk_2_b2, "Pk_4_b2": Pk_4_b2,
+        "Pk_0_bG2": Pk_0_bG2, "Pk_2_bG2": Pk_2_bG2, "Pk_4_bG2": Pk_4_bG2,
+    }
+    gl = _gl_multipoles(chan, k, f, _sig2_bao, _delta_sig2,
+                        hratio=hratio, Dratio=Dratio)
+    # Sign bookkeeping. `_gl_multipoles` is linear in `chan`, so the six leaves
+    # clax stores negated relative to the raw C arrays -- Pk_Id2d2 (pm[1]),
+    # Pk_0_b1bG2/Pk_0_bG2 (pm[32,33]), Pk_2_b1bG2/Pk_2_bG2 (pm[36,37]),
+    # Pk_4_bG2 (pm[39]), all negated by classy.pyx:4676/4721-4722/4727-4728/4732
+    # -- come back out already in clax's convention. The single exception is
+    # Pk_4_b1bG2: the C loop builds it (nonlinear_pt.c:5326, 5351) from the raw
+    # P_0_b1bG2 and P_2_b1bG2, and classy.pyx:4735 does NOT negate row 41, so
+    # feeding it the two negated parents flips it. Flip it back.
+    gl["Pk_4_b1bG2"] = -gl["Pk_4_b1bG2"]
     return {
-        "Pk_Id2d2": Pk_Id2d2, "Pk_Id2": Pk_Id2, "Pk_IG2": Pk_IG2,
-        "Pk_Id2G2": Pk_Id2G2, "Pk_IG2G2": Pk_IG2G2,
-        "Pk_IFG2": Pk_IFG2, "Pk_IFG2_0b1": Pk_IFG2_0b1,
-        "Pk_IFG2_0": Pk_IFG2_0, "Pk_IFG2_2": Pk_IFG2_2,
-        "Pk_ctr0": Pk_ctr0, "Pk_ctr2": Pk_ctr2, "Pk_ctr4": Pk_ctr4,
-        "Pk_0_vv": Pk_0_vv, "Pk_0_vd": Pk_0_vd, "Pk_0_dd": Pk_0_dd,
-        "Pk_2_vv": Pk_2_vv, "Pk_2_vd": Pk_2_vd, "Pk_4_vv": Pk_4_vv,
-        "Pk_2_dd": Pk_2_dd, "Pk_4_vd": Pk_4_vd, "Pk_4_dd": Pk_4_dd,
-        "Pk_0_vv1": Pk_0_vv1, "Pk_0_vd1": Pk_0_vd1, "Pk_0_dd1": Pk_0_dd1,
-        "Pk_2_vv1": Pk_2_vv1, "Pk_2_vd1": Pk_2_vd1, "Pk_2_dd1": Pk_2_dd1,
-        "Pk_4_vv1": Pk_4_vv1, "Pk_4_vd1": Pk_4_vd1, "Pk_4_dd1": Pk_4_dd1,
-        "Pk_0_b1b2": Pk_0_b1b2, "Pk_0_b2": Pk_0_b2,
-        "Pk_0_b1bG2": Pk_0_b1bG2, "Pk_0_bG2": Pk_0_bG2,
-        "Pk_2_b1b2": Pk_2_b1b2, "Pk_2_b2": Pk_2_b2,
-        "Pk_2_b1bG2": Pk_2_b1bG2, "Pk_2_bG2": Pk_2_bG2,
-        "Pk_4_b2": Pk_4_b2, "Pk_4_bG2": Pk_4_bG2,
-        "Pk_4_b1b2": Pk_4_b1b2, "Pk_4_b1bG2": Pk_4_b1bG2,
+        "Pk_Id2": Pk_Id2, "Pk_IG2": Pk_IG2, "Pk_IFG2": Pk_IFG2,
         "P22_mu6_vv": P22_mu6_vv, "P22_mu6_vd": P22_mu6_vd,
         "P22_mu8": P22_mu8, "P13_mu6": P13_mu6,
+        **gl,
     }
 
 
@@ -1785,6 +1900,13 @@ def compute_ept(
                   Used by IR resummation in the Σ²_BAO j₂-filter integral.
                   Ignored if ``_ir_precomputed`` is provided (the caller already
                   computed Σ²_BAO) or ``ir_resummation=False``.
+
+    No Alcock–Paczynski remap is reachable from here: the μ-loop this calls
+    (`_gl_multipoles`) carries CLASS-PT's `hratio`/`Dratio` because its
+    structure needs them, but they are left at their (1, 1) defaults, which is
+    exactly CLASS-PT's alpha=1 branch (nonlinear_pt.c:4396-4397). Threading a
+    real geometry through is a separate change (it also needs `omfid` and the
+    fiducial background) and is deliberately not part of this API yet.
 
     Returns:
         EPTComponents with all spectral arrays on the EPT k-grid
@@ -1919,7 +2041,7 @@ def compute_ept(
         x, k_h, pk_resummed, lnk,
         M22b, IFG2, M13, M22,
         etam, cmsym2, etam2,
-        f, Pk_tree, cutoff_h,
+        f, cutoff_h,
         cmsym_nw=cmsym_nw_jnp,
         cmsym_w=cmsym_w_jnp,
         pk_nw=pk_nw_jnp,
@@ -2221,13 +2343,11 @@ def pk_gg_l2(
     h = ept.h
     kh = ept.kh
 
-    # Tree: Kaiser formula (b1+fμ²)² projected to L2 via GL quadrature.
-    # For galaxies the tree ℓ=2 is vv + b1·vd only.  The dd tree component
-    # (Pk_2_dd) is NOT included here: CLASS-PT's pk_mult[26] (the b1² dd
-    # term in pk_gg_l2) is a 1-loop contribution, not tree.  For matter
-    # (pk_mm_l2, b1=1) the dd tree IS included because the bias weighting
-    # is different.  cf. CLASS-PT classy.pyx:1206.
-    new_l2_tree = ept.Pk_2_vv + b1 * ept.Pk_2_vd
+    # Tree: (b1 + f μ²)² p_tree projected on L2.  classy.pyx:4921 is
+    # pm[18] + b1·pm[19] + b1²·pm[26], and pm[26] is P1loopdd_ap_ir, which
+    # nonlinear_pt.c:4529 OPENS with p_tree -- so the b1² dd tree belongs here,
+    # carrying b1² like every other dd term.
+    new_l2_tree = ept.Pk_2_vv + b1 * ept.Pk_2_vd + b1 ** 2 * ept.Pk_2_dd
 
     P_loop_l2 = (
         ept.Pk_2_vv1
@@ -2270,10 +2390,11 @@ def pk_gg_l4(
     h = ept.h
     kh = ept.kh
 
-    # Tree: CLASS-PT uses pm[20] (the matter anisotropic tree) for both matter
-    # and galaxy l=4; b1 factors appear only on the 1-loop terms pm[28]/pm[29].
-    # cf. CLASS-PT classy.pyx line 1213: pm[20]+pm[27]+b1*pm[28]+b1²*pm[29].
-    new_l4_tree = ept.Pk_4_vv + ept.Pk_4_vd + ept.Pk_4_dd
+    # Tree: classy.pyx:4931 is pm[20] + pm[27] + b1·pm[28] + b1²·pm[29], and
+    # pm[28]/pm[29] are P1loopvd_ap_ir / P1loopdd_ap_ir, which open with the
+    # vd/dd tree (nonlinear_pt.c:4529-4539).  The tree therefore carries the
+    # same b1 powers as the loop: vv, b1·vd, b1²·dd.
+    new_l4_tree = ept.Pk_4_vv + b1 * ept.Pk_4_vd + b1 ** 2 * ept.Pk_4_dd
 
     P_loop_l4 = (
         ept.Pk_4_vv1
@@ -2281,11 +2402,12 @@ def pk_gg_l4(
         + b1 ** 2 * ept.Pk_4_dd1
     )
 
+    # classy.pyx:4925-4931 has no pm[40]/pm[41] (P_4_b1b2 / P_4_b1bG2) term,
+    # although the C loop fills both rows; mirror the accessor.  The leaves stay
+    # in EPTComponents.
     P_bias_l4 = (
         b2 * ept.Pk_4_b2
         + bG2 * ept.Pk_4_bG2
-        + b1 * b2 * ept.Pk_4_b1b2
-        + b1 * bG2 * ept.Pk_4_b1bG2
     )
 
     P_b4 = (
