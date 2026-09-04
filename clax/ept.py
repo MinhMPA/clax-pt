@@ -1503,6 +1503,18 @@ def _compute_bias_spectra(
     # Exact kernels from nonlinear_pt.c lines 12871–13339.
     # ===========================================================
 
+    # These kernels require the b = -1.6 BIAS FFTLog basis: they are contracted
+    # with x2, which is the b = -1.6 decomposition.  nu1/nu2 were bound to that
+    # basis near the top of this function, but the RSD 1-loop multipole block
+    # above rebinds them to the b = -0.3 MATTER basis (etam).  Rebind them here.
+    #
+    # The real-space bias channels (Pk_Id2, Pk_IG2, Pk_Id2G2, Pk_IG2G2) are
+    # computed before that rebinding, which is why only the RSD bias channels
+    # were affected -- and why comparisons against a reference with b2 = bG2 = 0
+    # could never see it.
+    nu1 = -0.5 * eta_i
+    nu2 = -0.5 * eta_l
+
     # Monopole bias kernels (ℓ=0)
     # M22_0_b1b2: (-3+2ν1+2ν2)(-12+7(3+f)(ν1+ν2)) / (42 ν1 ν2)
     # Ref: nonlinear_pt.c line 12871
