@@ -913,6 +913,47 @@ def _ir_resummation_gaussian(
 # Bias spectral cross-terms from M22basic (JAX-native)
 # ---------------------------------------------------------------------------
 
+def _simpson(y: Float[Array, "N"], x: Float[Array, "N"]) -> Float[Array, ""]:
+    """scipy.integrate.simpson (>= 1.11) for one 1-D sample set, in JAX.
+
+    Odd N: composite Simpson over (N-1)/2 parabolic segments. Even N: the same
+    over the first N-2 intervals plus Cartwright's (2017, eq. 8) correction for
+    the last interval, which is the branch scipy takes, so the two agree to
+    round-off. N is static; N >= 3.
+    """
+    n = y.shape[0]
+    if n < 3:
+        raise ValueError("_simpson needs at least 3 samples")
+    h = jnp.diff(x)
+
+    def basic(stop):
+        h0, h1 = h[0:stop:2], h[1:stop + 1:2]
+        y0, y1, y2 = y[0:stop:2], y[1:stop + 1:2], y[2:stop + 2:2]
+        hsum = h0 + h1
+        return jnp.sum(hsum / 6.0 * (y0 * (2.0 - h1 / h0)
+                                     + y1 * hsum ** 2 / (h0 * h1)
+                                     + y2 * (2.0 - h0 / h1)))
+
+    if n % 2 == 1:
+        return basic(n - 2)
+    h0, h1 = h[-2], h[-1]
+    alpha = (2.0 * h1 ** 2 + 3.0 * h0 * h1) / (6.0 * (h0 + h1))
+    beta = (h1 ** 2 + 3.0 * h0 * h1) / (6.0 * h0)
+    eta = h1 ** 3 / (6.0 * h0 * (h0 + h1))
+    return basic(n - 3) + alpha * y[-1] + beta * y[-2] - eta * y[-3]
+
+
+def _pd2d2_0(pk_tree: Float[Array, "Nk"], kh: Float[Array, "Nk"]) -> Float[Array, ""]:
+    """Zero-lag P_{delta^2 delta^2}(k -> 0) that pk_gg_l0 adds back.
+
+    CLASS-PT computes it in `initialize_output` (classy.pyx:4805-4813) as
+    simpson(Ptree^2 * kh^3, x=ln kh) / pi^2, where Ptree = pm[14]*h^3 is the
+    IR-resummed tree (nonlinear_pt.c:2999) -- not the FFTLog-discretised
+    spectrum, and not a trapezoid. Units (Mpc/h)^3.
+    """
+    return _simpson(pk_tree ** 2 * kh ** 3, jnp.log(kh)) / jnp.pi ** 2
+
+
 def _compute_bias_spectra(
     x: Complex[Array, "Nk Nmax+1"],
     k: Float[Array, "Nk"],
@@ -1032,8 +1073,6 @@ def _compute_bias_spectra(
     # the AbacusSummit c000 z=0.5 cosmology.  We integrate over the full EPT
     # grid instead, which is converged; the residual difference is
     # 0.25*b2^2*(2840-2253) ~ 10 (Mpc/h)^3 for |b2| ~ 0.3.
-    Pd2d2_0 = jnp.trapezoid(pk_disc ** 2 * k ** 3, lnk) / jnp.pi ** 2
-
     # Exact bias spectra from modified M22basic matrices
     # From nonlinear_pt.c lines 12095-12493 (all use x2 with b=-1.6 basis)
     Pk_Id2   = qf2(M_Id2)
@@ -1655,7 +1694,6 @@ def _compute_bias_spectra(
     Pk_4_b1bG2 = jnp.zeros_like(k)
 
     return {
-        "Pd2d2_0": Pd2d2_0,
         "Pk_Id2d2": Pk_Id2d2, "Pk_Id2": Pk_Id2, "Pk_IG2": Pk_IG2,
         "Pk_Id2G2": Pk_Id2G2, "Pk_IG2G2": Pk_IG2G2,
         "Pk_IFG2": Pk_IFG2, "Pk_IFG2_0b1": Pk_IFG2_0b1,
@@ -1798,13 +1836,10 @@ def compute_ept(
         damp = jnp.exp(-sigma2_bao * k_h ** 2)
         # IR-resummed linear spectrum (input to FFTLog)
         pk_resummed = pk_nw + pk_w * damp
-        # Tree-level spectrum for real-space: use raw pk_lin_h (no IR damping).
-        # The real-space tree has no RSD, so no anisotropic damping applies.
-        # Using raw pk_lin avoids sensitivity to our DST-derived
-        # sigma2_bao, which may differ slightly from CLASS-PT's.
-        # RSD tree multipoles are computed via anisotropic GL quadrature in
-        # _compute_bias_spectra (see Pk_0/2/4_vv/vd/dd accumulated there).
-        Pk_tree = pk_lin_h
+        # Tree-level spectrum = CLASS-PT's Ptree, pm[14] (nonlinear_pt.c:2999):
+        # the IR-resummed tree carries the isotropic damping AND the (1 + Sigma k^2)
+        # factor. The raw pk_lin_h used before is the Sigma -> 0 limit of this.
+        Pk_tree = pk_nw + pk_w * damp * (1.0 + sigma2_bao * k_h ** 2)
     elif prec.ir_resummation:
         # Default path: call NumPy IR resummation (NOT differentiable through pk_lin_h).
         # Use _ir_precomputed to enable gradients.
@@ -1813,12 +1848,13 @@ def compute_ept(
         )
         pk_nw = jnp.array(pk_nw_np)
         pk_w  = jnp.array(pk_w_np)
+        damp = jnp.exp(-sigma2_bao * k_h ** 2)
         # IR-resummed linear spectrum (input to FFTLog)
-        pk_resummed = pk_nw + pk_w * jnp.exp(-sigma2_bao * k_h ** 2)
-        # Tree-level spectrum for real-space: use raw pk_lin_h (no IR damping).
-        # RSD tree multipoles are computed via anisotropic GL quadrature.
-        Pk_tree = pk_lin_h
+        pk_resummed = pk_nw + pk_w * damp
+        # Tree-level spectrum = CLASS-PT's Ptree, pm[14] (nonlinear_pt.c:2999).
+        Pk_tree = pk_nw + pk_w * damp * (1.0 + sigma2_bao * k_h ** 2)
     else:
+        # IR off: CLASS-PT has Pw = 0, so Ptree = Pbin (nonlinear_pt.c:3294).
         pk_resummed = pk_lin_h
         Pk_tree = pk_lin_h
 
@@ -1904,6 +1940,10 @@ def compute_ept(
         pk_w=pk_w,
         sigma2_bao=jnp.asarray(_sigma2),
         delta_sigma2_bao=jnp.asarray(_delta_sigma2),
+        # classy.pyx:4813 builds this from Ptree on the output grid, so it is
+        # computed here rather than inside _compute_bias_spectra, which only
+        # ever sees the FFTLog-discretised spectrum.
+        Pd2d2_0=_pd2d2_0(Pk_tree, k_h),
         **bias,
     )
 

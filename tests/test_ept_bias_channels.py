@@ -137,11 +137,17 @@ def test_Pd2d2_0_matches_analytic_integral():
     IR resummation is switched off so the integrand is exactly the supplied
     linear P(k); with it on, clax integrates the RESUMMED spectrum (matching
     CLASS-PT's pk_mult[14]), which shifts the integral by ~0.05%.
+
+    The quadrature is Simpson, not trapezoid: classy.pyx:4813 evaluates this
+    with scipy's `simpson`. The two rules differ by ~7e-6 relative here, above
+    this test's 1e-6 bound, so the rule has to match to compare against
+    CLASS-PT at all.
     """
+    from scipy.integrate import simpson
     k_h, pk_lin, h, fz = _load_pk_lin()
     prec = EPTPrecisionParams(ir_resummation=False)
     ept = compute_ept(jnp.asarray(pk_lin), jnp.asarray(k_h), h=h, f=fz, prec=prec)
-    expect = np.trapezoid(pk_lin ** 2 * k_h ** 3, np.log(k_h)) / np.pi ** 2
+    expect = simpson(pk_lin ** 2 * k_h ** 3, x=np.log(k_h)) / np.pi ** 2
     got = float(ept.Pd2d2_0)
     assert got == pytest.approx(expect, rel=1e-6), \
         f"Pd2d2_0 = {got:.4f}, analytic integral = {expect:.4f}"
@@ -257,3 +263,40 @@ def test_gm_counterterm_carries_the_factor_two(ept_fz):
     m = _band(ept_fz)
     rel = np.max(np.abs(d[m] - want[m])) / np.max(np.abs(want[m]))
     assert rel < 1e-12, f"cs slope is off by {rel:.3e} of the expected 2*cs*b1*Pk_ctr"
+
+
+# ---------------------------------------------------------------------------
+# 8. Pk_tree is CLASS-PT's Ptree, and Pd2d2_0 is built from it
+# ---------------------------------------------------------------------------
+
+
+def test_tree_is_the_ir_resummed_tree(ept_fz):
+    """Pk_tree must be pm[14]: Pnw + Pw*exp(-S k^2)*(1 + S k^2).
+
+    nonlinear_pt.c:2999. clax previously used the raw linear spectrum, which is
+    the S -> 0 limit, so it differed from CLASS-PT wherever the BAO wiggle and
+    the damping are both non-negligible.
+    """
+    kh = np.asarray(ept_fz.kh)
+    S = float(ept_fz.sigma2_bao)
+    damp = np.exp(-S * kh ** 2)
+    want = np.asarray(ept_fz.pk_nw) + np.asarray(ept_fz.pk_w) * damp * (1.0 + S * kh ** 2)
+    got = np.asarray(ept_fz.Pk_tree)
+    m = _band(ept_fz)
+    assert np.max(np.abs(got[m] - want[m])) / np.max(np.abs(want[m])) < 1e-12
+    # and it is genuinely not the raw linear spectrum
+    lin = np.asarray(ept_fz.pk_nw) + np.asarray(ept_fz.pk_w)
+    assert np.max(np.abs(got[m] - lin[m])) / np.max(np.abs(lin[m])) > 1e-4
+
+
+def test_Pd2d2_0_uses_simpson_on_the_tree(ept_fz):
+    """Pd2d2_0 = simpson(Ptree^2 kh^3, ln kh)/pi^2 -- classy.pyx:4805-4813.
+
+    Trapezoid on the FFTLog-discretised spectrum, which clax used before, is a
+    different integrand under a different rule.
+    """
+    from scipy.integrate import simpson
+    kh = np.asarray(ept_fz.kh)
+    want = simpson(np.asarray(ept_fz.Pk_tree) ** 2 * kh ** 3, x=np.log(kh)) / np.pi ** 2
+    got = float(ept_fz.Pd2d2_0)
+    assert abs(got - want) / want < 1e-10, f"Pd2d2_0 {got:.6f} vs simpson {want:.6f}"
