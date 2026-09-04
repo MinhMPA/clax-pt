@@ -1625,16 +1625,22 @@ def _compute_bias_spectra(
     M_4_bG2 = M22b * k_4_bG2
 
     # Compute RSD bias spectra via quadratic form
+    # CLASS-PT negates the bG2 RSD channels when it unpacks them --
+    # classy.pyx:4721-4731, indices 32,33 (l=0 b1bG2,bG2), 36,37 (l=2), 39 (l=4):
+    #     pk_mult[32] = -raw_pk[32] + large_b   etc.
+    # Both codes then use "+ b1*bG2*<channel> + bG2*<channel>" in pk_gg_l*, so we
+    # must carry the same sign.  Index 41 (Pk_4_b1bG2) is NOT negated upstream --
+    # and is hard-zeroed below in the no-AP case anyway.
     Pk_0_b1b2  = qf2(M_0_b1b2)
     Pk_0_b2    = qf2(M_0_b2)
-    Pk_0_b1bG2 = qf2(M_0_b1bG2)
-    Pk_0_bG2   = qf2(M_0_bG2)
+    Pk_0_b1bG2 = -qf2(M_0_b1bG2)
+    Pk_0_bG2   = -qf2(M_0_bG2)
     Pk_2_b1b2  = qf2(M_2_b1b2)
     Pk_2_b2    = qf2(M_2_b2)
-    Pk_2_b1bG2 = qf2(M_2_b1bG2)
-    Pk_2_bG2   = qf2(M_2_bG2)
+    Pk_2_b1bG2 = -qf2(M_2_b1bG2)
+    Pk_2_bG2   = -qf2(M_2_bG2)
     Pk_4_b2    = qf2(M_4_b2)
-    Pk_4_bG2   = qf2(M_4_bG2)
+    Pk_4_bG2   = -qf2(M_4_bG2)
     # Pk_4_b1b2 and Pk_4_b1bG2: populated via AP integration in CLASS-PT;
     # zero in no-AP case (our reference was generated without AP).
     Pk_4_b1b2  = jnp.zeros_like(k)
