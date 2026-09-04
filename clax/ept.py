@@ -292,6 +292,7 @@ class EPTComponents:
     pk_w:  Float[Array, "Nk"]           # wiggle P(k) = pk_lin - pk_nw
     sigma2_bao: Float[Array, ""]         # isotropic BAO damping Σ²_BAO in (Mpc/h)²
     delta_sigma2_bao: Float[Array, ""]   # anisotropic correction δΣ²_BAO in (Mpc/h)²
+    Pd2d2_0: Float[Array, ""]            # zero-lag P_δ²δ²(k→0) in (Mpc/h)³
     P22_mu6_vv: Float[Array, "Nk"]      # P22 bare mu^6 vv coefficient
     P22_mu6_vd: Float[Array, "Nk"]      # P22 bare mu^6 vd coefficient
     P22_mu8:    Float[Array, "Nk"]      # P22 bare mu^8 coefficient
@@ -317,24 +318,26 @@ class EPTComponents:
             self.P22_mu6_vv, self.P22_mu6_vd, self.P22_mu8, self.P13_mu6,  # 45-48
             self.Pk_2_dd, self.Pk_4_vd, self.Pk_4_dd,          # 49, 50, 51
             # Scalars as leaves (tracer-safety for traced h/f/sigma2_bao/
-            # delta_sigma2_bao): these are the LAST FOUR leaves, in order
-            # h, f, sigma2_bao, delta_sigma2_bao -- see tree_unflatten below.
+            # delta_sigma2_bao/Pd2d2_0): these are the LAST FIVE leaves, in
+            # order h, f, sigma2_bao, delta_sigma2_bao, Pd2d2_0 -- see
+            # tree_unflatten below.
             # Emitted bare (no jnp.asarray): the constructor already coerces,
             # and transforming during flatten breaks eval_shape/vmap-sentinel
             # round-trips.
             self.h, self.f, self.sigma2_bao, self.delta_sigma2_bao,
+            self.Pd2d2_0,
         ]
         aux = None
         return arrays, aux
 
     @classmethod
     def tree_unflatten(cls, aux, arrays):
-        # The four scalars are the LAST FOUR leaves, in order h, f,
-        # sigma2_bao, delta_sigma2_bao (matches tree_flatten above).
+        # The five scalars are the LAST FIVE leaves, in order h, f,
+        # sigma2_bao, delta_sigma2_bao, Pd2d2_0 (matches tree_flatten above).
         # Negative indexing so the tail stays correct if the array-leaf
         # count above it changes.
-        h, f, sigma2_bao, delta_sigma2_bao = (
-            arrays[-4], arrays[-3], arrays[-2], arrays[-1])
+        h, f, sigma2_bao, delta_sigma2_bao, Pd2d2_0 = (
+            arrays[-5], arrays[-4], arrays[-3], arrays[-2], arrays[-1])
         return cls(
             kh=arrays[0], h=h, f=f,
             Pk_tree=arrays[1], Pk_loop=arrays[2], Pk_ctr=arrays[3],
@@ -355,6 +358,7 @@ class EPTComponents:
             Pk_4_b1b2=arrays[41], Pk_4_b1bG2=arrays[42],
             pk_nw=arrays[43], pk_w=arrays[44],
             sigma2_bao=sigma2_bao, delta_sigma2_bao=delta_sigma2_bao,
+            Pd2d2_0=Pd2d2_0,
             P22_mu6_vv=arrays[45], P22_mu6_vd=arrays[46],
             P22_mu8=arrays[47], P13_mu6=arrays[48],
             Pk_2_dd=arrays[49], Pk_4_vd=arrays[50], Pk_4_dd=arrays[51],
@@ -1026,6 +1030,18 @@ def _compute_bias_spectra(
     # included; the ratio to CLASS-PT was exactly -1.000 at every k.
     Pk_Id2d2 = (raw_Id2d2 - raw_Id2d2[0]) * uv_damp
 
+    # Zero-lag value that the subtraction above removes:
+    #     P_d2d2(k->0) = 2 * int P_lin(q)^2 d^3q/(2pi)^3
+    #                  = (1/pi^2) * int P_lin(q)^2 q^3 dln q
+    # CLASS-PT adds this back explicitly in pk_gg_l0 (classy.pyx:4911), so we
+    # must carry it.  Note CLASS-PT evaluates the integral on the USER'S OUTPUT
+    # GRID (classy.pyx:4813, `self.kh`), which leaves it under-converged for a
+    # narrow output range -- 2253 vs 2840 (Mpc/h)^3 on a 0.01-0.3 h/Mpc grid at
+    # the AbacusSummit c000 z=0.5 cosmology.  We integrate over the full EPT
+    # grid instead, which is converged; the residual difference is
+    # 0.25*b2^2*(2840-2253) ~ 10 (Mpc/h)^3 for |b2| ~ 0.3.
+    Pd2d2_0 = jnp.trapezoid(pk_disc ** 2 * k ** 3, lnk) / jnp.pi ** 2
+
     # Exact bias spectra from modified M22basic matrices
     # From nonlinear_pt.c lines 12095-12493 (all use x2 with b=-1.6 basis)
     Pk_Id2   = qf2(M_Id2)
@@ -1647,6 +1663,7 @@ def _compute_bias_spectra(
     Pk_4_b1bG2 = jnp.zeros_like(k)
 
     return {
+        "Pd2d2_0": Pd2d2_0,
         "Pk_Id2d2": Pk_Id2d2, "Pk_Id2": Pk_Id2, "Pk_IG2": Pk_IG2,
         "Pk_Id2G2": Pk_Id2G2, "Pk_IG2G2": Pk_IG2G2,
         "Pk_IFG2": Pk_IFG2, "Pk_IFG2_0b1": Pk_IFG2_0b1,
@@ -2145,7 +2162,13 @@ def pk_gg_l0(
         * ept.Pk_ctr4
     )
 
-    return (new_l0_tree + P_loop_l0 + P_bias_l0 + 2.0 * cs0 * ept.Pk_ctr0) + Pshot + P_b4
+    # CLASS-PT adds the zero-lag P_d2d2(k->0) back here -- classy.pyx:4911,
+    # "+ 0.25*b2**2.*self.Pd2d2_0" -- so that this term uses the UNSUBTRACTED
+    # P_d2d2.  It is NOT degenerate with Pshot once b2 floats, because it scales
+    # as b2^2.  NB pk_gg_real deliberately does NOT carry it (CLASS-PT
+    # classy.pyx:4827 omits it there too); the constant is absorbed into Pshot.
+    return ((new_l0_tree + P_loop_l0 + P_bias_l0 + 2.0 * cs0 * ept.Pk_ctr0)
+            + Pshot + P_b4 + 0.25 * b2 ** 2 * ept.Pd2d2_0)
 
 
 def pk_gg_l2(
