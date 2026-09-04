@@ -1956,6 +1956,8 @@ def compute_ept(
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     _ir_precomputed: Optional[tuple] = None,
     rs_h: float = 99.0,
+    hratio: float | Float[Array, ""] = 1.0,
+    Dratio: float | Float[Array, ""] = 1.0,
 ) -> EPTComponents:
     """Compute all EPT spectral components from linear P(k).
 
@@ -2161,6 +2163,8 @@ def compute_ept(
         sigma2_bao=sigma2_bao if prec.ir_resummation else None,
         delta_sigma2_bao=delta_sigma2_bao if prec.ir_resummation else None,
         pk_w=pk_w if prec.ir_resummation else None,
+        hratio=hratio,
+        Dratio=Dratio,
     )
 
     _sigma2 = sigma2_bao if sigma2_bao is not None else 0.0
@@ -2553,6 +2557,8 @@ def compute_ept_from_clax(
     pt,               # PerturbationResult
     z: float = 0.0,
     prec: EPTPrecisionParams = EPTPrecisionParams(),
+    *,
+    omfid: Optional[float] = None,
 ) -> EPTComponents:
     """Compute EPT components from a full clax perturbation run.
 
@@ -2605,6 +2611,15 @@ def compute_ept_from_clax(
     # channel measured at -9.48e4 of the stage h-gradient (GPU job 13313,
     # issue #30 item 4).
     h_conc = float(jax.lax.stop_gradient(h))
+
+    # Alcock-Paczynski ratios (nonlinear_pt.c:1245-1296). The branch is on the
+    # STATIC omfid, never on a traced value; ap_ratios itself is differentiable
+    # in bg. omfid=None reproduces the pre-AP behaviour exactly.
+    if omfid is None:
+        hratio, Dratio = 1.0, 1.0
+    else:
+        from clax.ap import ap_ratios
+        hratio, Dratio = ap_ratios(bg, z, omfid)
 
     # EPT k-grid in h/Mpc (static shape source) -> Mpc^-1, TRACED in h so
     # the delta_m/primordial sampling points move with h under AD exactly
@@ -2666,4 +2681,5 @@ def compute_ept_from_clax(
                         # branch); stop_gradient is a no-op here but keeps
                         # this call site's own gradient graph minimal.
                         rs_h=jax.lax.stop_gradient(rs_h_traced),
-                        _ir_precomputed=ir_pre)
+                        _ir_precomputed=ir_pre,
+                        hratio=hratio, Dratio=Dratio)
