@@ -528,6 +528,12 @@ class PerturbationResult:
     # Weyl potential (phi+psi) in synchronous gauge (eta + alpha_prime)
     source_phi_plus_psi: Float[Array, "Nk Ntau"]
 
+    # Baryon+CDM density contrast for galaxy clustering (CLASS-PT `cb: Yes`):
+    # the delta_m combination without the ncdm term, for every N_ncdm.
+    # Must stay LAST: tree_unflatten is positional (``cls(*fields)``), so the
+    # dataclass field order and the tree_flatten order both end with delta_cb.
+    delta_cb: Float[Array, "Nk Ntau"]
+
     def tree_flatten(self):
         return [
             self.k_grid, self.tau_grid,
@@ -536,6 +542,7 @@ class PerturbationResult:
             self.source_SW, self.source_ISW_vis, self.source_ISW_fs, self.source_Doppler,
             self.source_Doppler_nonIBP, self.source_T0_noDopp,
             self.source_phi_plus_psi,
+            self.delta_cb,
         ], None
 
     @classmethod
@@ -1765,16 +1772,20 @@ def _extract_sources(y, k, tau, bg, th, idx, params,
     # The geometric lensing kernel is applied in compute_cl_pp_transfer.
     source_phi_plus_psi = eta + alpha_prime
 
+    # Baryon+CDM density contrast (galaxy-clustering field, CLASS-PT `cb: Yes`)
+    delta_cb = (rho_b * delta_b + rho_cdm * delta_cdm) / (rho_b + rho_cdm)
+
     # Matter density contrast (for P(k))
     # Include ncdm when hierarchy is active (n_q > 0) to match CLASS P_m(k)
     if n_q > 0 and q_ncdm is not None:
         delta_m = (rho_b * delta_b + rho_cdm * delta_cdm + rho_ncdm * delta_ncdm_src) / (rho_b + rho_cdm + rho_ncdm)
     else:
-        delta_m = (rho_b * delta_b + rho_cdm * delta_cdm) / (rho_b + rho_cdm)
+        delta_m = delta_cb
 
     return (source_T0, source_T1, source_T2, source_E, source_lens, delta_m,
             source_SW, source_ISW_vis, source_ISW_fs, source_Doppler,
-            source_Doppler_nonIBP, source_T0_noDopp, source_phi_plus_psi)
+            source_Doppler_nonIBP, source_T0_noDopp, source_phi_plus_psi,
+            delta_cb)
 
 
 def _extract_delta_m(
@@ -1975,7 +1986,7 @@ def _pt_saved_output_count(*, solve_kind: str) -> int:
     if solve_kind == "mpk":
         return 1
     if solve_kind == "full":
-        return 12
+        return 14  # 13 source arrays + delta_cb (see _extract_sources)
     raise ValueError(f"Unknown perturbation solve kind: {solve_kind}")
 
 
@@ -2196,6 +2207,7 @@ def _perturbations_solve_impl(
         source_Doppler_nonIBP=all_sources[10],
         source_T0_noDopp=all_sources[11],
         source_phi_plus_psi=all_sources[12],
+        delta_cb=all_sources[13],
     )
 
 

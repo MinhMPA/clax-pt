@@ -13,6 +13,7 @@ Usage:
 """
 
 # Force CPU backend BEFORE importing JAX (Metal does not support float64)
+import json
 import os
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
 os.environ["JAX_PLATFORMS"] = "cpu"
@@ -55,7 +56,8 @@ ALL_SPECTRA = [
 FAST_SPECTRA = ["pk_mm_real", "pk_mm_l0", "pk_gg_l2"]
 
 # Reference NPZ key mapping: clax name -> NPZ key
-# Note: gm in clax = mg in CLASS-PT reference file
+# The legacy reference names the cross spectrum `pk_mg_real`; the alpha = 1
+# reference names it `pk_gm_real`. _ref_key() picks whichever the file has.
 REF_KEY_MAP = {
     "pk_mm_real": "pk_mm_real",
     "pk_gg_real": "pk_gg_real",
@@ -73,12 +75,41 @@ REF_KEY_MAP = {
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _ref_key(ref, name):
+    """CLASS-PT key for a clax spectrum, tolerating the two naming schemes."""
+    mapped = REF_KEY_MAP[name]
+    return mapped if mapped in ref.files else name
+
+
+def _ref_bias(ref):
+    """Bias dict from either the flat `bias_*` keys or a `bias_json` blob."""
+    if "bias_json" in ref.files:
+        return json.loads(str(ref["bias_json"]))
+    return {k: float(ref[f"bias_{k}"]) for k in
+            ("b1", "b2", "bG2", "bGamma3", "cs0", "cs2", "cs4", "Pshot", "b4", "cs")}
+
+
 @pytest.fixture(scope="module")
 def classpt_ref():
-    """Load CLASS-PT reference data from NPZ file."""
+    """CLASS-PT reference at alpha = 1, i.e. with Alcock-Paczynski OFF.
+
+    `classpt_z0.38_noap_alpha1.npz` carries `ap = False` and
+    `hratio = Dratio = 1.0`, so it is directly comparable to this module's
+    AP-free `compute_ept`. It also records its own provenance -- the CLASS-PT
+    commit and the sha256 of every patch applied to that build -- so the
+    comparison is reproducible without external metadata.
+
+    The older `classpt_z0.38_fullrange.npz` was generated with AP ON, against a
+    CLASS-PT build that no longer exists. Comparing an AP-free clax against it
+    leaves a geometric mismatch that happened to cancel part of the BAO
+    no-wiggle error; once that error was fixed the mismatch surfaced as a
+    spurious 1.15% in pk_gg_l2. It is kept in the tree as a drift bound, not as
+    a correctness oracle, and the AP-aware comparison against it returns with
+    the Alcock-Paczynski support.
+    """
     ref_path = os.path.join(
         os.path.dirname(__file__), "..", "reference_data",
-        "classpt_z0.38_fullrange.npz"
+        "classpt_z0.38_noap_alpha1.npz"
     )
     if not os.path.isfile(ref_path):
         pytest.skip(f"Reference data not found: {ref_path}")
@@ -94,22 +125,14 @@ def ept_result(classpt_ref):
     h = float(ref["h"])
     fz = float(ref["fz"])
 
-    bias = {
-        "b1": float(ref["bias_b1"]),
-        "b2": float(ref["bias_b2"]),
-        "bG2": float(ref["bias_bG2"]),
-        "bGamma3": float(ref["bias_bGamma3"]),
-        "cs0": float(ref["bias_cs0"]),
-        "cs2": float(ref["bias_cs2"]),
-        "cs4": float(ref["bias_cs4"]),
-        "Pshot": float(ref["bias_Pshot"]),
-        "b4": float(ref["bias_b4"]),
-        "cs": float(ref["bias_cs"]),
-    }
+    bias = _ref_bias(ref)
 
     prec = EPTPrecisionParams()
+    # Feed the cosmology's own sound horizon rather than compute_ept's fiducial
+    # default, so the BAO splitter sees what CLASS-PT saw.
+    kw = {"rs_h": float(ref["rs_d"]) * h} if "rs_d" in ref.files else {}
     ept_out = compute_ept(
-        jnp.array(pk_lin), jnp.array(k_h), h=h, f=fz, prec=prec
+        jnp.array(pk_lin), jnp.array(k_h), h=h, f=fz, prec=prec, **kw
     )
 
     return ept_out, bias, k_h
@@ -166,7 +189,7 @@ def test_ept_accuracy(spectrum_name, classpt_ref, clax_spectra, ept_result, requ
     n_modes = int(mask.sum())
 
     clax_vals = clax_spectra[spectrum_name][mask]
-    ref_key = REF_KEY_MAP[spectrum_name]
+    ref_key = _ref_key(classpt_ref, spectrum_name)
     ref_vals = np.squeeze(classpt_ref[ref_key])[mask]
 
     is_l4 = spectrum_name in L4_NAMES
