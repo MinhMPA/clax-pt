@@ -1,0 +1,47 @@
+diff --git a/python/cclassy.pxd b/python/cclassy.pxd
+index d8d72ae3..2eed59e7 100644
+--- a/python/cclassy.pxd
++++ b/python/cclassy.pxd
+@@ -423,6 +423,9 @@ cdef extern from "class.h":
+         ErrorMsg error_message
+         int z_pk_num
+         double z_pk[100]
++        double * growthf
++        double * hratio_array
++        double * Dratio_array
+         int k_size
+         int ln_k_size
+         double * ln_k
+diff --git a/python/classy.pyx b/python/classy.pyx
+index bc3c733e..dd43bc8b 100644
+--- a/python/classy.pyx
++++ b/python/classy.pyx
+@@ -4604,6 +4604,28 @@ cdef class Class:
+         result.append(factor_fNL*(pk12_4_bG2_ortho - large_for_logs_fNL))
+         return result
+ 
++    def get_ap_ratios(self, double z):
++        """(hratio, Dratio, f) as used in-loop by nonlinear_pt.c:1245-1296 for z_pk == z.
++        AP=No returns (1, 1, f); RSD=No returns (1, 1, 1). Raises if z is not a requested z_pk."""
++        cdef int i
++        if self.nlpt.method != nlpt_spt:
++            raise CosmoSevereError("get_ap_ratios: requires 'non linear': 'PT'")
++        for i in range(self.nlpt.z_pk_num):
++            # |z_pk[i] - z| < 1e-10, spelled as a chained C comparison: classy.pyx:18
++            # does `from libc.stdlib cimport *`, so `abs` is C int abs(int) here.
++            if -1e-10 < self.nlpt.z_pk[i] - z < 1e-10:
++                return (self.nlpt.hratio_array[i], self.nlpt.Dratio_array[i], self.nlpt.growthf[i])
++        raise CosmoSevereError("get_ap_ratios: z=%g is not in z_pk" % z)
++
++    def get_Pd2d2_0(self):
++        """Value computed by the last initialize_output() call (classy.pyx:4813).
++
++        Guarded like every other PT accessor (_check_pt at :4768, as pk_mm_real
++        does at :4816): without it, a call before initialize_output() would
++        silently return the zero-initialised cdef double instead of raising."""
++        self._check_pt()
++        return self.Pd2d2_0
++
+     def get_pk_mult(self, np.ndarray[DTYPE_t,ndim=1] k, double z, int k_size, no_wiggle=False, double alpha_rs=1.0):
+         """Fast vectorized function to get the non-linear power spectrum multipole components on a k array.
+ 

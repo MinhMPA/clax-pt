@@ -1,196 +1,198 @@
-#!/usr/bin/env python3
-"""Generates CLASS-PT reference data for accuracy validation.
+#!/usr/bin/env python
+# scripts/generate_classpt_reference.py
+"""Generate CLASS-PT reference multipoles for the clax-pt validation campaign.
 
-Requires CLASS-PT Python wrapper (classy with PT extension).
-Install via:  cd ~/CLASS-PT && pip install .
-
-Produces reference_data/classpt_z{z}_fullrange.npz files containing:
-  - pk_mm_real   : matter-matter P(k) real-space
-  - pk_mg_real   : galaxy-matter P(k) real-space  (NB: "mg" not "gm")
-  - pk_gg_real   : galaxy-galaxy P(k) real-space
-  - pk_mm_l0/l2/l4 : matter RSD multipoles
-  - pk_gg_l0/l2/l4 : galaxy RSD multipoles
-  - pk_mult      : raw multipole array from get_pk_mult
-  - pk_lin        : linear P(k) in (Mpc/h)^3
-  - k_h          : wavenumber grid in h/Mpc (from ept_kgrid)
-  - h, fz, z     : cosmological parameters
-  - bias_*       : bias/EFT parameters used
-
-The output filename format is classpt_z{z}_fullrange.npz, matching
-what scripts/accuracy_classpt.py loads.
-
-Usage:
-    python scripts/generate_classpt_reference.py
+Runs in the `classpt` env (Task A2) only:
+    micromamba run -n classpt env PYTHONPATH=<repo> python scripts/generate_classpt_reference.py \
+        --cosmology lcdm_fiducial --z-list 0 0.38 0.8
+Writes validation_cosmologies.reference_path(...) per z (spec §4.8) with the
+raw `get_pk_mult` rows plus every classy accessor, and asserts the NumPy twin
+(scripts/classpt_assembly.py) reproduces classy to 1e-10 on each file.
+`--legacy` regenerates the legacy fiducial (LEGACY_CLASSPT_FIDUCIAL, cb=No,
+BBN YHe) for the provenance gate (Task A4).
+`--class-extra '<JSON dict>'` is merged into the classy params dict LAST (it
+can override anything `classpt_params_from` set) and is recorded verbatim in
+the written `params_json` (Ruling 13, Task A4 fix round 1): used to probe
+CLASS-core-version drift (e.g. `N_ur`, `recombination`) against the legacy
+z=0.38 reference without touching the campaign's default-input fiducial.
 """
+from __future__ import annotations
 
 import argparse
-import os
+import hashlib
+import json
+import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Cosmological parameters — Planck 2018 best-fit LCDM (no massive neutrinos)
-# ---------------------------------------------------------------------------
+from scripts import classpt_assembly as ca
+from scripts import validation_cosmologies as vc
 
-FIDUCIAL_PARAMS = {
-    'h': 0.6736,
-    'omega_b': 0.02237,
-    'omega_cdm': 0.1200,
-    'A_s': 2.0989e-9,
-    'n_s': 0.9649,
-    'tau_reio': 0.0544,
-}
-
-OUTDIR = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
-
-# Fiducial bias / EFT parameters for galaxy reference data.
-# Set to zero (except b1, b4) for a clean baseline; non-zero values
-# can be added for richer validation.
-BIAS_PARAMS = {
-    'b1': 2.0, 'b2': 0.0, 'bG2': 0.0, 'bGamma3': 0.0,
-    'cs0': 0.0, 'cs2': 0.0, 'cs4': 0.0, 'Pshot': 0.0, 'b4': 500.0,
-    'cs': 0.0,
-}
-
-Z_VALUES = [0.38]
+CLASSPT_DIR = Path("/home/n2minh/CLASS-PT")
 
 
-# ---------------------------------------------------------------------------
-# Generation via classy (CLASS-PT)
-# ---------------------------------------------------------------------------
+def _classpt_commit() -> str:
+    return subprocess.run(["git", "-C", str(CLASSPT_DIR), "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
 
-def generate_classpt_reference():
-    """Run CLASS-PT via classy and save reference spectra."""
+
+def _patch_shas() -> dict:
+    pdir = vc.REPO_ROOT / "scripts" / "classpt_patches"
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(pdir.glob("*.patch"))}
+
+
+def _assert_close(name, a, b, rtol=1e-10):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    scale = max(np.max(np.abs(b)), 1e-300)
+    err = np.max(np.abs(a - b)) / scale
+    if not err < rtol:
+        raise AssertionError(f"ERROR twin mismatch {name}: max|twin-classy|/max|classy| = {err:.3e}")
+
+
+def run(case: str, cosmo: dict, z_list, *, ap: bool, omfid: float, cb: bool, bias_name: str,
+        yhe, use_ppf, tag: str, outdir: Path | None, class_extra: dict | None = None) -> list[Path]:
+    from classy import Class
+
+    prm = vc.classpt_params_from(cosmo, z_list=z_list, ap=ap, omfid=omfid, cb=cb, yhe=yhe, use_ppf=use_ppf)
+    if class_extra:
+        prm.update(class_extra)   # merged LAST (Ruling 13): overrides anything above,
+                                  # recorded verbatim via params_json below
+    bias = vc.BIAS if bias_name == "fiducial" else vc.BIAS_NONZERO
+    M = Class()
+    M.set(prm)
+    M.compute()
+    if not (hasattr(M, "get_ap_ratios") and hasattr(M, "get_Pd2d2_0")):
+        sys.exit("ERROR classy is unpatched: run scripts/setup_classpt_env.sh (Task A2)")
+    # classy is a Cython cdef class, so its methods take NO keyword arguments
+    # ("TypeError: Class.pk_mm_real() takes no keyword arguments"); every accessor
+    # call below is positional, in the order of its live `def` line.  Guard the one
+    # arity that silently misbinds (ref §11): the pre-A3 generator passed pk_gg_l0
+    # seven positional args, which against the live 9-arg signature (classy.pyx:4900
+    # `b1,b2,bG2,bGamma3,cs0,Pshot_nbar,a0_nbar,a2_nbar,b4`) would bind b4 to a0_nbar.
     try:
-        from classy import Class
-    except ImportError:
-        print("ERROR: classy not installed. Run: cd ~/CLASS-PT && pip install .")
-        sys.exit(1)
-
-    # Import ept_kgrid to use the same k grid as clax
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from clax.ept import ept_kgrid, EPTPrecisionParams
-        prec = EPTPrecisionParams()
-        k_h = ept_kgrid(prec)  # 256-pt, [5e-5, 100] h/Mpc
-        print(f"Using ept_kgrid: {len(k_h)} pts [{k_h.min():.2e}, {k_h.max():.2e}] h/Mpc")
-    except Exception as e:
-        print(f"WARNING: could not import ept_kgrid ({e}), using fallback grid")
-        k_h = np.logspace(np.log10(5e-5), np.log10(100.0), 256)
-
-    os.makedirs(OUTDIR, exist_ok=True)
-
-    for z in Z_VALUES:
-        print(f"\n--- Generating CLASS-PT reference at z={z} ---")
-
-        h = FIDUCIAL_PARAMS['h']
-        k_1Mpc = k_h * h  # convert to 1/Mpc for CLASS internal use
-
-        # Build CLASS parameter dict including CLASS-PT options.
-        # AP=Yes with Omfid=0.31: enables Alcock-Paczynski effect in the
-        # multipole computation. The fiducial Omega_m (Omfid) sets the
-        # reference cosmology for the AP distortion; 0.31 is a standard
-        # choice matching typical survey analyses (e.g. BOSS).
-        params = dict(FIDUCIAL_PARAMS)
-        params.update({
-            'output': 'mPk',
-            'non linear': 'PT',
-            'IR resummation': 'Yes',
-            'Bias tracers': 'Yes',
-            'RSD': 'Yes',
-            'AP': 'Yes',
-            'Omfid': '0.31',
-            'P_k_max_h/Mpc': 100.0,
-            'z_pk': z,
-        })
-
-        cosmo = Class()
-        cosmo.set(params)
-        cosmo.compute()
-
-        h_out = cosmo.h()
-        fz = cosmo.scale_independent_growth_factor_f(z)
-
-        print(f"  h = {h_out:.4f}, f(z={z}) = {fz:.6f}")
-
-        # Initialize output on the ept k grid
-        cosmo.initialize_output(k_1Mpc, z, len(k_h))
-
-        b = BIAS_PARAMS
-
-        # Raw multipole array
-        pk_mult = cosmo.get_pk_mult(k_1Mpc, z, len(k_h))
-
-        # Linear P(k) in (Mpc/h)^3
-        pk_lin = np.array([cosmo.pk_lin(ki, z) for ki in k_1Mpc]) * h_out**3
-
-        # Matter spectra
-        pk_mm_real = np.asarray(cosmo.pk_mm_real(cs=b['cs']))
-
-        # Galaxy spectra at fiducial bias
-        pk_gg_real = np.asarray(
-            cosmo.pk_gg_real(b['b1'], b['b2'], b['bG2'], b['bGamma3'],
-                             b['cs'], b['cs0'], b['Pshot'])
+        M.pk_gg_l0(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)     # legacy 7-arg form
+        bound_seven = True
+    except TypeError:
+        bound_seven = False                               # 9-arg signature, as targeted
+    except Exception:
+        bound_seven = True                                # bound 7 args, failed further in
+    if bound_seven:
+        sys.exit("ERROR classy.pk_gg_l0 accepts 7 positional args: not the 9-arg "
+                 "signature this generator targets (classy.pyx:4900)")
+    h = M.h()
+    k_h = vc.ept_kgrid_numpy()
+    k = k_h * h                                   # CLASS units for every classy call
+    n_ncdm = int(prm.get("N_ncdm", 0))
+    written = []
+    for z in z_list:
+        M.initialize_output(k, z, len(k_h))       # sets kh (h/Mpc, patched), fz, pk_mult, Pd2d2_0
+        pm = np.asarray(M.get_pk_mult(k, z, len(k_h)), dtype=float)
+        fz = float(M.scale_independent_growth_factor_f(z))
+        hratio, Dratio, growthf = M.get_ap_ratios(z)
+        Pd2d2_0 = float(M.get_Pd2d2_0())
+        pk_m_lin = np.array([M.pk_lin(ki, z) for ki in k]) * h**3
+        pk_cb_lin = np.array([M.pk_cb_lin(ki, z) for ki in k]) * h**3 if n_ncdm > 0 else None
+        pk_lin = pk_cb_lin if cb else pk_m_lin
+        b = bias
+        classy_out = {
+            # classy.pyx:4816  pk_mm_real(cs)
+            "pk_mm_real": M.pk_mm_real(b["cs"]),
+            # classy.pyx:4822  pk_gg_real(b1, b2, bG2, bGamma3, cs, cs0, Pshot)
+            "pk_gg_real": M.pk_gg_real(b["b1"], b["b2"], b["bG2"], b["bGamma3"],
+                                       b["cs"], b["cs0"], b["Pshot"]),
+            # classy.pyx:4829  pk_gm_real(b1, b2, bG2, bGamma3, cs, cs0)
+            "pk_gm_real": M.pk_gm_real(b["b1"], b["b2"], b["bG2"], b["bGamma3"],
+                                       b["cs"], b["cs0"]),
+            # classy.pyx:4881/4887/4893  pk_mm_l0(cs0) / pk_mm_l2(cs2) / pk_mm_l4(cs4)
+            "pk_mm_l0": M.pk_mm_l0(b["cs0"]),
+            "pk_mm_l2": M.pk_mm_l2(b["cs2"]),
+            "pk_mm_l4": M.pk_mm_l4(b["cs4"]),
+            # classy.pyx:4900  pk_gg_l0(b1, b2, bG2, bGamma3, cs0, Pshot_nbar, a0_nbar, a2_nbar, b4)
+            "pk_gg_l0": M.pk_gg_l0(b["b1"], b["b2"], b["bG2"], b["bGamma3"],
+                                   b["cs0"], b["Pshot"], 0.0, 0.0, b["b4"]),
+            # classy.pyx:4914  pk_gg_l2(b1, b2, bG2, bGamma3, cs2, a2_nbar, b4)
+            "pk_gg_l2": M.pk_gg_l2(b["b1"], b["b2"], b["bG2"], b["bGamma3"],
+                                   b["cs2"], 0.0, b["b4"]),
+            # classy.pyx:4925  pk_gg_l4(b1, b2, bG2, bGamma3, cs4, b4)
+            "pk_gg_l4": M.pk_gg_l4(b["b1"], b["b2"], b["bG2"], b["bGamma3"],
+                                   b["cs4"], b["b4"]),
+        }
+        classy_out = {kk: np.asarray(v, dtype=float) for kk, v in classy_out.items()}
+        # --- falsify the twin against classy on this very file ---
+        twin = ca.assemble_from_pm(pm, h, fz, k_h, bias, Pd2d2_0)
+        for kk in classy_out:
+            _assert_close(kk, twin[kk], classy_out[kk])
+        _assert_close("Pd2d2_0", ca.pd2d2_0(pm[14] * h**3, k_h), Pd2d2_0, rtol=1e-8)
+        # growthf is background_at_tau(tau_of_z) (nonlinear_pt.c:1262), fz is
+        # background_at_z (classy.pyx:2382): the same f through two interpolation paths.
+        _assert_close("growthf==fz", growthf, fz, rtol=1e-8)
+        # Magnitude-only reminder that pm[14] is the IR-resummed tree, not pk_lin:
+        # they differ by ~1-5% at the BAO scale (nonlinear_pt.c:2999, Bug #4).
+        _assert_close("pm[14]==pk_lin(IR-resummed tree differs: expect fail)", pm[14] * h**3, pk_lin, rtol=1.0)
+        if not ap:
+            _assert_close("hratio", hratio, 1.0, rtol=1e-14)
+            _assert_close("Dratio", Dratio, 1.0, rtol=1e-14)
+        path = vc.reference_path(case, z, ap=ap, omfid=omfid, cb=cb, bias=bias_name, tag=tag)
+        if outdir is not None:
+            path = Path(outdir) / path.relative_to(vc.REFERENCE_ROOT)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(
+            k_h=k_h, z=z, h=h, fz=fz, growthf=growthf,
+            D_z=float(M.scale_independent_growth_factor(z)), H_z=float(M.Hubble(z)),
+            DA_z=float(M.angular_distance(z)), rs_d=float(M.rs_drag()),   # Mpc; nonlinear_pt.c:2919 rbao
+            hratio=hratio, Dratio=Dratio, Pd2d2_0=Pd2d2_0,
+            pk_lin=pk_lin, pk_m_lin=pk_m_lin, pk_mult=pm, kh_convention="h/Mpc",
+            ap=ap, omfid=omfid, cb=cb, use_ppf=str(prm.get("use_ppf", "default")),
+            params_json=json.dumps(prm, sort_keys=True), bias_json=json.dumps(bias, sort_keys=True),
+            classpt_commit=_classpt_commit(), patches_sha256=json.dumps(_patch_shas(), sort_keys=True),
+            **classy_out,
         )
-        # NB: the CLASS-PT method is pk_gm_real, but we save as "pk_mg_real"
-        # to match the convention used by accuracy_classpt.py
-        pk_mg_real = np.asarray(
-            cosmo.pk_gm_real(b['b1'], b['b2'], b['bG2'], b['bGamma3'],
-                             b['cs'], b['cs0'])
-        )
-
-        # RSD multipoles -- matter
-        pk_mm_l0 = np.asarray(cosmo.pk_mm_l0(cs0=b['cs0']))
-        pk_mm_l2 = np.asarray(cosmo.pk_mm_l2(cs2=b['cs2']))
-        pk_mm_l4 = np.asarray(cosmo.pk_mm_l4(cs4=b['cs4']))
-
-        # RSD multipoles -- galaxy
-        pk_gg_l0 = np.asarray(
-            cosmo.pk_gg_l0(b['b1'], b['b2'], b['bG2'], b['bGamma3'],
-                           b['cs0'], b['Pshot'], b['b4'])
-        )
-        pk_gg_l2 = np.asarray(
-            cosmo.pk_gg_l2(b['b1'], b['b2'], b['bG2'], b['bGamma3'],
-                           b['cs2'], b['b4'])
-        )
-        pk_gg_l4 = np.asarray(
-            cosmo.pk_gg_l4(b['b1'], b['b2'], b['bG2'], b['bGamma3'],
-                           b['cs4'], b['b4'])
-        )
-
-        # Save with key names matching what accuracy_classpt.py reads:
-        #   - "fz" (not "f") for the growth rate
-        #   - "pk_mg_real" (not "pk_gm_real") for the galaxy-matter cross
-        #   - "pk_mult" for the raw multipole array
-        outfile = os.path.join(OUTDIR, f'classpt_z{z}_fullrange.npz')
-        np.savez(outfile,
-                 k_h=k_h, z=np.array(z), h=np.array(h_out), fz=np.array(fz),
-                 pk_lin=pk_lin,
-                 pk_mm_real=pk_mm_real,
-                 pk_gg_real=pk_gg_real,
-                 pk_mg_real=pk_mg_real,
-                 pk_mm_l0=pk_mm_l0, pk_mm_l2=pk_mm_l2, pk_mm_l4=pk_mm_l4,
-                 pk_gg_l0=pk_gg_l0, pk_gg_l2=pk_gg_l2, pk_gg_l4=pk_gg_l4,
-                 pk_mult=pk_mult,
-                 **{f'bias_{k}': v for k, v in BIAS_PARAMS.items()})
-        print(f"  Saved {outfile}")
-
-        # Quick sanity check
-        print(f"  pk_mm_real at k=0.1 h/Mpc: "
-              f"{np.interp(0.1, k_h, pk_mm_real):.2f} (Mpc/h)^3")
-
-        cosmo.struct_cleanup()
-        cosmo.empty()
-
-    print("\nDone. Reference data saved to reference_data/classpt_z*_fullrange.npz")
+        if pk_cb_lin is not None:
+            payload["pk_cb_lin"] = pk_cb_lin
+        np.savez(path, **payload)
+        print(f"wrote {path}  hratio={hratio:.6f} Dratio={Dratio:.6f} f={fz:.6f}")
+        written.append(path)
+    M.struct_cleanup()
+    M.empty()
+    return written
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--cosmology", choices=list(vc.CASES))
+    g.add_argument("--legacy", action="store_true", help="LEGACY_CLASSPT_FIDUCIAL, cb=No, BBN YHe")
+    g.add_argument("--list-distinct", action="store_true")
+    p.add_argument("--z-list", type=float, nargs="+", default=list(vc.Z_LIST))
+    p.add_argument("--ap", choices=["yes", "no"], default="yes")
+    p.add_argument("--omfid", type=float, default=vc.OMFID)
+    p.add_argument("--cb", choices=["yes", "no"], default="yes")
+    p.add_argument("--bias", choices=["fiducial", "nonzero"], default="fiducial")
+    p.add_argument("--yhe", default=str(vc.Y_HE_CLAX), help="float or 'none' (CLASS-PT BBN default)")
+    p.add_argument("--use-ppf", choices=["default", "yes", "no"], default="default")
+    p.add_argument("--tag", default="")
+    p.add_argument("--outdir", default=None)
+    p.add_argument("--class-extra", default=None,
+                    help="JSON dict merged into the classy params LAST (overrides anything); "
+                         "recorded verbatim in params_json")
+    a = p.parse_args(argv)
+    if a.list_distinct:
+        print("\n".join(vc.distinct_cases()))
+        return
+    yhe = None if a.yhe.lower() == "none" else float(a.yhe)
+    use_ppf = {"default": None, "yes": True, "no": False}[a.use_ppf]
+    class_extra = json.loads(a.class_extra) if a.class_extra else None
+    if a.legacy:
+        run("legacy_fiducial", vc.LEGACY_CLASSPT_FIDUCIAL, a.z_list, ap=a.ap == "yes", omfid=a.omfid,
+            cb=False, bias_name=a.bias, yhe=None, use_ppf=use_ppf, tag=a.tag, outdir=a.outdir,
+            class_extra=class_extra)
+    else:
+        run(a.cosmology, vc.cosmo_params(a.cosmology), a.z_list, ap=a.ap == "yes", omfid=a.omfid,
+            cb=a.cb == "yes", bias_name=a.bias, yhe=yhe, use_ppf=use_ppf, tag=a.tag, outdir=a.outdir,
+            class_extra=class_extra)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Generate CLASS-PT reference data')
-    args = parser.parse_args()
-    generate_classpt_reference()
+
+if __name__ == "__main__":
+    main()
