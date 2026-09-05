@@ -1,0 +1,98 @@
+diff --git a/source/nonlinear_pt.c b/source/nonlinear_pt.c
+index a3e606b2..a0245ee7 100644
+--- a/source/nonlinear_pt.c
++++ b/source/nonlinear_pt.c
+@@ -4563,6 +4563,93 @@ int nonlinear_pt_loop(
+             }
+             TIMER_ADD(rsd_ap);
+ 
++            /* ---- D1 DIAGNOSTIC DUMP (temporary; reverted after the D1 probe) ----
++             * Writes every kdisc-grid intermediate the RSD loop consumes and
++             * produces, so clax can be compared against CLASS-PT's own arrays
++             * rather than against the spline-interpolated pk_mult output.
++             * Enabled only when $CLAXPT_D1_DUMP is set. */
++            {
++                const char *_d1path = getenv("CLAXPT_D1_DUMP");
++                if (_d1path != NULL && _d1path[0] != '\0') {
++                    FILE *_d1 = fopen(_d1path, "w");
++                    if (_d1 != NULL) {
++                        int _ia, _ij;
++                        const char *_nm[] = {
++                            "kdisc", "Pdisc", "Pbin", "Ptree", "Pnw", "Pw",
++                            "P13", "P22", "P1loop",
++                            "P22_mu0_dd", "P22_mu2_vd", "P22_mu2_dd",
++                            "P22_mu4_vv", "P22_mu4_vd", "P22_mu4_dd",
++                            "P22_mu6_vv", "P22_mu6_vd", "P22_mu8",
++                            "P22_mu0_dd_w", "P22_mu2_vd_w", "P22_mu2_dd_w",
++                            "P22_mu4_vv_w", "P22_mu4_vd_w", "P22_mu4_dd_w",
++                            "P22_mu6_vv_w", "P22_mu6_vd_w", "P22_mu8_w",
++                            "P13_mu0_dd", "P13_mu2_dd", "P13_mu2_vd",
++                            "P13_mu4_vv", "P13_mu4_vd", "P13_mu6",
++                            "P13_mu0_dd_w", "P13_mu2_dd_w", "P13_mu2_vd_w",
++                            "P13_mu4_vv_w", "P13_mu4_vd_w", "P13_mu6_w",
++                            "P13UV_mu0_dd", "P13UV_mu2_dd", "P13UV_mu2_vd",
++                            "P13UV_mu4_vv", "P13UV_mu4_vd", "P13UV_mu6",
++                            "P1loop_0_vv", "P1loop_0_vd", "P1loop_0_dd",
++                            "P1loop_2_vv", "P1loop_2_vd", "P1loop_2_dd",
++                            "P1loop_4_vv", "P1loop_4_vd", "P1loop_4_dd",
++                            "Ptree_0_vv", "Ptree_0_vd", "Ptree_0_dd",
++                            "Ptree_2_vv", "Ptree_2_vd", "Ptree_4_vv",
++                            "P_CTR_0", "P_CTR_2", "P_CTR_4"};
++                        double *_ar[] = {
++                            kdisc, Pdisc, Pbin, Ptree, Pnw, Pw,
++                            P13, P22, P1loop,
++                            P22_mu0_dd, P22_mu2_vd, P22_mu2_dd,
++                            P22_mu4_vv, P22_mu4_vd, P22_mu4_dd,
++                            P22_mu6_vv, P22_mu6_vd, P22_mu8,
++                            P22_mu0_dd_w, P22_mu2_vd_w, P22_mu2_dd_w,
++                            P22_mu4_vv_w, P22_mu4_vd_w, P22_mu4_dd_w,
++                            P22_mu6_vv_w, P22_mu6_vd_w, P22_mu8_w,
++                            P13_mu0_dd, P13_mu2_dd, P13_mu2_vd,
++                            P13_mu4_vv, P13_mu4_vd, P13_mu6,
++                            P13_mu0_dd_w, P13_mu2_dd_w, P13_mu2_vd_w,
++                            P13_mu4_vv_w, P13_mu4_vd_w, P13_mu6_w,
++                            P13UV_mu0_dd, P13UV_mu2_dd, P13UV_mu2_vd,
++                            P13UV_mu4_vv, P13UV_mu4_vd, P13UV_mu6,
++                            P1loop_0_vv, P1loop_0_vd, P1loop_0_dd,
++                            P1loop_2_vv, P1loop_2_vd, P1loop_2_dd,
++                            P1loop_4_vv, P1loop_4_vd, P1loop_4_dd,
++                            Ptree_0_vv, Ptree_0_vd, Ptree_0_dd,
++                            Ptree_2_vv, Ptree_2_vd, Ptree_4_vv,
++                            P_CTR_0, P_CTR_2, P_CTR_4};
++                        int _na = (int)(sizeof(_ar) / sizeof(_ar[0]));
++                        fprintf(_d1, "# scalars\n");
++                        fprintf(_d1, "Nmax %d\n", Nmax);
++                        fprintf(_d1, "k_size %d\n", pnlpt->k_size);
++                        fprintf(_d1, "h %.17g\n", pba->h);
++                        fprintf(_d1, "f %.17g\n", f);
++                        fprintf(_d1, "hratio %.17g\n", hratio);
++                        fprintf(_d1, "Dratio %.17g\n", Dratio);
++                        fprintf(_d1, "sigmav %.17g\n", sigmav);
++                        fprintf(_d1, "SigmaBAO %.17g\n", SigmaBAO);
++                        fprintf(_d1, "deltaSigmaBAO %.17g\n", deltaSigmaBAO);
++                        fprintf(_d1, "cutoff %.17g\n", cutoff);
++                        fprintf(_d1, "bfft %.17g\n", b);
++                        for (_ia = 0; _ia < _na; _ia++) {
++                            fprintf(_d1, "%s", _nm[_ia]);
++                            for (_ij = 0; _ij < Nmax; _ij++)
++                                fprintf(_d1, " %.17g", _ar[_ia][_ij]);
++                            fprintf(_d1, "\n");
++                        }
++                        fprintf(_d1, "lnk_l");
++                        for (_ij = 0; _ij < pnlpt->k_size; _ij++)
++                            fprintf(_d1, " %.17g", lnk_l[_ij]);
++                        fprintf(_d1, "\n");
++                        fprintf(_d1, "lnpk_l");
++                        for (_ij = 0; _ij < pnlpt->k_size; _ij++)
++                            fprintf(_d1, " %.17g", lnpk_l[_ij]);
++                        fprintf(_d1, "\n");
++                        fclose(_d1);
++                        printf("D1 dump written to %s\n", _d1path);
++                    }
++                }
++            }
++            /* ---- end D1 DIAGNOSTIC DUMP ---- */
++
+             { void *_f[] = {
+                 dd_P13_mu4_vv, dd_P22_mu4_vv, dd_P22_mu4_vv_w, dd_P13_mu4_vv_w,
+                 dd_P13_mu6, dd_P22_mu6_vv, dd_P22_mu6_vv_w, dd_P13_mu6_w,
