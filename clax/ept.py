@@ -2551,6 +2551,88 @@ def pk_gg_l4(
 # Integration with clax pipeline
 # ---------------------------------------------------------------------------
 
+def ept_inputs_from_clax(
+    params,           # CosmoParams
+    bg,               # BackgroundResult
+    pt,               # PerturbationResult (field="cb" reads .delta_cb)
+    z: float = 0.0,
+    prec: EPTPrecisionParams = EPTPrecisionParams(),
+    *,
+    field: str = "cb",
+) -> tuple[Float[Array, "Nk"], Float[Array, ""]]:
+    """Linear P(k, z) on the EPT k-grid in (Mpc/h)^3 and the growth rate f(z).
+
+    field="cb" (default) samples ``pt.delta_cb`` -- CLASS-PT's ``cb: Yes``
+    (input.c:3952 switches the PT input from delta_m to delta_cb; spec §4.5).
+    field="m" samples ``pt.delta_m`` (``cb: No``); clax.lensing uses it
+    because the CMB-lensing nonlinear ratio is a total-matter quantity.
+
+    Args:
+        params: CosmoParams (h, primordial spectrum); h is traced throughout
+        bg:     BackgroundResult (tau(z), f(z))
+        pt:     PerturbationResult; a MatterPerturbationResult (no delta_cb)
+                is accepted only with field="m"
+        z:      target redshift (may be traced)
+        prec:   EPT precision (sets the k-grid)
+        field:  "cb" or "m"
+
+    Returns:
+        (pk_h, f): pk_h shape (prec.nmax,) in (Mpc/h)^3 on ept_kgrid(prec);
+        f = bg.f_of_loga at z (0-d).
+    """
+    from clax.primordial import primordial_scalar_pk
+    from clax.interpolation import CubicSpline as CS
+
+    if field == "cb":
+        delta = getattr(pt, "delta_cb", None)
+        if delta is None:
+            raise ValueError(
+                "field='cb' needs PerturbationResult.delta_cb (perturbations_solve); "
+                f"{type(pt).__name__} has none -- use field='m' or the full solver")
+    elif field == "m":
+        delta = pt.delta_m
+    else:
+        raise ValueError(f"field must be 'cb' or 'm', got {field!r}")
+
+    h = params.h  # traced: carries d(pk_h)/dh AND the k-resampling channel
+
+    # EPT k-grid in h/Mpc (static shape source) -> Mpc^-1, TRACED in h so
+    # the delta/primordial sampling points move with h under AD exactly
+    # as they do under finite differences (issue #30 item 4).
+    k_h = ept_kgrid(prec)              # static numpy array
+    k_mpc = jnp.asarray(k_h) * h       # traced jnp array
+
+    lnk_pt  = jnp.log(pt.k_grid)
+    lnk_out = jnp.log(jnp.array(k_mpc))
+
+    # Interpolate delta to tau(z) along the tau axis (vmap-safe; no Python
+    # branch on z), then spline along log-k onto the EPT k-grid. Beyond
+    # pt.k_grid[-1] the spline clamps to the last value (constant delta):
+    # solve with pt_k_max_cl >= 3 Mpc^-1 (the P22/P13 UV cutoff CUTOFF = 3
+    # h/Mpc) when the loop integrals matter, cf. tests/test_ept_e2e_multicosmo.py.
+    loga_z = jnp.log(1.0 / (1.0 + z))
+    tau_z = bg.tau_of_loga.evaluate(loga_z)
+    delta_at_z = jax.vmap(
+        lambda d_k: CS(pt.tau_grid, d_k).evaluate(tau_z))(delta)
+    delta_ept = CS(lnk_pt, delta_at_z).evaluate(lnk_out)
+
+    # Linear P(k) in Mpc^3: P(k) = 2 pi^2 / k^3 * P_R(k) * delta^2(k)
+    # (matches clax/transfer.py::compute_linear_matter_pk_from_perturbations)
+    k_arr = jnp.array(k_mpc)
+    prim = primordial_scalar_pk(k_arr, params)  # dimensionless P_R(k)
+    pk_mpc3 = 2.0 * jnp.pi**2 / k_arr ** 3 * prim * delta_ept ** 2
+
+    # Convert to h-units: P_h = P * h^3, k_h = k / h. This h**3 cancels
+    # exactly against 1/k_arr**3 (k_arr = k_h * h) and contributes nothing
+    # to d(pk_h)/dh; the true h-derivative is the traced k-resampling above.
+    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)^3
+
+    # Growth rate from the background solve (f = dlnD/dlna spline),
+    # z-consistent and differentiable. cf. background.py:681 (f_of_loga).
+    f = bg.f_of_loga.evaluate(loga_z)
+    return pk_h, f
+
+
 def compute_ept_from_clax(
     params,           # CosmoParams
     bg,               # BackgroundResult
@@ -2559,6 +2641,7 @@ def compute_ept_from_clax(
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     *,
     omfid: Optional[float] = None,
+    field: str = "cb",
 ) -> EPTComponents:
     """Compute EPT components from a full clax perturbation run.
 
@@ -2624,50 +2707,8 @@ def compute_ept_from_clax(
     # EPT k-grid in h/Mpc (static shape source) -> Mpc^-1, TRACED in h so
     # the delta_m/primordial sampling points move with h under AD exactly
     # as they do under finite differences.
-    k_h = ept_kgrid(prec)              # static numpy array
-    k_mpc = jnp.asarray(k_h) * h       # traced jnp array
-
-    # Get δ_m at each k, at redshift z, from perturbation result
-    # Then P_lin(k) = 2π²/k³ × A_s × (k/k_pivot)^{n_s-1} × δ_m²
-    lnk_pt  = jnp.log(pt.k_grid)
-    lnk_out = jnp.log(jnp.array(k_mpc))
-
-    # Interpolate δ_m to τ(z) along the τ axis (vmap-safe; no Python branch
-    # on z), then spline along log-k onto the EPT k-grid. At z=0 the τ
-    # interpolation evaluates at τ_0 and matches pt.delta_m[:, -1] up to
-    # spline edge effects; for z > 0 it gives the correct δ_m(k, z) so
-    # downstream loop integrals reflect the requested redshift.
-    from clax.interpolation import CubicSpline as CS
-    loga_z = jnp.log(1.0 / (1.0 + z))
-    tau_z = bg.tau_of_loga.evaluate(loga_z)
-    delta_m_at_z = jax.vmap(
-        lambda dm_k: CS(pt.tau_grid, dm_k).evaluate(tau_z))(pt.delta_m)
-    spline = CS(lnk_pt, delta_m_at_z)
-    delta_m_ept = spline.evaluate(lnk_out)
-
-    # Linear P(k) in Mpc³: P_m(k) = 2π² / k³ * P_R(k) * δ_m²(k)
-    # (matches clax/transfer.py::compute_linear_matter_pk_from_perturbations)
-    k_arr = jnp.array(k_mpc)
-    prim = primordial_scalar_pk(k_arr, params)  # dimensionless P_R(k)
-    pk_mpc3 = 2.0 * jnp.pi**2 / k_arr ** 3 * prim * delta_m_ept ** 2
-
-    # Convert to h-units: P_h = P * h³,  k_h = k / h
-    # NOTE: this explicit h**3 cancels exactly against the 1/k_arr**3
-    # prefactor in pk_mpc3 above (k_arr = k_mpc = k_h * h), so it contributes
-    # nothing to d(pk_h)/dh. The true h-derivative is carried entirely by
-    # the h-dependent k-resampling of the primordial spectrum and delta_m
-    # spline (k_mpc = k_h * h, traced above) -- which is why the pre-fix
-    # gradient (with that resampling frozen via stop_gradient) was spurious:
-    # amplitude-only, from this h**3 factor alone.
-    pk_h = pk_mpc3 * h ** 3  # (Mpc/h)³
-
-    # Growth rate from the background solve (f = dlnD/dlna spline),
-    # z-consistent and differentiable. The previous expression
-    # `float(sg(bg.Omega_m_of_z(z)))**0.55 if hasattr(...) else 0.8`
-    # ALWAYS took the fallback (BackgroundResult has no Omega_m_of_z):
-    # every multipole was computed with the literal f = 0.8 regardless
-    # of cosmology or redshift. cf. background.py:681 (f_of_loga).
-    f = bg.f_of_loga.evaluate(jnp.log(1.0 / (1.0 + z)))
+    k_h = ept_kgrid(prec)
+    pk_h, f = ept_inputs_from_clax(params, bg, pt, z, prec, field=field)
 
     # Traced IR resummation: d(pk_nw)/d(params) and d(Sigma^2)/d(params)
     # now flow (closes the 1.39% ln10A_s / 1.19% h structural residual,

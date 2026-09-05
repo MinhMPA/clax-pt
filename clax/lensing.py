@@ -290,7 +290,8 @@ def _ept_modulator(
     h = float(params.h)
 
     # --- Run EPT once at z=0 (Mpc/h units inside, convert to Mpc^-1) ---
-    ept = compute_ept_from_clax(params, bg, pt, z=0.0)
+    # total-matter field: the ratio below divides by the matter P_lin (C0)
+    ept = compute_ept_from_clax(params, bg, pt, z=0.0, field="m")
     pk_mm_h = pk_mm_real(ept)                  # (Mpc/h)^3 on EPT k-grid (h/Mpc)
     k_h = ept_kgrid()                           # h/Mpc
     k_ept_mpc = jnp.array(k_h) * h              # Mpc^-1
