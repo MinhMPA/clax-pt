@@ -187,10 +187,13 @@ def test_stage_w0wa_ppf_seam():
     """w0wa: the canonical (use_ppf=yes) file is asserted; the noppf twin is
     compared and its delta recorded (spec §9 ppf seam)."""
     case = "w0wa_m07_m10"
+    # `use_ppf` is stored as the string the generator was given ("default",
+    # "yes" or "no"), so `bool()` of it is True for every value. CLASS's
+    # default is PPF on, hence "default" counts as PPF.
     ref = cu.require_reference(case, DIAG_Z)
-    assert bool(ref["use_ppf"]) is True
+    assert str(ref["use_ppf"]) in ("default", "yes"), ref["use_ppf"]
     ref_noppf = cu.require_reference(case, DIAG_Z, tag="noppf")
-    assert bool(ref_noppf["use_ppf"]) is False
+    assert str(ref_noppf["use_ppf"]) == "no", ref_noppf["use_ppf"]
     nine_ppf, _ = _check(ref, case=case, z=DIAG_Z, tag="stage-ppf")
     e, nine_noppf = run_stage(ref_noppf, json.loads(str(ref_noppf["bias_json"])))
     delta = _windowed_rel(nine_ppf, nine_noppf, ref["k_h"])
