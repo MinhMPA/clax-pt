@@ -6,6 +6,12 @@
 Runs in either env (numpy only).  Idempotent; rerun after any regeneration.
 Skipped runs are appended from --skipped "path: reason" arguments.
 
+Only the part ABOVE the `## CLASS-PT internals dumps` heading is generated.
+That heading and everything after it is hand-maintained and carried over
+verbatim on every run. The `*_internals.npz` files it documents are C-level
+dumps without the provenance keys a campaign file carries, so they are
+skipped by name -- any OTHER file missing those keys still raises.
+
 A5 review fix round 1 (Blocking 2): every row now also carries `z_pk`
 (asserted single-valued -- Ruling 19 makes single-z provenance the
 load-bearing property of this file) and a reconstructed `invocation`: the
@@ -27,6 +33,21 @@ import numpy as np
 from scripts import validation_cosmologies as vc
 
 _USE_PPF_FLAG = {"default": None, "yes": True, "no": False}
+
+HAND_SECTION = "## CLASS-PT internals dumps"
+
+
+def _hand_maintained_tail(manifest) -> str:
+    """Everything from HAND_SECTION to the end of the existing manifest.
+
+    Empty when there is no manifest yet or it has no such section. The
+    generated part above the heading is rewritten on every run; this is not.
+    """
+    if not manifest.exists():
+        return ""
+    old = manifest.read_text()
+    i = old.find("\n" + HAND_SECTION)
+    return old[i + 1:] if i >= 0 else ""
 
 
 def _bias_flag(bias_json: dict, stem: str) -> tuple[str, bool]:
@@ -111,6 +132,8 @@ def main(argv=None):
     patch_blobs: set[str] = set()
     bias_fallback_files = []
     for path in sorted(vc.REFERENCE_ROOT.rglob("*.npz")):
+        if path.name.endswith("_internals.npz"):
+            continue    # documented by hand below HAND_SECTION; no provenance keys
         d = np.load(path)
         rel = path.relative_to(vc.REFERENCE_ROOT)
         sha = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
@@ -162,7 +185,12 @@ def main(argv=None):
                   "suffix instead.", ""]
     if a.skipped:
         lines += ["## Skipped", "", *[f"- {s}" for s in a.skipped], ""]
-    (vc.REFERENCE_ROOT / "MANIFEST.md").write_text("\n".join(lines))
+    manifest = vc.REFERENCE_ROOT / "MANIFEST.md"
+    text = "\n".join(lines)
+    tail = _hand_maintained_tail(manifest)
+    if tail:
+        text = text.rstrip("\n") + "\n\n" + tail
+    manifest.write_text(text)
     print(f"MANIFEST.md: {len(rows)} files, {len(a.skipped)} skipped")
 
 

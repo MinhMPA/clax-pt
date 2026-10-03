@@ -58,6 +58,8 @@ $GEN --cosmology lcdm_fiducial --z-list 0.38 --bias nonzero || FAILED+=("lcdm_fi
 SKIPPED=()
 $GEN --cosmology w0wa_m07_m10 --z-list 0.38 --use-ppf no --tag noppf \
   || SKIPPED+=("w0wa_m07_m10/z0.380_ap_omfid0.31_cb_noppf.npz: use_ppf=no rejected or failed (see job log)")
-python scripts/write_classpt_manifest.py --skipped "${SKIPPED[@]}"
+# No `set -e` here (a failed cosmology must not stop the rest), so the
+# manifest's own failure has to be recorded explicitly or the job exits 0.
+python scripts/write_classpt_manifest.py --skipped "${SKIPPED[@]}" || FAILED+=("manifest")
 echo "FAILED: ${FAILED[*]:-none}"
 [ ${#FAILED[@]} -eq 0 ]
