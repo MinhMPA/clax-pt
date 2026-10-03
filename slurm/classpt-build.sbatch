@@ -47,6 +47,8 @@ M.initialize_output(k, 0.38, len(k_h))
 print("ap", M.get_ap_ratios(0.38), "f", M.scale_independent_growth_factor_f(0.38), "Pd2d2_0", M.get_Pd2d2_0())
 try: M.get_ap_ratios(0.5)
 except Exception as e: print("expected error:", type(e).__name__)
+else: raise SystemExit("ERROR get_ap_ratios is unguarded: returned values at z=0.5, "
+                       "a redshift this run was never computed at")
 EOF
 
 echo "=== A2 PASS ==="
