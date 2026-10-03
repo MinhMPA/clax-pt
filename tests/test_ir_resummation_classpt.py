@@ -57,8 +57,9 @@ operator does not reproduce a constant exactly.
 
 import os
 
-os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
+# No JAX backend is chosen here: this module only exercises the NumPy splitter
+# (`_ir_resummation_numpy`). Setting JAX_PLATFORMS at import would pin every
+# later JAX test in the same pytest session to CPU without notice.
 
 import numpy as np
 import pytest
