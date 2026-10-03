@@ -312,7 +312,7 @@ def test_accessors_match_classy_twin(twin_setup, seed):
     twin = ca.assemble_from_pm(pm, h, fz, kh, bias, Pd2d2_0)
     ours = _clax_nine(e, bias)
     resid = {n: _rel(ours[n], twin[n]) for n in ours}
-    bad = {n: f"{r:.3e}" for n, r in resid.items() if r > 1e-12}
+    bad = {n: f"{r:.3e}" for n, r in resid.items() if not r <= 1e-12}   # NaN fails
     assert not bad, (f"{twin_setup['name']} seed {seed}: clax accessors vs classy "
                      f"twin: {bad}")
 
@@ -337,7 +337,7 @@ def test_pm_from_leaves_row_signs_at_alpha1(twin_setup):
     pm = _pm_from_leaves(e, h)
     rows = [r for r, _, _ in _PM_ROWS_H3 if r not in (40, 41)] + [r for r, _ in _PM_ROWS_H]
     rel = {r: _rel(pm[r][sel], stored[r][sel]) for r in sorted(rows)}
-    bad = [(r, f"{rel[r]:.3e}") for r in sorted(rel) if rel[r] > 5e-2]
+    bad = [(r, f"{rel[r]:.3e}") for r in sorted(rel) if not rel[r] <= 5e-2]   # NaN fails
     worst = max((v, r) for r, v in rel.items())
     assert not bad, (f"{twin_setup['name']}: inverse row map disagrees with the alpha=1 "
                      f"pk_mult on {bad} (sign flip reads ~2.0); worst overall "

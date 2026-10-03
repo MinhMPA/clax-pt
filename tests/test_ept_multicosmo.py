@@ -41,6 +41,25 @@ def test_rel_and_failures():
     assert lines == [f"pk_gg_l4 3.00% > 2.00% at k={errs['pk_gg_l4']['k']:.3f}"], lines
 
 
+def test_failures_reports_non_finite_errors():
+    """A NaN or inf residual must FAIL, never pass silently.
+
+    `err > threshold` is False for NaN, so a cosmology whose perturbation solve
+    returned NaN used to drop out of the sweep looking like a pass. NaN also
+    reaches `failures` through `compare_spectra` itself: `np.argmax` picks the
+    NaN entry, so one bad k-point makes the whole spectrum's error NaN.
+    """
+    k = np.logspace(np.log10(5e-5), 2, 256)
+    ref = {"pk_gg_l0": np.ones(256), "pk_gg_l2": np.ones(256)}
+    got = {"pk_gg_l0": np.ones(256), "pk_gg_l2": np.ones(256)}
+    got["pk_gg_l0"][cu.NSIDE + 3] = np.nan                     # one bad point inside the window
+    errs = cu.compare_spectra(got, ref, k)
+    errs["pk_gg_l2"]["err"] = np.inf
+    lines = cu.failures(errs, cu.THRESHOLDS)
+    assert len(lines) == 2, lines
+    assert all("non-finite" in s for s in lines), lines
+
+
 def test_log_record_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(cu, "LOG_DIR", tmp_path)
     monkeypatch.setattr(cu, "ERROR_LOG", tmp_path / "errors.jsonl")

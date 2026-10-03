@@ -93,11 +93,21 @@ def compare_rows(pm_got, pm_ref, k_h) -> list[dict]:
 
 
 def failures(errs: dict[str, dict], thresholds: dict[str, float]) -> list[str]:
-    """One greppable line per violated threshold: 'pk_gg_l4 2.31% > 2.00% at k=0.297'."""
+    """One greppable line per violated threshold: 'pk_gg_l4 2.31% > 2.00% at k=0.297'.
+
+    A non-finite error is a failure, never a pass: `err > thr` is False for
+    NaN, so testing that alone would let a cosmology whose solve returned NaN
+    drop out of the sweep looking like a success.
+    """
     out = []
     for name, rec in errs.items():
         thr = thresholds.get(name)
-        if thr is not None and rec["err"] > thr:
+        if thr is None:
+            continue
+        if not np.isfinite(rec["err"]):
+            out.append(f"{name} non-finite error ({rec['err']}) at k={rec['k']:.3f} "
+                       "-- the solve or the comparison produced NaN/inf")
+        elif rec["err"] > thr:
             out.append(f"{name} {100 * rec['err']:.2f}% > {100 * thr:.2f}% at k={rec['k']:.3f}")
     return out
 
