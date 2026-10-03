@@ -4,10 +4,15 @@ clax background -> thermodynamics -> perturbations -> compute_ept_from_clax
 seams (background, f, P_cb,lin) asserted first so a failing spectrum is
 already bisected. One perturbation solve per case (z by tau-interpolation).
 
-All tests are slow (GPU); run via slurm/ptval-track-c.sbatch or the
-campaign job slurm/ept-multicosmo-e2e.sbatch. Environment:
+All tests are slow (GPU); run via slurm/ptval-e2e-ap.sbatch. One cosmology
+costs a full perturbation solve (~48 min on a V100 at `fast`), so the full
+sweep is ~11 h serially and is normally sharded across nodes with
+PTVAL_E2E_CASES. Environment:
+  PTVAL_E2E_CASES  = a,b,...                     -- exact case names (the shard)
   PTVAL_E2E_PREC   = fast (default) | contract   -- clax precision preset
   PTVAL_E2E_SUBSET = fast                        -- FAST_CASES x FAST_Z only
+Pass PTVAL_E2E_CASES through the SUBMIT environment (`VAR=a,b sbatch
+--export=ALL ...`), never as `--export=ALL,VAR=a,b`: sbatch splits on commas.
 Multi-cosmology rule: 14 cases x 3 z (full) / 3 families x 1 z (subset).
 """
 from __future__ import annotations
