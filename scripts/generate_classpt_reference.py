@@ -4,7 +4,9 @@
 
 Runs in the `classpt` env (Task A2) only:
     micromamba run -n classpt env PYTHONPATH=<repo> python scripts/generate_classpt_reference.py \
-        --cosmology lcdm_fiducial --z-list 0 0.38 0.8
+        --cosmology lcdm_fiducial --z-list 0.38
+One redshift per run (Ruling 19): loop over z in the shell, as
+slurm/classpt-refgen.sbatch does. A combined multi-z run is refused -- see main().
 Writes validation_cosmologies.reference_path(...) per z (spec §4.8) with the
 raw `get_pk_mult` rows plus every classy accessor, and asserts the NumPy twin
 (scripts/classpt_assembly.py) reproduces classy to 1e-10 on each file.
@@ -165,7 +167,8 @@ def main(argv=None):
     g.add_argument("--cosmology", choices=list(vc.CASES))
     g.add_argument("--legacy", action="store_true", help="LEGACY_CLASSPT_FIDUCIAL, cb=No, BBN YHe")
     g.add_argument("--list-distinct", action="store_true")
-    p.add_argument("--z-list", type=float, nargs="+", default=list(vc.Z_LIST))
+    p.add_argument("--z-list", type=float, nargs="+", default=None,
+                   help="exactly ONE redshift per run (Ruling 19)")
     p.add_argument("--ap", choices=["yes", "no"], default="yes")
     p.add_argument("--omfid", type=float, default=vc.OMFID)
     p.add_argument("--cb", choices=["yes", "no"], default="yes")
@@ -181,6 +184,15 @@ def main(argv=None):
     if a.list_distinct:
         print("\n".join(vc.distinct_cases()))
         return
+    # Ruling 19: one CLASS-PT run per redshift. Combining z=0 with other
+    # redshifts in one z_pk list trips CLASS-PT's out-of-range spline
+    # (nonlinear_pt.c:1324/1829) for 6 of the 14 cosmologies, and even where it
+    # succeeds it builds a different P_L interpolation grid in ln tau than the
+    # committed single-z files, so their provenance would differ.
+    if a.z_list is None or len(a.z_list) != 1:
+        p.error("--z-list takes exactly one redshift per run (Ruling 19); "
+                "loop over z in the shell. A combined run breaks CLASS-PT for 6 of 14 "
+                "cosmologies and changes the interpolation provenance.")
     yhe = None if a.yhe.lower() == "none" else float(a.yhe)
     use_ppf = {"default": None, "yes": True, "no": False}[a.use_ppf]
     class_extra = json.loads(a.class_extra) if a.class_extra else None
