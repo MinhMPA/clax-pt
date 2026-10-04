@@ -8,6 +8,71 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Sep 6, 2026: Land the CLASS-PT validation apparatus in the fork
+
+**The clax-pt vs CLASS-PT campaign — 15 cosmologies x 3 redshifts, 42 stage
+grid points, worst residual 0.171% — existed only on an unmerged branch. It is
+now reproducible from a clone of the fork.**
+
+Ported from `campaign/clax-pt-validation` by explicit path (that branch's
+`clax/` package is an older variant and was NOT taken):
+
+- `reference_data/classpt/**` — 52 files (~12 MB): 14 distinct cosmologies x
+  z in (0, 0.38, 0.8), plus the biasnz / matter / no-AP / no-ppf / internals
+  diagnostics and the legacy AP-leaked point. Each npz carries its own
+  provenance; `MANIFEST.md` records sha256, CLASS-PT commit `09d5531a`,
+  (hratio, Dratio, f) and the exact invocation per file.
+- `scripts/validation_cosmologies.py` — single source of truth for the case
+  grid, redshifts, AP fiducial (Omfid = 0.31), bias sets and reference layout.
+  Imports in both the `clax` (JAX) and `classpt` (oracle) envs.
+- `scripts/generate_classpt_reference.py`, `classpt_assembly.py`,
+  `write_classpt_manifest.py`, `setup_classpt_env.sh`, `classpt_patches/**` —
+  the references can be regenerated, not merely trusted.
+- `slurm/**`, `docs/**` — batch wrappers and the campaign spec/plans.
+- `tests/test_ept_multicosmo.py` + `tests/ept_campaign_utils.py` — the sweep.
+  Window: grid points `[10:]` with k <= 0.3 h/Mpc. Thresholds 1% (real space,
+  l = 0/2) and 2% (l = 4); they only ever tighten.
+
+**The one substantive adaptation — the pk_mult row map is now uniformly +1.**
+The campaign stored six leaves with `nonlinear_pt.c`'s raw storage sign and
+compensated with a `-1`: `Pk_Id2d2` (row 1) and the five bG2 channels
+`Pk_0_b1bG2` (32), `Pk_0_bG2` (33), `Pk_2_b1bG2` (36), `Pk_2_bG2` (37),
+`Pk_4_bG2` (39). The released `clax.ept` stores the sign `classy.pyx`'s
+`get_pk_mult` returns — it drops the `fabs()` on `Pk_Id2d2` (`ept.py:1400`) and
+negates the five bG2 channels at the source (`ept.py:1909-1916`) — so all six
+are `+1` and no row in the 48-row map carries a flip.
+
+Measured against CLASS-PT's own alpha = 1 `pk_mult` at lcdm_fiducial z = 0.38,
+those six rows read 3.2e-04 / 5.2e-04 / 6.4e-04 / 4.9e-04 / 6.1e-04 / 5.2e-04
+with `+1`, and exactly **2.000** with the campaign's `-1`.
+`tests/test_ept_assembly.py::test_pm_from_leaves_row_signs_at_alpha1`
+re-measures every row at three cosmology families on each run (worst honest
+row 4.2e-03, row 25; threshold 5e-2).
+
+Also ported individually into `tests/test_ept_assembly.py` (the fork's copy of
+that file otherwise wins): `test_pm_row_map_is_complete_and_unique`,
+`test_pd2d2_0_matches_twin`, `test_accessors_match_classy_twin`, and a new
+`test_pm_row_map_signs_are_uniformly_plus_one`.
+
+Three further campaign modules came along because they gate the artifacts
+above: `tests/test_classpt_provenance.py` (the 52 files vs `MANIFEST.md`),
+`tests/test_classpt_assembly.py` (the NumPy twin vs the legacy npz) and
+`tests/test_ir_resummation_classpt.py` (clax's BAO splitter vs CLASS-PT's own
+`Pnw`, the only consumer of the three `*_internals.npz` dumps and a test
+`slurm/ptval-track-b-full.sbatch` already invokes).
+
+**Sweep result** (SLURM 14667, igpu02, `tests/test_ept_multicosmo.py`, full
+mode): **48 passed, 1 skipped** in 52 s. The skip is the w0wa no-ppf twin,
+whose reference file was never generated. Five worst stage residuals:
+
+| case | z | spectrum | max-rel |
+|---|---|---|---|
+| w0wa_m09_p01 | 0.80 | pk_gg_l2 | 0.171% |
+| w0wa_m07_m10 | 0.80 | pk_gg_l4 | 0.170% |
+| w0wa_m07_m10 | 0.38 | pk_gg_l2 | 0.169% |
+| w0wa_m09_p01 | 0.38 | pk_gg_l2 | 0.134% |
+| ns_high | 0.38 | pk_gg_l4 | 0.123% |
+
 ### Sep 4, 2026: Fix four bugs in the EPT quadratic-bias (b2, bG2) channels
 
 **`pk_gg_l0/l2/l4` disagreed with CLASS-PT by up to 5481% in the quadratic-bias

@@ -1,0 +1,13 @@
+diff --git a/python/classy.pyx b/python/classy.pyx
+index bc3c733e..8516a17d 100644
+--- a/python/classy.pyx
++++ b/python/classy.pyx
+@@ -4782,7 +4782,7 @@ cdef class Class:
+     # New user interface functions
+     def initialize_output(self, np.ndarray[DTYPE_t,ndim=1] k, double z, int k_size):
+         """Compute and store the various non-linear power spectrum terms that will be called in the user interface routines below."""
+-        self.kh = k
++        self.kh = k / self.ba.h
+         self.fz = self.scale_independent_growth_factor_f(z)
+         self.pk_mult = self.get_pk_mult(k, z, k_size)
+         # Precompute constant Pd2d2 contribution: integral of P_lin^2(k) k^3 d(ln k) / pi^2
