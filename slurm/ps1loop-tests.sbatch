@@ -31,5 +31,21 @@ export JAX_PLATFORMS=${JAX_PLATFORMS:-cpu}
 echo "HEAD: $(git -C "$REPO" rev-parse --short HEAD)  ps_1loop: $(git -C /home/n2minh/ps_1loop_jax-for-pfs rev-parse --short HEAD)"
 git -C "$REPO" status --porcelain | head -20
 python -c "import jax, ps_1loop_jax; print('devices', jax.devices())"
-python -m pytest ${PYTEST_ARGS:?set PYTEST_ARGS} 2>&1 | tail -n 60
-test "${PIPESTATUS[0]}" -eq 0 && echo PASS
+OUT=/lustre/work/n2minh/std/clax/ps1loop
+mkdir -p "$OUT"
+# Arguments: PYTEST_ARGS_FILE (one argument per line, lossless; written by slurm/run-ps1loop-pytest.sh)
+# or, for direct sbatch use, PYTEST_ARGS (whitespace-split, no quoting).
+if [ -n "${PYTEST_ARGS_FILE:-}" ]; then
+    mapfile -t ARGS < "$PYTEST_ARGS_FILE"
+else
+    read -r -a ARGS <<< "${PYTEST_ARGS:?set PYTEST_ARGS_FILE or PYTEST_ARGS}"
+fi
+LOG="$OUT/ps1loop-tests.pytest.${SLURM_JOB_ID:-local}.log"
+echo "pytest args: ${ARGS[*]}  (full log: $LOG)"
+set +e
+python -m pytest "${ARGS[@]}" > "$LOG" 2>&1
+rc=$?
+set -e
+tail -n 60 "$LOG"
+if [ "$rc" -eq 0 ]; then echo PASS; fi
+exit "$rc"
