@@ -164,8 +164,14 @@ def main(argv=None):
 
     if rows:
         assert len(commits) == 1, f"multiple classpt_commit values across scanned files: {commits}"
-        assert len(patch_blobs) == 1, f"multiple patches_sha256 blobs across scanned files: {patch_blobs}"
-        patches = json.loads(next(iter(patch_blobs)))
+        # Files may differ in patch set: the installed CLASS-PT build also carries the inert
+        # classpt_d1_dump.patch (no-op unless $CLAXPT_D1_DUMP is set, changes no computed
+        # value), so files generated after it landed list it. Record the union; the same
+        # patch name must never map to two different hashes.
+        patches = {}
+        for blob in sorted(patch_blobs):
+            for name, h in json.loads(blob).items():
+                assert patches.setdefault(name, h) == h, f"patch {name} has two hashes across scanned files"
     else:
         patches = {}
 
