@@ -68,6 +68,12 @@ BIAS_NONZERO = dict(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=5.0, cs2=15.0,
 
 FAST_CASES = ("lcdm_fiducial", "massive_nu_015", "w0wa_m07_m10")   # spec §4.6
 FAST_Z = 0.38
+# ps_1loop second-oracle validation (docs/superpowers/specs/2026-10-05-clax-pt-vs-ps1loop-validation-design.md §3):
+# PFS slices = midpoints of Takada et al. (2014) Table 2; IR-off CLASS-PT tie-breakers at z = 0.38.
+PFS_Z_LIST = (0.7, 0.9, 1.1, 1.3, 1.5, 1.8, 2.2)
+PFS_CASES = ("lcdm_fiducial", "omega_cdm_low", "massive_nu_015", "massive_nu_030", "w0wa_m07_m10")
+IRNO_CASES = ("lcdm_fiducial", "massive_nu_030", "w0wa_m07_m10")
+IRNO_TAG = "irno"
 
 # Exact input dict of the legacy reference_data/classpt_z0.38_fullrange.npz
 # (scripts/generate_classpt_reference.py before Task A3): no N_ncdm, no N_ur,
