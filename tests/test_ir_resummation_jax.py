@@ -93,7 +93,8 @@ def test_stage_grad_ln10A_s_matches_fd_through_traced_ir(fast_mode, request):
     """
     if fast_mode:
         pytest.skip("uses the shared full-mode pipeline fixture")
-    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
+    # z=0 EPT needs the tau0-complete matter solve (smsharma/clax#42).
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5_mpk")
 
     base = CosmoParams()
 

@@ -9,6 +9,8 @@ Provides:
 Pipeline fixtures (session-scoped, shared across test files):
     pipeline_fast_cl      — CosmoParams() + fast_cl preset
     pipeline_fast_cl_k5   — CosmoParams() + fast_cl + pt_k_max_cl=5.0
+    pipeline_fast_cl_k5_mpk — the k5 pipeline, last element the tau0-complete
+                              matter solve pt_mpk (smsharma/clax#42)
 """
 
 import json
@@ -69,6 +71,17 @@ def pipeline_fast_cl_k5():
     th = thermodynamics_solve(params, prec, bg)
     pt = perturbations_solve(params, prec, bg, th)
     return params, prec, bg, th, pt
+
+
+@pytest.fixture(scope="session")
+def pipeline_fast_cl_k5_mpk(pipeline_fast_cl_k5):
+    """The tau0-complete matter solve for the SAME params/prec/bg/th as
+    pipeline_fast_cl_k5. Use it for any P(k)/EPT lookup near z=0: the C_l
+    solve's grid stops at 0.999*tau0 (smsharma/clax#42).
+    Returns (params, prec, bg, th, pt_mpk)."""
+    from clax.perturbations import perturbations_solve_mpk
+    params, prec, bg, th, _ = pipeline_fast_cl_k5
+    return params, prec, bg, th, perturbations_solve_mpk(params, prec, bg, th)
 
 
 def pytest_addoption(parser):

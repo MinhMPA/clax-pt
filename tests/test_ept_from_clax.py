@@ -18,7 +18,7 @@ import jax.numpy as jnp
 from clax import CosmoParams, PrecisionParams
 from clax.background import background_solve, sound_horizon_drag
 from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve
+from clax.perturbations import perturbations_solve_mpk
 import clax.ept as ept_mod
 from clax.ept import (
     EPTPrecisionParams, ept_kgrid, ept_inputs_from_clax, compute_ept_from_clax,
@@ -82,7 +82,7 @@ def test_field_validation():
     pt = _synthetic_pt(bg)
     with pytest.raises(ValueError, match="field"):
         ept_inputs_from_clax(params, bg, pt, Z, field="matter")
-    # MatterPerturbationResult-like object (perturbations_solve_mpk): no delta_cb
+    # An object with no delta_cb (real MatterPerturbationResults now carry one)
     no_cb = types.SimpleNamespace(k_grid=pt.k_grid, tau_grid=pt.tau_grid, delta_m=pt.delta_m)
     with pytest.raises(ValueError, match="delta_cb"):
         ept_inputs_from_clax(params, bg, no_cb, Z, field="cb")
@@ -146,8 +146,9 @@ def test_defaults_and_lensing_field():
     assert sig.parameters["omfid"].kind is inspect.Parameter.KEYWORD_ONLY
     import clax.lensing
     src = inspect.getsource(clax.lensing)
-    assert 'compute_ept_from_clax(params, bg, pt, z=0.0, field="m")' in src, (
-        "clax.lensing must request the total-matter field explicitly: "
+    assert 'compute_ept_from_clax(params, bg, pt_mpk, z=0.0, field="m")' in src, (
+        "clax.lensing must request the total-matter field explicitly, and "
+        "the tau0-complete pt_mpk (smsharma/clax#42): "
         "the CMB-lensing nonlinear ratio is P_mm,NL / P_mm,lin")
 
 
@@ -168,7 +169,8 @@ def _solve(params):
     if key not in _SOLVES:
         bg = background_solve(params, DELTA_PREC)
         th = thermodynamics_solve(params, DELTA_PREC, bg)
-        pt = perturbations_solve(params, DELTA_PREC, bg, th)
+        # z=0 lookups need the tau0-complete matter solve (smsharma/clax#42).
+        pt = perturbations_solve_mpk(params, DELTA_PREC, bg, th)
         _SOLVES[key] = (params, bg, pt)
     return _SOLVES[key]
 

@@ -18,7 +18,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import clax
-from clax.perturbations import perturbations_solve
+from clax.perturbations import perturbations_solve, perturbations_solve_mpk
 from clax.lensing import compute_cl_pp
 from dataclasses import replace as dc_replace
 
@@ -41,19 +41,20 @@ def pipeline_results():
     bg = clax.background_solve(params, prec)
     th = clax.thermodynamics_solve(params, prec, bg)
     pt = perturbations_solve(params, prec, bg, th)
-    return params, prec, bg, th, pt
+    pt_mpk = perturbations_solve_mpk(params, prec, bg, th)   # reaches today (#42)
+    return params, prec, bg, th, pt, pt_mpk
 
 
 @pytest.fixture(scope="module")
 def cl_pp_results(pipeline_results):
     """Compute linear and Halofit C_l^pp via the public source-Limber path."""
-    params, _, bg, th, pt = pipeline_results
+    params, _, bg, th, pt, pt_mpk = pipeline_results
     l_max = 2500
 
     cl_pp_lin = np.array(compute_cl_pp(
         pt, params, bg, th, l_max=l_max, nonlinear="none"))
     cl_pp_hf = np.array(compute_cl_pp(
-        pt, params, bg, th, l_max=l_max, nonlinear="halofit"))
+        pt, params, bg, th, l_max=l_max, nonlinear="halofit", pt_mpk=pt_mpk))
 
     return cl_pp_lin, cl_pp_hf
 

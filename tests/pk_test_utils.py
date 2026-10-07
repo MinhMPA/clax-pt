@@ -109,6 +109,19 @@ PK_TABLE_GRAD_FULL_PREC = dataclass_replace(
     PK_TABLE_GRAD_FAST_PREC,
 )
 
+# Full k-table solves (perturbations_solve / perturbations_solve_mpk over every
+# k-mode) in tests. PK_FAST_PREC is built for single-k compute_pk calls; a whole
+# table at it (full 5-bin x l_max 35 ncdm hierarchy, one mode at a time) did not
+# finish one solve in 2 h on 12 CPU cores. This is fast_cl (CLASS ncdm fluid
+# approximation, batched k) with k_max = 1 Mpc^-1 and PK_FAST_PREC's ODE tolerances.
+PK_TABLE_SOLVE_PREC = dataclass_replace(
+    PrecisionParams.fast_cl(),
+    pt_k_max_cl=1.0,
+    pt_k_chunk_size=20,
+    pt_ode_rtol=1.0e-5,
+    pt_ode_atol=1.0e-10,
+)
+
 
 PK_FORWARD_FAST_K = np.array([
     1.0e-4,
