@@ -2,7 +2,11 @@
 clax background -> thermodynamics -> perturbations -> compute_ept_from_clax
 (omfid=0.31, field="cb") against CLASS-PT's nine spectra, with the spec §8
 seams (background, f, P_cb,lin) asserted first so a failing spectrum is
-already bisected. One perturbation solve per case (z by tau-interpolation).
+already bisected. One perturbation solve per case (z by tau-interpolation):
+the tau0-complete matter solve, perturbations_solve_mpk, because z=0 lies
+beyond the C_l solve's 0.999*tau0 grid and that lookup raises
+(smsharma/clax#42). The gradient test stays on the C_l solve: it evaluates at
+z=0.38, inside both grids.
 
 All tests are slow (GPU); run via slurm/ptval-e2e-ap.sbatch. One cosmology
 costs a full perturbation solve (~48 min on a V100 at `fast`), so the full
@@ -29,7 +33,7 @@ import jax.numpy as jnp
 from clax import PrecisionParams
 from clax.background import background_solve, sound_horizon_drag
 from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve
+from clax.perturbations import perturbations_solve, perturbations_solve_mpk
 from clax.ept import compute_ept_from_clax, ept_inputs_from_clax, ept_kgrid
 from clax.ap import ap_ratios
 from scripts import validation_cosmologies as vc
@@ -99,7 +103,7 @@ def pipeline(case: str):
         t0 = time.perf_counter()
         bg = background_solve(params, PREC)
         th = thermodynamics_solve(params, PREC, bg)
-        pt = perturbations_solve(params, PREC, bg, th)
+        pt = perturbations_solve_mpk(params, PREC, bg, th)   # reaches tau0 (#42)
         jax.block_until_ready(pt.delta_cb)
         secs = time.perf_counter() - t0
         print(f"[pipeline] {case} preset={PRESET_NAME} n_k={pt.k_grid.shape[0]} {secs:.0f} s")
