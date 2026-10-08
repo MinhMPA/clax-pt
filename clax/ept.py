@@ -2554,7 +2554,7 @@ def pk_gg_l4(
 def ept_inputs_from_clax(
     params,           # CosmoParams
     bg,               # BackgroundResult
-    pt,               # PerturbationResult (field="cb" reads .delta_cb)
+    pt,               # MatterPerturbationResult (perturbations_solve_mpk)
     z: float = 0.0,
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     *,
@@ -2570,8 +2570,10 @@ def ept_inputs_from_clax(
     Args:
         params: CosmoParams (h, primordial spectrum); h is traced throughout
         bg:     BackgroundResult (tau(z), f(z))
-        pt:     PerturbationResult; a MatterPerturbationResult (no delta_cb)
-                is accepted only with field="m"
+        pt:     MatterPerturbationResult from perturbations_solve_mpk (reaches
+                today; carries delta_cb and delta_m). A PerturbationResult
+                from perturbations_solve works only for z >~ 0.0032: its
+                grid stops at 0.999*tau0, and a z~0 lookup raises.
         z:      target redshift (may be traced)
         prec:   EPT precision (sets the k-grid)
         field:  "cb" or "m"
@@ -2587,8 +2589,8 @@ def ept_inputs_from_clax(
         delta = getattr(pt, "delta_cb", None)
         if delta is None:
             raise ValueError(
-                "field='cb' needs PerturbationResult.delta_cb (perturbations_solve); "
-                f"{type(pt).__name__} has none -- use field='m' or the full solver")
+                "field='cb' needs pt.delta_cb (perturbations_solve_mpk provides it); "
+                f"{type(pt).__name__} has none -- use field='m'")
     elif field == "m":
         delta = pt.delta_m
     else:
@@ -2611,7 +2613,12 @@ def ept_inputs_from_clax(
     # solve with pt_k_max_cl >= 3 Mpc^-1 (the P22/P13 UV cutoff CUTOFF = 3
     # h/Mpc) when the loop integrals matter, cf. tests/test_ept_e2e_multicosmo.py.
     loga_z = jnp.log(1.0 / (1.0 + z))
-    tau_z = bg.tau_of_loga.evaluate(loga_z)
+    # Raise, rather than let the tau spline clamp, if tau(z) is outside the
+    # solved grid: perturbations_solve stops at 0.999*tau0, so a z~0 lookup
+    # on it silently returned -0.33% in P (smsharma/clax#42).
+    from clax.perturbations import _raise_if_tau_outside_grid
+    tau_z = _raise_if_tau_outside_grid(
+        bg.tau_of_loga.evaluate(loga_z), pt.tau_grid, "ept_inputs_from_clax")
     delta_at_z = jax.vmap(
         lambda d_k: CS(pt.tau_grid, d_k).evaluate(tau_z))(delta)
     delta_ept = CS(lnk_pt, delta_at_z).evaluate(lnk_out)
@@ -2636,7 +2643,7 @@ def ept_inputs_from_clax(
 def compute_ept_from_clax(
     params,           # CosmoParams
     bg,               # BackgroundResult
-    pt,               # PerturbationResult
+    pt,               # MatterPerturbationResult (perturbations_solve_mpk)
     z: float = 0.0,
     prec: EPTPrecisionParams = EPTPrecisionParams(),
     *,
@@ -2651,7 +2658,9 @@ def compute_ept_from_clax(
     Args:
         params: CosmoParams (for h, primordial spectrum)
         bg:     BackgroundResult (for growth factor, distances)
-        pt:     PerturbationResult (for δ_m(k,τ))
+        pt:     MatterPerturbationResult from perturbations_solve_mpk. Required
+                near z=0: perturbations_solve's grid stops at 0.999*tau0 and
+                the lookup raises (smsharma/clax#42).
         z:      target redshift
         prec:   EPT precision
 
