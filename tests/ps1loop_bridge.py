@@ -42,6 +42,15 @@ STRUCTURAL_ZERO = 1e-12
 EXACT_MONOMIALS = (("1",), ("b1",), ("b1", "b1"), ("b2",), ("b1", "b2"), ("b2", "b2"),
                    ("bG2",), ("b1", "bG2"), ("bG2", "bG2"), ("b2", "bG2"),
                    ("bGamma3",), ("b1", "bGamma3"), ("P_shot",), ("a2",))
+# The six F_G2-type projections that CLASS-PT (and clax-pt, ept.py:2483-2489, 2535-2538) omit and ps_1loop
+# keeps; asserted by the closed-form closure in tests/test_ps1loop_model_difference.py (Task 5);
+# see docs/ps1loop-findings.md. (b1*bG2:l4 and b1*bGamma3:l4 would pass a 2% gate only because they
+# are small relative to their monopole, not because the codes agree.)
+C1_LINES = ("bG2:l4", "bGamma3:l4", "b1*bG2:l2", "b1*bG2:l4", "b1*bGamma3:l2", "b1*bGamma3:l4")
+# Isotropic-loop projections CLASS-PT omits (it keeps only the l=0 moment of Id2d2, IG2G2, Id2G2 in the
+# mu-loop; clax/ept.py _gl_multipoles) and ps_1loop keeps; asserted by closure in Task 5.
+LOOP_LINES = ("b2*b2:l2", "b2*b2:l4", "bG2*bG2:l2", "bG2*bG2:l4", "b2*bG2:l2", "b2*bG2:l4")
+CLOSURE_LINES = C1_LINES + LOOP_LINES
 MODEL_DIFF_MONOMIALS = (("c0",), ("c2",), ("c4",), ("cfog",), ("cfog", "b1"),
                         ("cfog", "b1", "b1"), ("a0",))
 NO_TIEBREAK = {"a0", "a2"}   # CLASS-PT's twin has no scale-dependent stochastic rows
@@ -328,7 +337,7 @@ def attribute(res, lab, i, kw, scale, thr) -> str:
     return f"vs CLASS-PT: ps {100 * e_ps:.3f}%, clax {100 * e_cl:.3f}% -> {verdict}"
 
 
-def gate(res, kw, *, channels=CHANNELS, thresholds=COEF_THRESHOLDS):
+def gate(res, kw, *, channels=CHANNELS, thresholds=COEF_THRESHOLDS, exclude=()):
     errs, lines = {}, []
     for lab, ref in res["clax"].items():
         scale = float(np.max(np.abs(ref)))
@@ -337,7 +346,7 @@ def gate(res, kw, *, channels=CHANNELS, thresholds=COEF_THRESHOLDS):
             name = f"{lab}:{ch}"
             errs[name] = e
             thr = thresholds[ch]
-            if not np.isfinite(e["err"]) or e["err"] > thr:
+            if name not in exclude and (not np.isfinite(e["err"]) or e["err"] > thr):
                 lines.append(f"ERROR {name} {e['metric']} {100 * e['err']:.3f}% > {100 * thr:.1f}% "
                              f"at k={e['k']:.3f} -- {attribute(res, lab, i, kw, scale, thr)}")
     return errs, lines
