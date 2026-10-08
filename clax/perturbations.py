@@ -553,14 +553,22 @@ class PerturbationResult:
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class MatterPerturbationResult:
-    """Reduced perturbation output for the dedicated linear-matter-power path."""
+    """Reduced perturbation output for the dedicated linear-matter-power path.
+
+    Integrated to the full conformal age (``tau_max_factor=1.0``), so its
+    ``tau_grid`` ends today -- unlike ``PerturbationResult``, whose grid stops
+    at 0.999*tau0. Use this result for any P(k) or EPT evaluation near z=0.
+    """
 
     k_grid: Float[Array, "Nk"]
     tau_grid: Float[Array, "Ntau"]
     delta_m: Float[Array, "Nk Ntau"]
+    # Baryon+CDM contrast (galaxy-clustering field, CLASS-PT `cb: Yes`).
+    # tree_unflatten is positional: keep delta_cb LAST in both orders.
+    delta_cb: Float[Array, "Nk Ntau"]
 
     def tree_flatten(self):
-        return [self.k_grid, self.tau_grid, self.delta_m], None
+        return [self.k_grid, self.tau_grid, self.delta_m, self.delta_cb], None
 
     @classmethod
     def tree_unflatten(cls, aux, fields):
@@ -1829,6 +1837,24 @@ def _extract_delta_m(
     return (rho_b * delta_b + rho_cdm * delta_cdm) / (rho_b + rho_cdm)
 
 
+def _extract_delta_cb(y, tau, bg, idx):
+    """Baryon+CDM density contrast from one perturbation state.
+
+    The galaxy-clustering field (CLASS-PT ``cb: Yes``), with the same density
+    weighting as the ``delta_cb`` source in ``_extract_sources``. It has no
+    ncdm term by construction, so it needs no ncdm quadrature arguments.
+    """
+    loga = bg.loga_of_tau.evaluate(tau)
+    rho_b = bg.rho_b_of_loga.evaluate(loga)
+    rho_cdm = bg.rho_cdm_of_loga.evaluate(loga)
+    # delta_cb = (rho_b delta_b + rho_cdm delta_cdm)/(rho_b + rho_cdm), cf.
+    # perturbations.c:7039 (perturbations_total_stress_energy, `delta_cb =
+    # delta_rho_m/rho_m` before the ncdm term is added; delta_rho_m and rho_m
+    # accumulate b at :6939-6940 and cdm at :6956-6957). Line numbers read in
+    # the CLASS-PT tree (_VERSION_ v3.3.4); stock class_public-3.3.4 not rechecked.
+    return (rho_b * y[idx["delta_b"]] + rho_cdm * y[idx["delta_cdm"]]) / (rho_b + rho_cdm)
+
+
 # ---------------------------------------------------------------------------
 # Grid construction
 # ---------------------------------------------------------------------------
@@ -1984,7 +2010,7 @@ def _pt_auto_batch_mode_cap(*, platform: str, solve_kind: str) -> int:
 def _pt_saved_output_count(*, solve_kind: str) -> int:
     """Return the number of saved arrays materialized per ``(k, tau)`` sample."""
     if solve_kind == "mpk":
-        return 1
+        return 2  # delta_m + delta_cb
     if solve_kind == "full":
         return 14  # 13 source arrays + delta_cb (see _extract_sources)
     raise ValueError(f"Unknown perturbation solve kind: {solve_kind}")
@@ -2077,6 +2103,11 @@ def _raise_if_diverged(x, label):
     for the batched table paths) — the predicate is reduced with ``jnp.any``
     so a single bad entry anywhere in the array raises.
 
+    ``x`` may also be a pytree of arrays, e.g. the ``(delta_m, delta_cb)``
+    pair of the matter-power solve: every leaf is tested and one bad entry in
+    any leaf raises. For a single array this is the same predicate as before,
+    so the single-array call sites are unchanged.
+
     Used at all 3 divergence-guard call sites (single-k
     ``_matter_delta_m_single_k_impl``, batched ``_solve_mpk_batched_rosenbrock``,
     and the table-assembly ``_perturbations_solve_mpk_impl``) so that deleting
@@ -2084,12 +2115,44 @@ def _raise_if_diverged(x, label):
     that ``tests/test_divergence_guard.py`` can exercise the real guard
     instead of a re-implemented mirror of its predicate.
     """
+    bad = jnp.zeros((), dtype=bool)
+    for leaf in jax.tree_util.tree_leaves(x):
+        bad = bad | jnp.any(~jnp.isfinite(leaf) | (jnp.abs(leaf) > 1e20))
     return eqx.error_if(
         x,
-        jnp.any(~jnp.isfinite(x) | (jnp.abs(x) > 1e20)),
+        bad,
         f"{label}: perturbation solve diverged for at least one entry "
         "(|delta_m|>1e20 or non-finite) — likely a TCA-transition "
         "instability; see project memory.",
+    )
+
+
+def _raise_if_tau_outside_grid(tau_z, tau_grid, label):
+    """AD-safe/jit-safe guard for a tau(z) lookup on a perturbation result.
+
+    ``perturbations_solve`` (the C_l solve) integrates only to
+    ``0.999 * bg.conformal_age``, while ``clax.interpolation.CubicSpline``
+    clamps out-of-range evaluations. A z~0 lookup on that result therefore
+    used to return delta from z~0.003 silently: -0.33% in P(k) at z=0
+    (smsharma/clax#42; the same 14-Mpc effect commit 18fd88d fixed for the
+    matter-power paths in May 2026). This raises instead.
+
+    Tolerance 1e-8 relative: the truncation gap is 1e-3 relative and node
+    round-off ~1e-15, so it can neither miss the gap nor fire on a
+    tau0-complete result. ``tau_z`` may be a scalar or a vector (vmapped
+    z-grids); the predicate is reduced with ``jnp.any``. Mirrors
+    ``_raise_if_diverged``: returns ``tau_z`` unchanged; jvp/grad pass
+    through.
+    """
+    lo = tau_grid[0] * (1.0 - 1e-8)
+    hi = tau_grid[-1] * (1.0 + 1e-8)
+    return eqx.error_if(
+        tau_z,
+        jnp.any((tau_z < lo) | (tau_z > hi)),
+        f"{label}: tau(z) lies outside the perturbation tau_grid, so the lookup "
+        "would silently clamp -- perturbations_solve stops at 0.999*tau0 "
+        "(~14 Mpc before today). For P(k) or EPT near z=0 use "
+        "perturbations_solve_mpk.",
     )
 
 
@@ -2297,19 +2360,19 @@ def _solve_mpk_batched_rosenbrock(
             args=(f_single, k_batch),
         )
         # sol.ys: (n_tau, batch_size, n_eq)
-        # Extract delta_m for each (tau, k) pair.
+        # Extract (delta_m, delta_cb) for each (tau, k) pair.
         def extract_at_tau(i):
-            return jax.vmap(
-                lambda y_single, ki: _extract_delta_m(
+            def both(y_single, ki):
+                dm = _extract_delta_m(
                     y_single, ki, tau_grid[i], bg, idx,
                     q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
                     ncdmfa_mode_code=ncdmfa_mode_code,
                     ncdmfa_trigger=ncdmfa_trigger,
-                ),
-                in_axes=(0, 0),
-            )(sol.ys[i], k_batch)
+                )
+                return dm, _extract_delta_cb(y_single, tau_grid[i], bg, idx)
+            return jax.vmap(both, in_axes=(0, 0))(sol.ys[i], k_batch)
 
-        return jax.vmap(extract_at_tau)(jnp.arange(n_tau))  # (n_tau, batch_size)
+        return jax.vmap(extract_at_tau)(jnp.arange(n_tau))  # pair, each (n_tau, batch_size)
 
     # Pad to full chunks to avoid recompilation for the tail.
     n_tail = n_k % batch_size
@@ -2317,21 +2380,24 @@ def _solve_mpk_batched_rosenbrock(
     k_padded = jnp.concatenate([k_grid, jnp.full(pad_size, k_grid[-1])])
     k_chunks = k_padded.reshape(-1, batch_size)  # (n_chunks, batch_size)
 
-    # solve_batch returns (n_tau, batch_size);
-    # lax.map stacks to (n_chunks, n_tau, batch_size).
-    all_delta_m = jax.lax.map(solve_batch, k_chunks)
-    # Reshape to (n_k, n_tau) matching the unbatched path.
-    all_delta_m = jnp.transpose(all_delta_m, (0, 2, 1))   # (n_chunks, batch_size, n_tau)
-    all_delta_m = all_delta_m.reshape(-1, n_tau)[:n_k]     # (n_k, n_tau)
+    def _to_k_tau(a):
+        # lax.map stacks to (n_chunks, n_tau, batch_size) -> (n_k, n_tau)
+        a = jnp.transpose(a, (0, 2, 1))
+        return a.reshape(-1, n_tau)[:n_k]
+
+    all_delta_m, all_delta_cb = jax.lax.map(solve_batch, k_chunks)
+    all_delta_m, all_delta_cb = _to_k_tau(all_delta_m), _to_k_tau(all_delta_cb)
 
     # Latent-correctness guard (see _raise_if_diverged for the full
     # rationale): the batched Rosenbrock path feeds compute_pk_table /
     # compute_pk_interpolator via the *filtered*-norm step-size controller,
     # which is exactly the controller observed to report a diverged solve
-    # (P(k) ~ 1e98 from the TCA-transition instability) as "success". Guard
-    # the whole array once here rather than let the silent garbage propagate.
-    all_delta_m = _raise_if_diverged(all_delta_m, "_solve_mpk_batched_rosenbrock")
-    return all_delta_m
+    # (P(k) ~ 1e98 from the TCA-transition instability) as "success". Both
+    # arrays go through ONE call (tests/test_divergence_guard.py pins the
+    # module's call count).
+    all_delta_m, all_delta_cb = _raise_if_diverged(
+        (all_delta_m, all_delta_cb), "_solve_mpk_batched_rosenbrock")
+    return all_delta_m, all_delta_cb
 
 
 def _perturbations_solve_mpk_impl(
@@ -2360,12 +2426,13 @@ def _perturbations_solve_mpk_impl(
                     q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm)
 
         def save_delta_m(tau_i, y_i, args_unused):
-            return _extract_delta_m(
+            dm = _extract_delta_m(
                 y_i, k, tau_i, bg, idx,
                 q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
                 ncdmfa_mode_code=ncdmfa_mode_code,
                 ncdmfa_trigger=ncdmfa_trigger,
             )
+            return dm, _extract_delta_cb(y_i, tau_i, bg, idx)
 
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(_perturbation_rhs),
@@ -2395,14 +2462,14 @@ def _perturbations_solve_mpk_impl(
     )
 
     if prec.pt_ode_solver in ("rodas5", "rosenbrock", "rosenbrock_batched"):
-        all_delta_m = _solve_mpk_batched_rosenbrock(
+        all_delta_m, all_delta_cb = _solve_mpk_batched_rosenbrock(
             k_grid, batch_size, tau_ini, tau_max, tau_grid, n_tau, n_eq,
             bg, th, params, prec, idx, pid_config, args_ncdm,
             l_max_g, l_max_pol, l_max_ur,
             ncdmfa_mode_code, ncdmfa_trigger,
         )
     else:
-        all_delta_m = _solve_k_modes_batched(solve_single_k, k_grid, batch_size)
+        all_delta_m, all_delta_cb = _solve_k_modes_batched(solve_single_k, k_grid, batch_size)
 
     # Latent-correctness guard (see _raise_if_diverged for the full
     # rationale). This is the production entry point behind compute_pk_table
@@ -2414,9 +2481,12 @@ def _perturbations_solve_mpk_impl(
     # _solve_mpk_batched_rosenbrock when that path is taken — kept so each
     # function is independently unit-testable and a guard removed from one
     # site does not silently lose all coverage.)
-    all_delta_m = _raise_if_diverged(all_delta_m, "_perturbations_solve_mpk_impl")
+    # Both arrays in ONE call: tests/test_divergence_guard.py pins the count.
+    all_delta_m, all_delta_cb = _raise_if_diverged(
+        (all_delta_m, all_delta_cb), "_perturbations_solve_mpk_impl")
 
-    return MatterPerturbationResult(k_grid=k_grid, tau_grid=tau_grid, delta_m=all_delta_m)
+    return MatterPerturbationResult(k_grid=k_grid, tau_grid=tau_grid,
+                                    delta_m=all_delta_m, delta_cb=all_delta_cb)
 
 
 _perturbations_solve_mpk_impl = functools.partial(jax.jit, static_argnums=(1, 4))(

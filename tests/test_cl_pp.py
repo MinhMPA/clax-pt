@@ -31,7 +31,7 @@ def pipeline():
     from clax import CosmoParams, PrecisionParams
     from clax.background import background_solve
     from clax.thermodynamics import thermodynamics_solve
-    from clax.perturbations import perturbations_solve
+    from clax.perturbations import perturbations_solve, perturbations_solve_mpk
 
     prec = _replace(PrecisionParams.fast_cl(),
                     pt_k_max_cl=5.0,
@@ -40,7 +40,8 @@ def pipeline():
     bg = background_solve(params, prec)
     th = thermodynamics_solve(params, prec, bg)
     pt = perturbations_solve(params, prec, bg, th)
-    return params, bg, th, pt
+    pt_mpk = perturbations_solve_mpk(params, prec, bg, th)   # reaches today (#42)
+    return params, bg, th, pt, pt_mpk
 
 
 @pytest.fixture(scope="module")
@@ -79,7 +80,7 @@ class TestContract:
     def test_returns_correct_shape(self, pipeline):
         """Returns array of shape ``(l_max+1,)`` with l=0,1 zeroed."""
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         cl = compute_cl_pp(pt, params, bg, th, l_max=100)
         assert cl.shape == (101,), f"expected (101,), got {cl.shape}"
         assert float(cl[0]) == 0.0
@@ -89,15 +90,15 @@ class TestContract:
     def test_unknown_nonlinear_raises(self, pipeline):
         """Unknown ``nonlinear`` value is rejected with ValueError."""
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         with pytest.raises(ValueError, match="unknown nonlinear"):
             compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="bogus")
 
     def test_ept_accepted(self, pipeline):
         """``nonlinear='ept'`` is now an accepted value (no ValueError)."""
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
-        cl = compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="ept")
+        params, bg, th, pt, pt_mpk = pipeline
+        cl = compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="ept", pt_mpk=pt_mpk)
         assert cl.shape == (11,)
         assert float(cl[2]) > 0
 
@@ -112,7 +113,7 @@ class TestLinearAccuracy:
     def test_matches_class_at_low_l(self, pipeline, class_reference_linear):
         """Matches CLASS to <3% for l in {100, 200, 500}."""
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         cl = np.array(compute_cl_pp(pt, params, bg, th, l_max=500))
 
         for l in [100, 200, 500]:
@@ -124,7 +125,7 @@ class TestLinearAccuracy:
     def test_matches_class_at_medium_l(self, pipeline, class_reference_linear):
         """Matches CLASS to <5% for l = 1000."""
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         cl = np.array(compute_cl_pp(pt, params, bg, th, l_max=1000))
 
         ratio = cl[1000] / class_reference_linear[1000]
@@ -153,7 +154,7 @@ class TestCrossImplAgreement:
         """``compute_cl_pp(nonlinear="none")`` matches the full-Bessel oracle
         at low l where the oracle's upward Bessel recurrence is stable."""
         from clax.lensing import compute_cl_pp, _compute_cl_pp_full_bessel
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
 
         l_probe = jnp.array([10, 20, 50, 100], dtype=jnp.float64)
 
@@ -184,11 +185,11 @@ class TestHalofit:
     @pytest.fixture(scope="class")
     def cl_pair(self, pipeline):
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         cl_lin = np.array(compute_cl_pp(pt, params, bg, th, l_max=2000,
                                          nonlinear="none"))
         cl_nl = np.array(compute_cl_pp(pt, params, bg, th, l_max=2000,
-                                        nonlinear="halofit"))
+                                        nonlinear="halofit", pt_mpk=pt_mpk))
         return cl_lin, cl_nl
 
     def test_positive(self, cl_pair):
@@ -231,11 +232,11 @@ class TestEPT:
     @pytest.fixture(scope="class")
     def cl_pair(self, pipeline):
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         cl_lin = np.array(compute_cl_pp(pt, params, bg, th, l_max=2000,
                                          nonlinear="none"))
         cl_nl = np.array(compute_cl_pp(pt, params, bg, th, l_max=2000,
-                                        nonlinear="ept"))
+                                        nonlinear="ept", pt_mpk=pt_mpk))
         return cl_lin, cl_nl
 
     def test_positive(self, cl_pair):
@@ -276,7 +277,7 @@ class TestJaxCompat:
     def test_jit_compatible(self, pipeline):
         """Function compiles under ``jax.jit``."""
         from clax.lensing import compute_cl_pp
-        params, bg, th, pt = pipeline
+        params, bg, th, pt, pt_mpk = pipeline
         cl_jit = jax.jit(
             compute_cl_pp, static_argnums=(4,), static_argnames=("nonlinear",)
         )(pt, params, bg, th, 50)
@@ -286,7 +287,7 @@ class TestJaxCompat:
     def test_grad_wrt_ln10As(self, pipeline):
         """``jax.grad`` through ``ln10A_s`` gives a finite, nonzero gradient."""
         from clax.lensing import compute_cl_pp
-        _, bg, th, pt = pipeline
+        _, bg, th, pt, _ = pipeline
 
         def objective(params):
             cl = compute_cl_pp(pt, params, bg, th, l_max=30)
@@ -299,3 +300,70 @@ class TestJaxCompat:
         print(f"  d(sum Cl)/d(ln10As) = {g_As:.6e}")
         assert jnp.isfinite(g_As), f"gradient is not finite: {g_As}"
         assert abs(g_As) > 0, "gradient is zero"
+
+
+# -----------------------------------------------------------------------------
+# pt_mpk plumbing (smsharma/clax#42)
+# -----------------------------------------------------------------------------
+
+class TestPtMpk:
+    """compute_cl_pp's nonlinear corrections read P_lin at z~0, so they need
+    the tau0-complete matter solve (smsharma/clax#42).
+
+    These are cosmology-independent plumbing tests (wiring, raises,
+    bit-identity), exempt from the multi-cosmology rule."""
+
+    @pytest.mark.parametrize("nl", ["halofit", "ept"])
+    def test_nonlinear_without_pt_mpk_raises(self, pipeline, nl):
+        from clax.lensing import compute_cl_pp
+        params, bg, th, pt, _ = pipeline
+        with pytest.raises(ValueError, match="pt_mpk"):
+            compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear=nl)
+
+    def test_linear_ignores_pt_mpk_bit_identically(self, pipeline):
+        from clax.lensing import compute_cl_pp
+        params, bg, th, pt, pt_mpk = pipeline
+        a = np.asarray(compute_cl_pp(pt, params, bg, th, l_max=100))
+        b = np.asarray(compute_cl_pp(pt, params, bg, th, l_max=100, pt_mpk=pt_mpk))
+        assert np.array_equal(a, b)
+
+    def test_both_ept_ratio_sides_read_pt_mpk(self, pipeline, monkeypatch):
+        """Wiring: the P_NL numerator AND the P_lin denominator of the EPT
+        correction both come from pt_mpk. A half migration puts the numerator
+        and denominator on different solves, so the old second-order residual
+        becomes first order."""
+        import clax.ept
+        import clax.transfer
+        from clax.lensing import compute_cl_pp
+        params, bg, th, pt, pt_mpk = pipeline
+        seen = []
+        real_ept = clax.ept.compute_ept_from_clax
+        real_lin = clax.transfer.compute_linear_matter_pk_from_perturbations
+
+        def spy_ept(params_, bg_, pt_, *a, **k):
+            seen.append(("ept", pt_ is pt_mpk))
+            return real_ept(params_, bg_, pt_, *a, **k)
+
+        def spy_lin(pt_, *a, **k):
+            seen.append(("lin", pt_ is pt_mpk))
+            return real_lin(pt_, *a, **k)
+
+        monkeypatch.setattr(clax.ept, "compute_ept_from_clax", spy_ept)
+        monkeypatch.setattr(clax.transfer, "compute_linear_matter_pk_from_perturbations", spy_lin)
+        compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="ept", pt_mpk=pt_mpk)
+        assert ("ept", True) in seen and ("lin", True) in seen, seen
+        assert all(ok for _, ok in seen), seen
+
+    def test_pt_mpk_with_narrower_k_range_raises(self, pipeline):
+        """A pt_mpk solved at another precision must not silently misalign:
+        P_lin is evaluated at explicit k, and k outside pt_mpk's support is
+        rejected."""
+        from dataclasses import replace
+        from clax import PrecisionParams
+        from clax.lensing import compute_cl_pp
+        from clax.perturbations import perturbations_solve_mpk
+        params, bg, th, pt, _ = pipeline
+        narrow = replace(PrecisionParams.fast_cl(), pt_k_max_cl=1.0, pt_k_chunk_size=20)
+        pt_narrow = perturbations_solve_mpk(params, narrow, bg, th)
+        with pytest.raises(ValueError, match="solved perturbation grid"):
+            compute_cl_pp(pt, params, bg, th, l_max=10, nonlinear="halofit", pt_mpk=pt_narrow)

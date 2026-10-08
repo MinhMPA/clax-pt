@@ -495,12 +495,14 @@ def test_grad_pk_gg_l2_wrt_b1(ept_setup):
 #
 # Test 9/10 hold background+perturbations FIXED and vary only ln10A_s, which
 # only rescales the primordial amplitude downstream of the (already-solved)
-# perturbation ODE -- cheap, and isolates the
-# CosmoParams -> primordial P_R(k) -> compute_ept chain. They reuse the
-# session-scoped ``pipeline_fast_cl_k5`` fixture (tests/conftest.py),
-# already computed elsewhere in the suite (test_cl_pp_source_limber,
-# test_clpp_limber_accuracy, test_lensing_nonlinear, test_clpp_halofit_ratio),
-# so they add no meaningful extra cost.
+# perturbation ODE -- cheap once the solve exists, and isolates the
+# CosmoParams -> primordial P_R(k) -> compute_ept chain. They use the
+# session-scoped ``pipeline_fast_cl_k5_mpk`` fixture (tests/conftest.py): the
+# tau0-complete matter solve for the same params/prec/bg/th as
+# ``pipeline_fast_cl_k5``. The C_l solve's tau grid stops at 0.999*tau0, so a
+# z=0 lookup on it reads z~0.003 (smsharma/clax#42). The fixture costs one
+# matter solve per session, shared with test_ept_h_channels.py and
+# test_ir_resummation_jax.py.
 #
 # Test 11 re-solves background -> thermodynamics -> perturbations for every
 # probed ``h`` -- the genuinely full CosmoParams-to-EPT chain, including the
@@ -538,10 +540,11 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
     finite differences to within a documented, measured, structural bound
     (NOT the project's usual <1% -- see FINDING below).
 
-    Skips under --fast: nothing else in the current suite actually consumes
-    the shared ``pipeline_fast_cl_k5`` fixture (module-scoped, k_max=5.0,
-    ~85 k-modes), so requesting it here would be a full extra perturbation
-    solve added to every --fast run. Fetched lazily via
+    Skips under --fast: the session-scoped ``pipeline_fast_cl_k5_mpk``
+    fixture (k_max=5.0, ~85 k-modes) is built on first use, and building it
+    runs two perturbation solves (the C_l solve ``pipeline_fast_cl_k5`` it is
+    derived from, then the matter solve), which would be added to every
+    --fast run. Fetched lazily via
     ``request.getfixturevalue`` (after the skip check) rather than as a
     normal fixture parameter, since pytest resolves fixture parameters
     before the test body -- and before the skip -- runs.
@@ -556,39 +559,48 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
     differentiable JAX one, so ``pk_nw`` now carries a gradient too and the
     dropped term is closed by construction -- not by a fudge factor.
 
-    Measured (GPU job 14146, full validation suite on
-    fix/ir-resummation-traced @ 322a6ab): AD=1.322286e+06, FD=1.322286e+06,
+    Measured THEN (GPU-allocated job 14146 -- actual JAX platform
+    unverified: this file's import-time CPU pin -- C_l solve, full validation
+    suite on fix/ir-resummation-traced @ 322a6ab): AD=1.322286e+06, FD=1.322286e+06,
     rel_err=1.8231e-07 -- ~76,000x smaller than the pre-closure 1.39%
     (0.0139 / 1.8231e-07 ~= 76,244), and
     consistent with plain central-FD truncation noise (eps=1e-3) rather than
-    a remaining structural gap. This test's frozen-bg/pt setup
-    (``pipeline_fast_cl_k5`` fixture, no perturbation re-solve) also means
+    a remaining structural gap. Re-measured NOW on the tau0-complete matter
+    solve (CPU job 21739): AD=1.333357e+06, FD=1.333358e+06,
+    rel_err=1.8255e-07 -- the same relative figure to 0.13%. This test's
+    frozen-bg/pt setup (``pipeline_fast_cl_k5_mpk`` fixture, no perturbation
+    re-solve) also means
     ``pk_mm_real`` -- the real-space, non-RSD matter power spectrum --
     never touches the RSD-basis freeze still deferred elsewhere in
     ``compute_ept_from_clax`` (that freeze only matters for redshift-space
     multipoles), so this particular test path has no other residual channel
     left to show. Contrast the ``h`` end-to-end test below, which re-solves
     the full background/thermodynamics/perturbations pipeline per probed
-    ``h`` and picks up real discretization noise from those re-solves on
-    top of any remaining channel -- its residual did not collapse the same
-    way. The bound below (4e-7) is 2x the measured 1.8231e-07
+    ``h``; its job-14146 residual (1.38%) did not collapse with the traced
+    splitter, and is of the size of the CPU/GPU spread of the AD gradient
+    measured on identical code (see OBSERVED AD SPREAD in that test's
+    docstring). The bound below (4e-7) is 2x the job-14146 1.8231e-07
     (=3.6462e-07), rounded up to one significant figure -- never tighter
     than 2x measured, per this branch's ratchet rule, and confirmed green
-    on a second independent GPU run (see CHANGELOG for the confirm job ID).
+    on a second independent GPU-allocated run (see CHANGELOG for the confirm
+    job ID). 2x the matter-solve 1.8255e-07 (=3.651e-07) rounds up to the
+    same 4e-7.
 
     Headroom note: 4e-7 is a THIN margin in absolute terms -- only ~2.2x
-    the single measured 1.8231e-07 (2x exactly would be 3.6462e-07; 4e-7 is
+    the measured 1.8231e-07 and ~2.2x the matter-solve 1.8255e-07 (2x
+    exactly would be 3.6462e-07 / 3.651e-07; 4e-7 is
     the next value with one significant figure at or above that, per the
     ratchet rule's mechanical rounding, not a deliberately generous
-    margin). Accepted by the controller because the measurement reproduced
-    bit-for-bit identically across two independent GPU runs (jobs 14146 and
-    14147) -- this residual is FD-truncation noise from a fixed eps=1e-3,
-    not floating-point summation-order variance, so it is expected to be
-    stable run-to-run rather than a source of flakiness.
+    margin). Accepted by the controller because the job-14146 measurement
+    reproduced bit-for-bit identically across two independent GPU-allocated
+    runs (jobs 14146 and 14147) -- this residual is FD-truncation noise from a fixed
+    eps=1e-3, not floating-point summation-order variance, so it is expected
+    to be stable run-to-run rather than a source of flakiness.
     """
     if fast_mode:
         pytest.skip("full k_max=5.0 perturbation solve fixture -- full mode only")
-    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
+    # z=0 EPT needs the tau0-complete matter solve (smsharma/clax#42).
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5_mpk")
     f = _make_f_from_cosmoparams(bg, pt, "ln10A_s")
     x0 = float(params.ln10A_s)
 
@@ -604,7 +616,8 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
           f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
 
     # 4e-7 = 2x the measured 1.8231e-07 (job 14146), rounded up to one
-    # significant figure -- never tighter than 2x measured. See FINDING in
+    # significant figure -- never tighter than 2x measured (2x the matter-solve
+    # 1.8255e-07 of CPU job 21739 rounds to the same 4e-7). See FINDING in
     # the docstring: the traced IR-resummation splitter closes the
     # frozen-pk_nw gap that produced the old 1.39% (job 13132); the residual
     # here is FD-truncation noise, not a structural gap.
@@ -627,12 +640,13 @@ def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(fast_mode, request):
     (see ``tests/test_pk_forward_mode.py``), this jvp needs no
     ``ode_adjoint="direct"`` escape hatch.
 
-    Skips under --fast for the same reason as the AD-vs-FD test above (the
-    shared ``pipeline_fast_cl_k5`` fixture is otherwise unused right now).
+    Skips under --fast for the same reason as the AD-vs-FD test above (it
+    would build the session-scoped ``pipeline_fast_cl_k5_mpk`` fixture).
     """
     if fast_mode:
         pytest.skip("full k_max=5.0 perturbation solve fixture -- full mode only")
-    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
+    # z=0 EPT needs the tau0-complete matter solve (smsharma/clax#42).
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5_mpk")
     f = _make_f_from_cosmoparams(bg, pt, "ln10A_s")
     x0 = float(params.ln10A_s)
 
@@ -657,15 +671,21 @@ def test_jvp_equals_vjp_from_cosmoparams_ln10A_s(fast_mode, request):
 # test now passes with JAX_CHECK_TRACER_LEAKS=1 armed (GPU job 13207).
 def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     """d(sum(pk_mm_real))/dh, fully re-solved (background -> thermodynamics
-    -> perturbations -> compute_ept_from_clax) for every probed ``h`` --
-    the genuine CosmoParams-to-EPT coverage gap this module closes.
+    -> matter perturbations -> compute_ept_from_clax) for every probed ``h``
+    -- the genuine CosmoParams-to-EPT coverage gap this module closes.
 
     Heavy: 3 full perturbation solves (AD + FD+ + FD-) at the same
-    fast_cl(k_max=5.0) precision as the shared ``pipeline_fast_cl_k5``
-    fixture, so full mode only.
+    fast_cl(k_max=5.0) precision as the session-scoped
+    ``pipeline_fast_cl_k5`` / ``pipeline_fast_cl_k5_mpk`` fixtures, so full
+    mode only. The solve is ``perturbations_solve_mpk`` (it reaches
+    tau0 exactly), not the C_l solve ``perturbations_solve`` (a z=0 lookup on
+    its grid reads z~0.003; smsharma/clax#42). See OBSERVED AD SPREAD below
+    for the measured spread of this gradient.
 
-    FINDING (traced IR-resummation splitter closure; bound UNCHANGED --
-    measurement does not support tightening below the existing 0.03): the
+    HISTORY (traced IR-resummation splitter closure; figures in this
+    paragraph and the next two are as measured THEN, on the C_l solve, in
+    GPU-allocated jobs 14140/14146 -- actual JAX platform unverified: this
+    file's import-time CPU pin): the
     k_mpc-channel fix (commit 8bd9cdb, pre-this-branch) traced
     ``k_mpc = k_h * h`` through ``h``, closing the resampling channel that
     job 13313 attributed -9.48e4 of the stage gradient to. This branch
@@ -675,60 +695,85 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     FINDING above, which collapsed 1.39% -> 1.8231e-07 for that parameter).
 
     For ``h``, though, closing that same channel did NOT collapse the
-    residual the same way: a GPU run (job 14146, full validation suite on
+    residual the same way: GPU-allocated job 14146 (full validation suite on
     fix/ir-resummation-traced @ 322a6ab) measured AD=4.046783e6 vs
     FD=3.991575e6, rel_err=1.3831e-02 (1.38%) -- essentially unchanged from,
     and marginally above, the pre-closure job-14140 measurement of 1.1924e-02
-    (1.19%) that set the current 0.03 bound. This measured non-closure
-    FALSIFIES the "same frozen-pk_nw class as ln10A_s" attribution: ln10A_s
-    -- same observable (``pk_mm_real``), same commit -- collapsed to
-    1.8231e-07, proving the traced splitter is exact wherever no other
-    h-dependent static enters the computation, so whatever survives here is
-    NOT the pk_nw channel. The RSD-basis freeze is also RULED OUT for this
-    test specifically: ``compute_ept_from_clax``'s own in-line comment
-    states plainly that ``pk_mm_real`` "is unaffected -- it never reads
+    (1.19%) that set the then-current 0.03 bound. At the time this
+    non-closure was read as falsifying the "same frozen-pk_nw class as
+    ln10A_s" attribution: ln10A_s -- same observable (``pk_mm_real``), same
+    commit, bg/pt frozen -- collapsed to 1.8231e-07. OBSERVED AD SPREAD below
+    shows a spread of this size between CPU and GPU on identical code, so the
+    1.38% alone does not discriminate between channels. The RSD-basis
+    freeze does not touch this test: ``compute_ept_from_clax``'s own in-line
+    comment states plainly that ``pk_mm_real`` "is unaffected -- it never reads
     those FFTLog bases" (that freeze only matters for redshift-space
     multipoles, which this test's real-space observable never touches).
 
-    Leading suspect (concrete PHASE-2 item, same designation the codebase
-    already uses for the RSD-basis freeze): the DST grid endpoints inside
-    ``_ir_resummation_jax`` -- ``k_min2 = 7e-5/h_conc``,
+    At the time, the leading suspect for the surviving 1.38% was the DST
+    grid endpoints inside ``_ir_resummation_jax`` -- ``k_min2 = 7e-5/h_conc``,
     ``k_max2 = 7.0/h_conc`` -- and the static ``in_range`` mask built from
     them, all constructed from a concrete ``h_conc = stop_gradient(h)``.
     That function's own in-line comment justifies freezing these endpoints
     on the grounds that "their h-derivative is a boundary term with
     negligible content (P*k weight ~0 at both cuts)". Under AD at a fixed
     ``h``, this snapshot is a constant with zero gradient contribution by
-    construction. Under central FD, though, ``h_conc`` is a genuinely
-    different concrete float at ``h0+eps`` and ``h0-eps``, so the entire
-    DST grid -- not just its endpoint values -- shifts between the FD+ and
-    FD- evaluations, changing the discretization ``pk_nw`` is extracted on
-    for every k, not only near the cuts. This is a real h-dependent channel
-    the traced splitter does not (and structurally cannot, without
-    re-deriving ``_ir_resummation_jax`` with a variable-shape grid) close.
-    The measured 1.3831e-02 (job 14146) is the concrete evidence that the
-    "negligible content" argument, while true of the boundary VALUES in
-    isolation, does not extend to the grid-shift's effect on the interior
-    discretization at the ~1% level for ``h``. Secondary contributor: this
-    test also re-solves the FULL pipeline (background -> thermodynamics ->
-    perturbations -> compute_ept_from_clax) via central FD for every probed
-    ``h``, unlike the frozen-bg/pt ln10A_s test, so it picks up ODE
-    re-solve discretization noise on top of the DST-grid channel (out of
-    scope for this tests-only branch either way; closing the DST-grid
-    channel would need a clax/ source change). The per-k companion test
-    (``test_stage_grad_h_matches_fd_per_k`` in
-    ``tests/test_ept_h_channels.py``, which freezes bg/pt like the ln10A_s
-    test does -- isolating the DST-grid channel from full-pipeline
-    discretization noise) DID collapse sharply on this same job -- median
-    per-k rel err 9.825e-03 vs the prior 3.294e-02 -- confirming the traced
-    splitter closed most of the gap; the residual measured here (both
-    channels combined) is not a sign the closure failed.
+    construction. Under central FD, ``h_conc`` is a different concrete float
+    at ``h0+eps`` and ``h0-eps``, so the whole DST grid shifts between the
+    FD+ and FD- evaluations. This freeze is in the code, but the 1.38% is
+    not evidence for it (see OBSERVED AD SPREAD below); the channel stays a
+    candidate only within that spread and is not ranked. Closing it would
+    need a clax/ source change.
 
-    Ratchet arithmetic: 2x the measured 1.3831e-02 (=0.027662), rounded up
-    to one significant figure, is 0.03 -- identical to the current bound.
-    Per this branch's ratchet rule (>= 2x measured, never loosened), the
-    bound below stays at 0.03: this measurement does not license tightening
-    it further, and it is already exactly at the 2x-measured floor.
+    OBSERVED AD SPREAD (supersedes the readings above): the exact functional
+    of this test (matter solve, frozen export of commit 45be3cd, run by a
+    standalone discriminator script, not in the repo) was
+    differentiated three ways on CPU and on GPU, on IDENTICAL code (CPU job
+    22526 on igpu06, GPU job 22527 on igpu04):
+
+                  FD (eps=1e-3)   reverse grad          forward jvp (direct)
+        CPU       4.021530e6      4.031146e6 (+0.24%)   4.149531e6 (+3.18%)
+        GPU       4.022818e6      4.075966e6 (+1.32%)   4.022098e6 (-0.018%)
+
+    (relative to the same platform's FD; ``ode_adjoint="direct"`` for the
+    forward mode.) FD agrees across the two platforms to 0.03%, and GPU
+    forward mode reproduces FD to 1.8e-4, so ~4.0228e6 is the best available
+    value of the true derivative. Both AD modes move by 1-3% between CPU and
+    GPU on identical code. Reverse mode's spread is of the size
+    smsharma/clax#30 reported (~2% on h-like parameters). The functional
+    differentiates the WHOLE chain -- background, thermodynamics, the
+    perturbation ODE (whose adaptive step choices can differ by platform) and
+    the EPT stage -- and the discriminator did NOT localise where in that
+    chain the spread arises. The CPU forward-mode +3.18% is unexplained: the
+    repo's own #30 note (clax/thermodynamics.py:1010-1016) records forward
+    mode through thermodynamics as exact. The bar below bounds this observed
+    platform-dependent spread of the reverse-mode gradient. This file pins JAX
+    to CPU at import (the ``os.environ`` lines at the top), so CI measures the
+    CPU reverse-mode value, +0.24%. A GPU run of an unpinned copy of this test
+    itself (job 22431) gave rel_err=1.3211e-02, under the 0.03 bar.
+
+    History on the C_l solve (``perturbations_solve``, not the matter solve):
+    GPU-allocated job 14146 (actual JAX platform unverified: this file's
+    import-time CPU pin) gave rel_err=1.3831e-02 (AD=4.046783e6,
+    FD=3.991575e6) and CPU job 21812 on unmodified upstream e894567 gave
+    1.3775e-02 (AD=4.066306e6, FD=4.011052e6). The change from that 1.3775e-02
+    to the CPU matter-solve 2.3911e-03 (job 21739) lies within the measured
+    spread in the table, which says nothing about what caused the gap; an
+    earlier attribution of ~83% of it to the C_l solve's tau-grid end is
+    withdrawn. (Code facts only: the C_l solve's z~0 lookup clamps at
+    0.999*tau0, see smsharma/clax#42; the matter solve reaches tau0
+    (``tau_max_factor=1.0``), and its saved values follow tau0 through the
+    traced save times.) The frozen-bg/pt per-k companion
+    ``test_stage_grad_h_matches_fd_per_k`` in ``tests/test_ept_h_channels.py``
+    differentiates only the EPT stage with bg/pt frozen, so neither
+    thermodynamics nor the perturbation solve is in its differentiated path:
+    1.926e-03 on CPU, 1.924e-03 on GPU (job 22431).
+
+    Bar arithmetic: 0.03 is main's value, restored by user decision; it is
+    2x job 14146's 1.3831e-02 (=0.0277) rounded up to one significant figure.
+    This test differentiates in reverse mode, whose observed deviations are
+    +0.24% (CPU) and +1.32% (GPU). The +3.18% CPU forward-mode value is not
+    exercised here.
     """
     if fast_mode:
         pytest.skip("3 full perturbation solves -- full mode only")
@@ -738,7 +783,7 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     from clax import CosmoParams, PrecisionParams
     from clax.background import background_solve
     from clax.thermodynamics import thermodynamics_solve
-    from clax.perturbations import perturbations_solve
+    from clax.perturbations import perturbations_solve_mpk
     from clax.ept import compute_ept_from_clax, pk_mm_real
 
     prec = _dc_replace(PrecisionParams.fast_cl(), pt_k_max_cl=5.0, pt_k_chunk_size=20)
@@ -748,7 +793,7 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
         p = base_params.replace(h=h_val)
         bg = background_solve(p, prec)
         th = thermodynamics_solve(p, prec, bg)
-        pt = perturbations_solve(p, prec, bg, th)
+        pt = perturbations_solve_mpk(p, prec, bg, th)   # reaches today (#42)
         ept = compute_ept_from_clax(p, bg, pt, z=0.0)
         return jnp.sum(pk_mm_real(ept))
 
@@ -764,21 +809,20 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     print(f"\nd(sum(pk_mm_real))/dh [full CosmoParams pipeline]: "
           f"AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.4e}")
 
-    # 3% UNCHANGED post traced-IR-splitter closure: job 14146 measured
-    # rel_err=1.3831e-02, and 2x that (=0.027662) rounds up to the SAME
-    # 0.03 -- this measurement does not license tightening further. See
-    # FINDING in the docstring: the surviving residual is NOT the closed
-    # frozen-pk_nw channel (ln10A_s, same observable, collapsed to
-    # 1.8231e-07) and NOT the RSD-basis freeze (pk_mm_real never reads
-    # those FFTLog bases, per compute_ept_from_clax's own comment). Leading
-    # suspect: the h-dependent DST grid endpoints/in_range mask inside
-    # _ir_resummation_jax (built from a concrete stop_gradient(h) snapshot,
-    # PHASE-2 item), plus full-pipeline re-solve discretization noise.
+    # 0.03 is main's bar, restored by user decision: 2x job 14146's 1.3831e-02
+    # (=0.0277), rounded up to one significant figure. It bounds the observed
+    # platform-dependent spread of the AD gradient: on identical code the
+    # reverse-mode gradient reads +0.24% (CPU, job 22526) and +1.32% (GPU, job
+    # 22527) against FD, forward mode +3.18% (CPU) and -0.018% (GPU); FD agrees
+    # across platforms to 0.03%. Where in the chain (background,
+    # thermodynamics, perturbation ODE, EPT stage) the spread arises is not
+    # localised. See OBSERVED AD SPREAD in the docstring. This file pins JAX
+    # to CPU, so CI sees the CPU reverse-mode value (+0.24%).
     assert rel_err < 0.03, (
         f"AD vs FD disagree for d(sum(pk_mm_real))/dh (full CosmoParams "
         f"pipeline): AD={g_ad:.6e}, FD={g_fd:.6e}, rel_err={rel_err:.2%} "
-        f"(expected <3%; see FINDING in this test's docstring -- leading "
-        f"suspect is the frozen DST-grid-endpoint/in_range channel in "
-        f"_ir_resummation_jax, not the closed frozen-pk_nw channel and not "
-        f"the RSD-basis freeze, which pk_mm_real never reads)"
+        f"(expected <3%; see OBSERVED AD SPREAD in this test's docstring -- "
+        f"on identical code the reverse-mode gradient read +0.24% (CPU) and "
+        f"+1.32% (GPU) against FD, and forward mode +3.18% (CPU); where in "
+        f"the chain that spread arises was not localised)"
     )

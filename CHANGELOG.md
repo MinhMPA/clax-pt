@@ -8,6 +8,105 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 7, 2026: Linear P(k) at z=0 was 0.33% low through the C_l solve -- fixed, and the silent clamp now raises
+
+**Bug (smsharma/clax#42, part 1).** `perturbations_solve` integrates to
+0.999*tau0 (~14 Mpc short of today) and `CubicSpline` clamps out-of-range
+lookups, so a z~0 lookup on its result read delta from z~0.003: linear P(k)
+-0.33% at z=0, flat in k. Parameter-free prediction -2*integral(f dlna) =
+-0.333%; measured: at z=0 the C_l solve's P sits 0.3362% below the matter
+solve's (job 21288), and the P(0)/P(0.5) growth ratio vs CLASS reads -0.3346%
+(lcdm_fiducial) and -0.3241% (omega_cdm_low) (job 21375). Absent for z >~ 0.0032.
+
+**History.** The same "14 Mpc / 0.33%" effect was fixed for the matter-power
+paths in 18fd88d (May 3, 2026), which kept 0.999 for the C_l pipeline. EPT
+(PR #41) took delta_cb from the C_l solve and reinherited it. No test caught
+it: every P(k)-vs-CLASS test used the already-fixed matter path.
+
+**Fix.**
+- `MatterPerturbationResult` gains `delta_cb`; `perturbations_solve_mpk`
+  (reaches today) is the solve to use for P(k)/EPT near z=0.
+- `_raise_if_tau_outside_grid` (AD/jit-safe `eqx.error_if`) in
+  `ept_inputs_from_clax` and `compute_pk_from_perturbations`: an out-of-grid
+  tau(z) raises instead of clamping.
+- `compute_cl_pp(..., pt_mpk=)` is required for `nonlinear="halofit"/"ept"`;
+  both sides of the EPT ratio read it. README quickstart, signature line and
+  `notebooks/clax-pt_full_validation.ipynb` now pass `pt_mpk`.
+- `perturbations_solve` is unchanged: no edit touches the C_l solve's code path
+  (linear C_l^phiphi bit-identical, job 22416; harmonic + lensing tests pass,
+  job 22594).
+
+**Measured (before -> after).**
+- Growth ratio P(0)/P(0.5) vs CLASS: C_l solve -0.3346% / -0.3241% (red probe,
+  job 21375); matter solve -0.0001% at all 5 LCDM cosmologies in both lookups
+  (jobs 21377, 22413; bar 0.1%).
+- EPT input at z=0.38/0.8 moved by < 7.3e-5 on the standard EPT window:
+  4.844e-5 at z=0.38, 7.234e-5 at z=0.80 (job 21288).
+- C_l^phiphi shift (job 22416, CPU): none bit-identical; halofit max|shift|
+  1.55e-6; ept median +6.04e-4, max 1.088e-3 at l=2000. The ept shift matches
+  the parameter-free prediction 2*eps*(1 - C_none/C_ept), with 2*eps = 0.3362%
+  the C_l solve's z=0 P deficit: 6.058e-4 and 1.090e-3, i.e. 0.3% agreement.
+  A half migration would give >= 3.4e-3.
+- Guard overhead: -0.3% (17.232 ms with, 17.290 ms without; GPU, job 22419),
+  i.e. not measurable.
+
+**Gradients.**
+- omega_cdm growth-ratio gradient d ln[sum P_cb(0)/sum P_cb(0.3)]/d omega_cdm:
+  AD vs FD <= 2.1e-4 at 5 LCDM cosmologies (jobs 22381-22383; bar 1e-2).
+- h end-to-end EPT gradient: the bar stays at main's 0.03. A CPU/GPU
+  discriminator (jobs 22526/22527, identical code) measured these offsets from
+  FD: reverse mode +0.24% on CPU, +1.32% on GPU; forward mode +3.18% on CPU,
+  -0.018% on GPU. FD agrees across the two platforms to 0.03%. Where in the
+  chain the spread arises was not localised (it is tracked on #30). An earlier
+  attribution of the old 1.38% gap to the C_l tau-grid end is WITHDRAWN.
+- Per-k stage dP/dh bar ratcheted 0.02 -> 0.004: CPU 1.926e-3, GPU 1.924e-3,
+  upstream 1.930e-3.
+
+**Test pass rates.** Harmonic + lensing 22 passed (job 22594). Fast suite 329 +
+83 passed, 1 pre-existing failure (jobs 22595, 22613). Full mode on touched
+files, four shards: 16 / 64 (2 skipped) / 45 / 24 (2 skipped: CLASS Python
+wrapper absent) (jobs 22413, 22414, 22596, 22597).
+
+**Side effect.** `scripts/benchmark_ept.py` and `scripts/profile_compile_time.py`
+raised on main (matter-solve result lacked delta_cb for the default
+field="cb"); they no longer raise on the z=0 path. Not re-run in this branch.
+
+**Failed approaches.**
+- `PK_FAST_PREC` (full ncdm hierarchy, chunk 1) is intractable for full P(k)
+  tables: GPU job 20627 hit the 6 h limit, CPU job 21232 made no progress in
+  2 h. Replaced by `PK_TABLE_SOLVE_PREC`.
+- A CLASS P_cb/P_m ratio test failed (1.89e-3 fiducial, 7.01e-3 at 0.15 eV vs
+  bar 1e-3) on the d_tot offset and fluid approximation below. Replaced by a
+  cb growth test.
+
+**Discovered, pre-existing (none caused by this branch).**
+- smsharma/clax#45: `thermodynamics.py:807-840` stop_gradient (d127731) biases
+  AD d ln P/d ln omega_cdm by ~+0.004 in both AD modes. The error is set before
+  z=0.3: ~65% comes from the cut, ~9% (marginal) from the ncdm fluid
+  approximation, ~26% from an unidentified ncdm-sector residual. It cancels in
+  growth ratios. The AD platform spread above is also on #30.
+- ncdm fluid approximation vs CLASS: with `ncdm_fluid_approximation="class"`
+  (used by fast_cl/fit_cl, i.e. HMC), P_m(z=0) at 0.15 eV differs from CLASS by
+  up to 0.48% (-4.76e-3 at k=3.7e-3 Mpc^-1, +3.7e-3 at 1e-2; job 21369). With
+  the approximation off it matches to 1.2e-5 at that k. The same window produces
+  a P_cb/P_m ratio bump vs CLASS of 1.9e-3 (0.06 eV) and 7.0e-3 (0.15 eV) at
+  z=0.5 (jobs 21367/21368). No upstream issue yet.
+- `scripts/generate_class_reference.py` builds `pk_cb_*` from d_tot, which
+  includes radiation: a flat offset of 7.6e-4 at z=0.5 and 5.1e-4 at z=0
+  (= -2 Omega_r(1+z)/Omega_m) in every reference P_cb.
+- `CosmoParams(N_ncdm=0)` crashes in `background_solve` (log(0) at
+  `background.py:373`).
+- Test modules pin JAX to CPU at import (e.g. `tests/test_ept_gradients.py:13-14`),
+  which can pin a whole pytest session.
+- `tests/test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5`
+  fails with max_steps on upstream code too (jobs 21372/21373, 22595).
+- Per-k dP/dh was 9.825e-3 in job 14146 and is 1.926e-3 (CPU) / 1.924e-3 (GPU)
+  now; platform does not explain it, cause not investigated.
+
+**Not done (tracked).** The C_l solve's own 0.999 endpoint (fixing it would
+retire lensing's extra solve); #42 part 2 (oscillation at k>0.2); #43 (PPF); #44
+(r_s).
+
 ### Sep 6, 2026: Land the CLASS-PT validation apparatus in the fork
 
 **The clax-pt vs CLASS-PT campaign — 15 cosmologies x 3 redshifts, 42 stage
