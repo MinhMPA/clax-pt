@@ -433,7 +433,7 @@ def _ionHe(tempb, a, x0, x1, x2, Y_He, H0, Omega_b):
     r1 = 4.0 * b * jnp.exp(-_tion1 / tempb)
     r2 = b * jnp.exp(-_tion2 / tempb)
 
-    c = 0.25 * Y_He / (1.0 - Y_He)
+    c = _f_He(Y_He)
 
     def body_fun(i, vals):
         _, xe, x1, x2 = vals
@@ -453,6 +453,13 @@ def _ionHe(tempb, a, x0, x1, x2, Y_He, H0, Omega_b):
 # ---------------------------------------------------------------------------
 
 _NOT4 = 3.9715  # He-4/H mass ratio, cf. CLASS thermodynamics.h:707
+
+
+def _f_He(Y_He):
+    """Helium-to-hydrogen number ratio n_He/n_H = Y/(_not4_ (1-Y)), CLASS
+    thermodynamics.h:707. The one definition used by every x_e sum and helium
+    rate in this module (smsharma/clax#48)."""
+    return Y_He / (_NOT4 * (1.0 - Y_He))
 
 
 def _reionization_xe_fraction(z, z_reio):
@@ -483,7 +490,7 @@ def _reionization_xe(z, z_reio, Y_He, xe_before=0.0):
     """
     # fHe = n_He/n_H; CLASS uses _not4_=3.9715 instead of exactly 4
     # cf. CLASS thermodynamics.c:1207
-    fHe = Y_He / (_NOT4 * (1.0 - Y_He))
+    fHe = _f_He(Y_He)
     xe_after = 1.0 + fHe  # H + singly-ionized He
 
     # Hydrogen reionization (CLASS reio_camb)
@@ -590,7 +597,7 @@ def thermodynamics_solve(
     xHII0 = 1.0
     xHeII0 = 0.0
     xHeIII0 = 1.0
-    xe0 = xHII0 + 0.25 * Y_He / (1.0 - Y_He) * (xHeII0 + 2.0 * xHeIII0)
+    xe0 = xHII0 + _f_He(Y_He) * (xHeII0 + 2.0 * xHeIII0)
     barssc = _barssc_raw * (1.0 - 0.75 * Y_He + (1.0 - Y_He) * xe0)
     cs20 = 4.0 / 3.0 * barssc * tb0
 
@@ -672,8 +679,7 @@ def thermodynamics_solve(
         dlna_main = new_loga - lna0
         lnH0 = jnp.log(adot / a**2)          # a' = a^2 H -> H at the step start
         lnH1 = jnp.log(new_H)
-        f_He_xe = 0.25 * Y_He / (1.0 - Y_He)  # exactly-4 helium/hydrogen ratio; a later commit
-        # switches every site to CLASS's 3.9715
+        fHe = _f_He(Y_He)  # n_He/n_H with CLASS's _not4_: every x_e sum and the helium rate below
 
         def sub_env(s):
             a_s = jnp.exp(lna0 + s * dlna_main)
@@ -689,7 +695,7 @@ def thermodynamics_solve(
         # h*J = -3.2 at z = 1600 lies outside RK4's stability interval [-2.79, 0].
         new_xHII_peebles = _ros2_advance(
             _recfast_dxHII_dlna,
-            lambda x_: x_ + f_He_xe * (xHeII + 2.0 * xHeIII),
+            lambda x_: x_ + fHe * (xHeII + 2.0 * xHeIII),
             carry['xHII_ode'], sub_env, dlna_main, 10)
 
         # For z > 1600: hydrogen Saha equilibrium (CLASS thermodynamics.c:4074-4081).
@@ -703,7 +709,7 @@ def thermodynamics_solve(
         saha_rhs = jnp.maximum(
             (_CR_CGS * T_saha)**1.5 * saha_exp / nH_saha, 1e-300)
         # Helium electron contribution per H nucleus
-        xHeII_contrib = 0.25 * Y_He / (1.0 - Y_He) * xHeII
+        xHeII_contrib = fHe * xHeII
         xHII_saha = _solve_hydrogen_saha(saha_rhs, xHeII_contrib)
         # CLASS staging for hydrogen: regime "H" (z > 1600) is Saha with the x_HeII
         # correction (thermodynamics.c:4070-4087, the quadratic above). The ODE
@@ -717,7 +723,6 @@ def thermodynamics_solve(
         # Helium. HeIII->HeII: Saha (_ionHe). HeII->HeI: the MB95 Saha above
         # z ~ 5000, then the CLASS-style HeI Saha down to z = 2870, then the
         # Peebles ODE below it, blended over z 2770-2870 (staging block below).
-        fHe = Y_He / (4.0 * (1.0 - Y_He))
         _, new_xHeIII = _ionHe(
             new_tb, new_a, new_xHII, xHeII, xHeIII, Y_He, H0_kmsMpc, Omega_b
         )
@@ -728,7 +733,7 @@ def thermodynamics_solve(
         # no clip.
         new_xHeII_peebles = _ros2_advance(
             lambda xe_, x_, *env: _recfast_dxHe_dlna(xe_, x_, *env, fHe),
-            lambda x_: new_xHII + f_He_xe * (x_ + 2.0 * new_xHeIII),
+            lambda x_: new_xHII + fHe * (x_ + 2.0 * new_xHeIII),
             carry['xHeII_ode'], sub_env, dlna_main, 10)
         # Saha HeII <-> HeI with H fully ionized, thermodynamics.c:4053-4067:
         #   rhs = 4 (C_R T_b)^{3/2} exp(-T_HeI/T_b) / n_H(z)          (:4057)
@@ -759,7 +764,7 @@ def thermodynamics_solve(
         new_xHeII = w_saha_He * new_xHeII_saha + (1.0 - w_saha_He) * xHeII_staged
 
         # Total ionization fraction
-        new_xe = new_xHII + 0.25 * Y_He / (1.0 - Y_He) * (new_xHeII + 2.0 * new_xHeIII)
+        new_xe = new_xHII + fHe * (new_xHeII + 2.0 * new_xHeIII)
 
         # Sound speed squared (over c^2)
         dtbdla = -2.0 * new_tb - thomc * a2t / new_a

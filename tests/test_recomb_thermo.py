@@ -290,3 +290,22 @@ def test_vmap_over_h_matches_loop(recomb_cosmology):
     d = float(np.max(np.abs(batched - looped)))
     print(f"{name}: max |vmap - loop| = {d:.3e}")
     assert d < 1e-12, f"ERROR vmap vs loop differ by {d:.3e} ({name})"
+
+
+# ---- D4 (Task 8): one helium-to-hydrogen number ratio, CLASS's _not4_ ----
+
+@pytest.mark.parametrize("n", GRIDS)
+def test_fully_ionised_xe_uses_class_helium_mass_ratio(recomb_cosmology, n):
+    """x_e at z = 2e4 (H, He fully ionised) = 1 + 2 f_He with f_He = Y/(3.9715 (1-Y)),
+    CLASS thermodynamics.h:707 (_not4_). Fails while any site uses exactly 4.
+    Parametrised over GRIDS (R26): the value is grid-independent, so the 3000-point
+    case guards D4 routinely under --fast."""
+    name, p = recomb_cosmology
+    prec = thermo_prec(n)
+    q = as_traced(p)
+    th = thermodynamics_solve(q, prec, background_solve(q, prec))
+    xe = float(th.xe_of_loga.evaluate(jnp.log(1.0 / 2.0001e4)))
+    y = float(p.Y_He)
+    expect = 1.0 + 2.0 * y / (3.9715 * (1.0 - y))
+    print(f"{name} n={n}: x_e(z=2e4) = {xe:.8f}, expected {expect:.8f}, diff {xe - expect:+.3e}")
+    assert abs(xe - expect) < 1e-6, f"ERROR fully ionised x_e {xe:.8f} vs {expect:.8f} ({name}, n={n})"
