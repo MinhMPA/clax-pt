@@ -26,8 +26,11 @@ differences to 0.03–2%. Derivatives along f, α⊥ and α∥ are unaffected (c
 **Why no existing test saw it.** `tests/test_ept_gradients.py` holds the IR split fixed in both the AD and the FD arm
 (`ept_setup` passes one precomputed tuple), so the frozen basis moves in neither. Its end-to-end tests differentiate
 real-space functionals (`pk_mm_real`), which never read the RSD basis. The e2e AP campaign's gradient tests assert
-finiteness (`test_e2e_gradient_finite`) or differentiate the AP ratios with P_lin fixed; no earlier clax result
-depended on this channel, and no gradient-driven multipole likelihood exists on `main`.
+finiteness (`test_e2e_gradient_finite`) or differentiate the AP ratios with P_lin fixed. No earlier test asserts,
+and no analysis uses, a value of this channel; `test_e2e_gradient_finite` (tests/test_ept_e2e_multicosmo.py on
+branches feat/classpt-e2e-ap-validation and feat/e2e-ap-on-tau0-fix, not on `main`) logs three
+d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (only finiteness was asserted), and they are
+biased. No gradient-driven multipole likelihood exists on `main`.
 
 **Who is affected.** Any gradient of P_ℓ(RSD) taken through `compute_ept_from_clax` with respect to parameters that
 move P_lin (A_s, n_s, ω_b, ω_cdm, h, m_ν, …). HMC stays exact (the accept step uses exact energies) but samples less
