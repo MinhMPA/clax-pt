@@ -2,10 +2,14 @@
 traced IR splitter (compute_ept with _ir_precomputed = _ir_resummation_jax(...), the path
 compute_ept_from_clax uses).
 
-Before Oct 10, 2026 the one-loop FFTLog basis on this path was a stop_gradient snapshot of the IR
-split, so d(P_ell)/d(P_lin) omitted the one-loop response: AD disagreed with finite differences by
-~90-100% along amplitude and stretch directions (ps_1loop validation, Task 7). The existing
-tests/test_ept_gradients.py holds the IR split fixed in both arms and never saw it.
+Before Oct 10, 2026 most of d(P_ell)/d(P_lin) was missing on this path. A stop_gradient snapshot of
+the IR split (the wiggle / no-wiggle decomposition of P_lin) fed both the one-loop FFTLog basis and
+the no-wiggle spectrum used by the angular integration (tree, counterterms, P13ratio, IFG2
+rescaling), so d(P_ell)/d(P_lin) lacked the no-wiggle tree response as well as the one-loop
+response. Measured RED, AD vs FD at l=0/2/4, lcdm_fiducial (job 24203): amplitude 0.91/0.93/1.98,
+stretch 1.06/1.60/1.70, wiggle 0.035/0.027/0.13; the ps_1loop validation (Task 7, jobs 24165/24167,
+z=0.38) first saw ~90% (amplitude) / ~100% (stretch). The existing tests/test_ept_gradients.py holds
+the IR split fixed in both arms and never saw it.
 
 Multi-cosmology rule: the lcdm_cosmology grid (fiducial only under --fast). P_lin comes from the
 stored reference tables; f and rs_h are fixed representative values (the derivative checks do not
@@ -30,7 +34,9 @@ F_GROWTH = 0.75                       # z ~ 0.4 growth rate, representative
 RS_H = 99.0                           # r_d h [Mpc/h], the compute_ept default
 WINDOW = (0.01, 0.3)                  # h/Mpc, the cross-validation's comparison window
 FD_STEP = 1e-4                        # relative step along the tangent
-AD_FD_TOL = 1e-2                      # CLAUDE.md gradient target
+AD_FD_TOL = 1e-6                      # measured worst 2.8e-9 over the 5-point grid (Oct 10, 2026);
+                                      # central-FD truncation floor at step 1e-4 is ~1e-8; a partial
+                                      # re-freeze reads >= 3e-2
 PRIMAL_TOL = 1e-8
 TANGENTS = ("amplitude", "stretch", "wiggle")
 
@@ -50,6 +56,7 @@ def setup(lcdm_cosmology, prec):
     h = float(cosmo.h)
     k_h_ref, pk_h_ref = d["k"] / h, d["pk_lin_z0"] * h**3           # h/Mpc, (Mpc/h)^3
     k_ept = ept_kgrid(prec)
+    # the spline extrapolates P_lin outside the reference k-range at the EPT grid ends (outside the [0.01, 0.3] window; identical in the AD and FD arms)
     spl = CubicSpline(np.log(k_h_ref), np.log(pk_h_ref), extrapolate=True)
     pk_lin = np.exp(spl(np.log(k_ept)))
     assert np.all(np.isfinite(pk_lin))
@@ -84,11 +91,13 @@ def test_rsd_multipole_jvp_matches_finite_differences(setup, prec, tangent):
     _, ad = jax.jvp(F, (pk,), (t,))
     fd = (F(pk + FD_STEP * t) - F(pk - FD_STEP * t)) / (2 * FD_STEP)
     ad, fd = np.asarray(ad), np.asarray(fd)
-    assert np.all(np.isfinite(ad)), f"{setup['name']} {tangent}: non-finite AD"
+    assert np.all(np.isfinite(ad)), f"ERROR {setup['name']} {tangent}: non-finite AD"
+    assert np.all(np.isfinite(fd)), f"ERROR {setup['name']} {tangent}: non-finite FD"
     errs = [_rel(ad[i], fd[i]) for i in range(3)]
     print(f"{setup['name']} d P_ell / d P_lin along {tangent}: AD vs FD l=0,2,4 = "
           + " ".join(f"{e:.2e}" for e in errs))
-    assert max(errs) < AD_FD_TOL, f"ERROR {setup['name']} {tangent}: AD vs FD {max(errs):.3e} > {AD_FD_TOL}"
+    worst = float(np.max(np.asarray(errs)))               # np.max propagates a NaN; Python max can skip it
+    assert worst < AD_FD_TOL, f"ERROR {setup['name']} {tangent}: AD vs FD {worst:.3e} > {AD_FD_TOL}"
 
 
 def test_rsd_multipole_forward_equals_reverse(setup, prec):
@@ -114,7 +123,9 @@ def test_traced_path_primal_matches_numpy_path(setup, prec):
     w = setup["window"]
     numpy_path = np.stack([np.asarray(pk_gg_l0(e_np, *BIAS))[w], np.asarray(pk_gg_l2(e_np, *BIAS))[w],
                            np.asarray(pk_gg_l4(e_np, *BIAS))[w]])
-    rel = max(_rel(traced[i], numpy_path[i]) for i in range(3))
+    assert np.all(np.isfinite(traced)) and np.all(np.isfinite(numpy_path)), \
+        f"ERROR {setup['name']}: non-finite primal multipoles"
+    rel = float(np.max(np.asarray([_rel(traced[i], numpy_path[i]) for i in range(3)])))
     print(f"{setup['name']} traced vs numpy path max rel diff {rel:.3e}")
     assert rel <= PRIMAL_TOL, f"ERROR {setup['name']}: traced vs numpy path {rel:.3e}"
 
