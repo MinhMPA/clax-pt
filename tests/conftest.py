@@ -187,6 +187,22 @@ def _make_cosmology_fixture(grid):
 lcdm_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_LCDM)
 nulcdm_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_NULCDM)
 
+# Recombination staging (smsharma/clax#48): the 5 LCDM points plus helium,
+# N_eff and massive-neutrino extremes. Names match reference_data/<name>/
+# thermo_recfast_hesw1.npz (CLASS RECFAST, recfast_Heswitch=1).
+NEFF_NCDM = (0.71611 / (4.0 / 11.0) ** (1.0 / 3.0)) ** 4  # 1.0132: one ncdm species' early N_eff
+COSMOLOGY_GRID_RECOMB = {
+    **COSMOLOGY_GRID_LCDM,
+    "YHe_022": {"Y_He": 0.22},
+    "YHe_028": {"Y_He": 0.28},
+    "Neff_2": {"N_ur": 2.0 - NEFF_NCDM},
+    "Neff_4": {"N_ur": 4.0 - NEFF_NCDM},
+    "massive_nu_015": {"m_ncdm": 0.15},
+}
+recomb_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_RECOMB)
+recomb_downstream_cosmology = _make_cosmology_fixture(
+    {k: COSMOLOGY_GRID_RECOMB[k] for k in ("lcdm_fiducial", "omega_b_high", "YHe_028")})
+
 
 @pytest.fixture
 def lcdm_bg_ref():
