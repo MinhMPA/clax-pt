@@ -810,17 +810,19 @@ def _ir_resummation_jax(
     ln10A_s-class residual (job 13132): pk_nw structurally dropping
     d(pk_nw)/d(pk_lin_h) is exactly the derivative this function restores;
     `test_pk_nw_gradient_exists_and_matches_fd` in
-    tests/test_ir_resummation_jax.py checks it directly against FD. TWO
-    frozen channels survive this closure, consistent with
-    `compute_ept_from_clax`'s docstring (~2221-2231): (1) THIS function's
+    tests/test_ir_resummation_jax.py checks it directly against FD. ONE
+    frozen channel survives this closure, consistent with
+    `compute_ept_from_clax`'s "stop_gradient rationale" note: THIS function's
     own DST grid endpoints (k_min2/k_max2 above, built from a concrete
     h_conc) and the static `in_range` mask derived from them -- now the
     leading suspect for the measured h end-to-end residual (see the CAVEAT
     on the ENDPOINTS DELIBERATELY STATIC comment below, and the h FINDING
-    in tests/test_ept_gradients.py); and (2) the RSD FFTLog basis (phase 2,
-    pinned explicitly at compute_ept's `_ir_precomputed` RSD consumption) --
-    unaffected by this function, which sits one level upstream of that
-    split.
+    in tests/test_ept_gradients.py). The second channel this note used to
+    list, the RSD FFTLog basis (a stop_gradient snapshot of this function's
+    pk_nw/pk_w at compute_ept's `_ir_precomputed` RSD consumption), was
+    removed Oct 10, 2026: compute_ept now decomposes the traced pk_nw and
+    pk_w = pk_lin_h - pk_nw, so d(P_ell)/d(pk_lin_h) carries the one-loop
+    response (tests/test_ept_rsd_basis_gradients.py).
 
     Args:
         pk_lin_h:   P_lin(k) in (Mpc/h)^3, shape (N,), TRACED
@@ -859,8 +861,9 @@ def _ir_resummation_jax(
     # genuinely different float at h0+eps vs h0-eps), while under AD at fixed
     # h this snapshot is a constant with zero gradient by construction. That
     # mismatch measured a 1.3831e-02 residual on the h end-to-end gradient
-    # (job 14146); this is the concrete phase-2 item -- see the h FINDING in
-    # tests/test_ept_gradients.py.
+    # (job 14146); this is the concrete phase-2 item, the one pinned channel
+    # left now that the RSD FFTLog basis is traced (Oct 10, 2026) -- see the h
+    # FINDING in tests/test_ept_gradients.py.
     k_ir = np.linspace(k_min2, k_max2, N_IR)
 
     # --- DST input: ln(k P) on the linear grid ---------------------------------
@@ -1998,16 +2001,21 @@ def compute_ept(
                                              _ir_precomputed=(pk_nw_np, pk_w_np, sigma2, delta_sigma2))
                       grad = jax.grad(f)(pk_lin_ept)  # works!
 
-                  Physically-correct-freeze justification (applies ONLY to the
-                  concrete-numpy caller, kind (2) above): the no-wiggle template
-                  pk_nw is a property of the broadband shape at fixed cosmology,
-                  so for a perturbation δpk around the fiducial, the wiggle
-                  component changes as δpk_w = δpk_lin, and the resummed
-                  spectrum damps it by exp(-Σ²k²) -- this is what justifies
-                  freezing pk_nw when the caller never re-derives it under AD.
-                  For the traced caller (kind (1), ``compute_ept_from_clax``),
-                  no such freeze is needed or applied: d(pk_nw)/d(params) flows
-                  from ``_ir_resummation_jax`` itself.
+                  No freeze inside compute_ept: the resummed spectrum, the tree
+                  AND the redshift-space one-loop FFTLog basis (cmsym_nw from
+                  pk_nw, cmsym_w from pk_w) are all built from these same two
+                  arrays, so no stop_gradient is applied on either input of the
+                  RSD basis (the snapshot formerly applied there was removed
+                  Oct 10, 2026; tests/test_ept_rsd_basis_gradients.py). Whether
+                  pk_nw itself responds to pk_lin_h is the caller's choice. For
+                  the traced caller (kind (1), ``compute_ept_from_clax``),
+                  d(pk_nw)/d(params) flows from ``_ir_resummation_jax``. For the
+                  concrete-numpy caller (kind (2)), pk_nw is a constant, which is
+                  physically justified for a perturbation δpk around the
+                  fiducial: the no-wiggle template is a property of the
+                  broadband shape at fixed cosmology, so the wiggle component
+                  changes as δpk_w = δpk_lin and the resummed spectrum damps it
+                  by exp(-Σ²k²).
         rs_h:     Sound horizon at drag epoch times h, in Mpc (i.e. r_s(z_d) * h,
                   NOT r_s/h).  Default 99.0 ≈ Planck 2018 fiducial; for
                   cosmology-varying values, prefer ``compute_ept_from_clax`` which
@@ -2107,29 +2115,21 @@ def compute_ept(
     # Wiggle correction uses x_w = cmsym_w × k^etam (×2 for P22, ×1 for P13).
     # cf. nonlinear_pt.c lines 8215, 8246, 8562, 8586.
     # NOTE: _fftlog_decompose is jnp.fft internally (jnp.fft.fft, see its
-    # definition above), NOT numpy -- it accepts and can differentiate through
-    # traced inputs just fine. The `_pk_nw_np_rsd`/`_pk_w_np_rsd` naming below
-    # is legacy; what actually happens is that the RSD path deliberately reads
-    # the PINNED (stop_gradient) snapshot of _ir_precomputed[0]/[1] rather than
-    # the traced pk_nw/pk_w computed above, per the PHASE-2 FREEZE noted just
-    # below -- a deliberate gradient freeze, not a numpy/jax type requirement.
+    # definition above), NOT numpy -- it accepts and differentiates through
+    # traced inputs, and returns jnp arrays for NumPy or jnp input alike.
     if prec.ir_resummation:
-        if _ir_precomputed is not None:
-            # PHASE-2 FREEZE: the FFTLog cmsym basis is built from a pinned
-            # snapshot (the pre-existing deliberate freeze, now explicit).
-            # Gradient flows through the resummed spectra and damping; the
-            # basis-response term is deferred -- residual after this PR
-            # quantified in tests/test_ept_gradients.py docstrings.
-            _pk_nw_np_rsd = jax.lax.stop_gradient(jnp.asarray(_ir_precomputed[0]))
-            _pk_w_np_rsd  = jax.lax.stop_gradient(jnp.asarray(_ir_precomputed[1]))
-        else:
-            _pk_nw_np_rsd = np.array(pk_nw)
-            _pk_w_np_rsd  = np.array(pk_w)
-        _cmsym_nw_np, _ = _fftlog_decompose(_pk_nw_np_rsd, kmin, kmax, nmax, b)
-        _cmsym_w_np, _  = _fftlog_decompose(_pk_w_np_rsd,  kmin, kmax, nmax, b)
-        cmsym_nw_jnp = jnp.array(_cmsym_nw_np)
-        cmsym_w_jnp  = jnp.array(_cmsym_w_np)
-        pk_nw_jnp    = jnp.array(_pk_nw_np_rsd)
+        # The RSD one-loop basis is decomposed from the SAME pk_nw / pk_w (= pk_lin_h - pk_nw)
+        # used for the tree and the real-space loops above. On the _ir_precomputed path both are
+        # traced, so d(P_ell)/d(pk_lin_h) carries the one-loop basis response (the earlier
+        # stop_gradient snapshot -- "PHASE-2 FREEZE", a leftover of the NumPy-only splitter --
+        # dropped it: AD vs FD was ~90-100% off along P_lin directions, ps_1loop validation
+        # Task 7, Oct 10, 2026; fixed Oct 10, 2026). On the NumPy path (no _ir_precomputed)
+        # pk_nw / pk_w are concrete and nothing is traced, exactly as before. Values are
+        # bit-identical on both paths: _ir_resummation_jax's pk_w is pk_lin_h - pk_nw too.
+        # cf. nonlinear_pt.c lines 8215, 8246, 8562, 8586 (x_nw / x_w bases).
+        cmsym_nw_jnp, _ = _fftlog_decompose(pk_nw, kmin, kmax, nmax, b)
+        cmsym_w_jnp, _  = _fftlog_decompose(pk_w,  kmin, kmax, nmax, b)
+        pk_nw_jnp = pk_nw
     else:
         cmsym_nw_jnp = None
         cmsym_w_jnp  = None
@@ -2677,17 +2677,17 @@ def compute_ept_from_clax(
     the two channels that used to be stop_gradient'd here: the 1.39%-class
     pk_nw/ln10A_s residual (job 13132) and the rs_h (sound-horizon) channel
     (previously bounded below -1.0e2 of the stage h-gradient, GPU job
-    13313). Two channels remain deliberately frozen:
-      - the DST grid endpoints inside `_ir_resummation_jax` itself, built
-        from a concrete h_conc = stop_gradient(h) (np.linspace(7e-5/h,
-        7/h, ...) needs a fixed shape, not a differentiability choice --
-        see that function's docstring);
-      - the RSD FFTLog basis (`_pk_nw_np_rsd`/`_pk_w_np_rsd` at
-        compute_ept's `_ir_precomputed` RSD consumption): PHASE-2 FREEZE,
-        deferred by this PR -- see the inline comment there and
-        tests/test_ept_gradients.py docstrings for the residual this
-        leaves. pk_mm_real is unaffected -- it never reads those FFTLog
-        bases.
+    13313). One channel remains deliberately frozen: the DST grid
+    endpoints inside `_ir_resummation_jax` itself, built from a concrete
+    h_conc = stop_gradient(h) (np.linspace(7e-5/h, 7/h, ...) needs a fixed
+    shape, not a differentiability choice -- see that function's
+    docstring). The RSD FFTLog basis is traced since Oct 10, 2026:
+    compute_ept's `_ir_precomputed` branch builds cmsym_nw / cmsym_w from
+    the traced pk_nw and pk_w = pk_lin_h - pk_nw instead of the former
+    stop_gradient snapshot ("PHASE-2 FREEZE"), so d(P_ell)/d(params)
+    carries the one-loop response (tests/test_ept_rsd_basis_gradients.py;
+    values unchanged). pk_mm_real is unaffected -- it never reads those
+    FFTLog bases, so neither the freeze nor its removal changes it.
     """
     from clax.transfer import compute_pk_from_perturbations
     from clax.primordial import primordial_scalar_pk
@@ -2722,7 +2722,8 @@ def compute_ept_from_clax(
     # Traced IR resummation: d(pk_nw)/d(params) and d(Sigma^2)/d(params)
     # now flow (closes the 1.39% ln10A_s / 1.19% h structural residual,
     # issue #30). Only the DST grid endpoints stay pinned (see
-    # _ir_resummation_jax) and the RSD FFTLog basis (phase 2, below).
+    # _ir_resummation_jax); the RSD FFTLog basis inside compute_ept is
+    # traced too (since Oct 10, 2026).
     rs_h_traced = sound_horizon_drag(params) * params.h
     ir_pre = _ir_resummation_jax(pk_h, k_h, rs_h_traced, h_conc)
     return compute_ept(pk_h, jnp.array(k_h), h=h, f=f, prec=prec,
