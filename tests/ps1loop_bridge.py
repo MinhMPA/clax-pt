@@ -681,3 +681,91 @@ def ps_scheme_predicted(inp, kw, clax_coef, *, captured=None) -> dict:
     X = {n: Cn[n] + g["Exp"] * (C[n] - Cn[n]) for n in PS_SCHEME_CHANNELS}
     proj = _project_monomials(closure_integrands(X, g["f"], g["mu2t"], X["Pk_IFG2"]), g["W"], mask)
     return restrict_to_closure_lines({lab: proj[lab] - np.asarray(clax_coef[lab], dtype=float) for lab in proj})
+
+
+# --------------------------------------------------------------------------- real space, IR off (spec §5.4)
+# AP (controller ruling, Oct 7, 2026): real space has no AP and ps_1loop's get_pk_real / get_pk_gm_real
+# apply none, so clax-pt is evaluated at hratio = Dratio = 1. CLASS-PT and clax-pt store Id2d2, Id2G2, IG2G2
+# (pk_mult rows 1, 4, 5) as the AP-folded l = 0 mu-loop moment and reuse it in pk_gg_real (ept.py
+# _gl_multipoles 1222-1223; nonlinear_pt.c 5322-5349); with the file's AP those three P_gg rows would
+# differ from the AP-free real-space loops by the AP projection (0.57-0.68% at lcdm_fiducial z = 0.38) -- a
+# CLASS-PT convention, not real-space numerics. The tie-breaker therefore reads only the no-AP IR-off files.
+
+from clax.ept import pk_gg_real, pk_gm_real, pk_mm_real   # noqa: E402
+
+REAL_CHANNELS = ("pk_mm_real", "pk_gg_real", "pk_gm_real")
+REAL_THRESHOLDS = {c: 0.01 for c in REAL_CHANNELS}
+# P_mm: 1, c0 (the k^2 P shape, cs0 = c0); P_gg: bias pairs + P_shot; P_gm: linear bias terms.
+REAL_MONOMIALS = (("1",), ("c0",), ("b1",), ("b2",), ("bG2",), ("bGamma3",),
+                  ("b1", "b1"), ("b1", "b2"), ("b2", "b2"), ("b1", "bG2"), ("bG2", "bG2"),
+                  ("b2", "bG2"), ("b1", "bGamma3"), ("P_shot",))
+
+
+@functools.partial(jax.jit, static_argnames=("model",))
+def _ps_real_jit(model, k_h, pk, thetas, k, ndens):
+    pk_data = {"k": k_h, "pk": pk}
+
+    def one(th):
+        t = dict(zip(THETA_NAMES, th))
+        z0 = 0.0 * t["b1"]
+        p = ps_params(t, h=1.0, f=0.0, ndens=ndens)   # h, f unused: no IR, no RSD in real space
+        # P_mm = P_gg at b1 = 1, rest 0, carrying the c0 counterterm (ps_1loop.py:149-179, v0.5.0)
+        mm = model.get_pk_real(k, pk_data, {**p, "bias": {"b1": 1.0 + z0, "b2": z0, "bG2": z0, "bGamma3": z0},
+                                            "stoch": {"P_shot": z0, "a0": z0, "a2": z0}})
+        # P_gg without counterterm: clax-pt's P_gg counterterm is parameterised differently (spec §5.4)
+        gg = model.get_pk_real(k, pk_data, {**p, "ctr": {**p["ctr"], "c0": z0}})
+        gm = model.get_pk_gm_real(k, pk_data, {**p, "ctr": {"c0": z0, "cs0": z0}})   # ps_1loop.py:181-258
+        return jnp.stack([mm, gg, gm])
+    return jax.vmap(one)(thetas)
+
+
+def ps_real_batch(model, inp, kw, *, ndens=NDENS_PROBE):
+    def F(thetas):
+        return np.asarray(_ps_real_jit(model, jnp.asarray(inp["k_h"]), jnp.asarray(inp["pk"]),
+                                       jnp.asarray(thetas, dtype=float), jnp.asarray(kw), ndens))
+    return F
+
+
+def clax_real_batch(e, mask, *, ndens=NDENS_PROBE):
+    def one(th):
+        t = dict(zip(THETA_NAMES, th))
+        b = (t["b1"], t["b2"], t["bG2"], t["bGamma3"])
+        return jnp.stack([pk_mm_real(e, cs0=t["c0"]),
+                          pk_gg_real(e, *b, cs=0.0, cs0=0.0, Pshot=t["P_shot"] / ndens),
+                          pk_gm_real(e, *b, cs0=0.0, cs=0.0)])[:, mask]
+    vm = jax.vmap(one)
+    return lambda thetas: np.asarray(vm(jnp.asarray(thetas, dtype=float)))
+
+
+def classpt_real_batch(inp, mask, *, ndens=NDENS_PROBE):
+    def F(thetas):
+        rows = []
+        for th in np.asarray(thetas, dtype=float):
+            t = dict(zip(THETA_NAMES, th))
+            # classy pk_mm_real(cs) reads `cs` (classy.pyx:4816); P_gg/P_gm counterterms off.
+            cb = {"b1": t["b1"], "b2": t["b2"], "bG2": t["bG2"], "bGamma3": t["bGamma3"],
+                  "cs0": 0.0, "cs2": 0.0, "cs4": 0.0, "cs": t["c0"], "Pshot": t["P_shot"] / ndens, "b4": 0.0}
+            o = ca.assemble_from_pm(inp["pk_mult"], inp["h"], inp["f"], inp["k_h"], cb, inp["Pd2d2_0"])
+            rows.append(np.stack([o[c] for c in REAL_CHANNELS])[:, mask])
+        return np.stack(rows)
+    return F
+
+
+def real_coefficient_triplet(inp, *, irno_inp=None, ndens=NDENS_PROBE):
+    """Real-space coefficient spectra {"ps", "clax", "classpt"} on the window, IR off in all three. clax-pt
+    runs at hratio = Dratio = 1 whatever the file's AP (ruling above); irno_inp, the CLASS-PT tie-breaker,
+    must be a no-AP IR-off file on the same k grid."""
+    mask = cu.window(inp["k_h"])
+    kw = inp["k_h"][mask]
+    e = clax_ept(inp, ir=False, hratio=1.0, Dratio=1.0)
+    res = {"ps": coefficients(ps_real_batch(ps_model(inp["rbao"], do_irres=False), inp, kw, ndens=ndens),
+                              REAL_MONOMIALS),
+           "clax": coefficients(clax_real_batch(e, mask, ndens=ndens), REAL_MONOMIALS),
+           "classpt": {}}
+    if irno_inp is not None:
+        if has_ap(irno_inp):
+            raise ValueError("ERROR real-space tie-breaker file carries AP (hratio, Dratio != 1); "
+                             "CLASS-PT's AP-projected rows 1, 4, 5 must not be compared with AP-free real space")
+        np.testing.assert_array_equal(irno_inp["k_h"], inp["k_h"])
+        res["classpt"] = coefficients(classpt_real_batch(irno_inp, mask, ndens=ndens), REAL_MONOMIALS)
+    return res, kw
