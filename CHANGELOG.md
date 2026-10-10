@@ -50,7 +50,7 @@ pk_lin_h - pk_nw on the same arrays feeds the same jnp FFT) found the basis
 inputs and their decompositions bitwise equal (max |old - new| = 0), and the
 traced-vs-NumPy primal gap is unchanged (7.657e-15 before and after). This
 holds for every caller whose IR-split tuple was built from the same pk_lin_h
-(every caller in the repo); a legacy NumPy tuple reused at a different P_lin
+(`compute_ept_from_clax` and the new test); a legacy NumPy tuple reused at a different P_lin
 now gets the wiggle basis from pk_lin_h - pk_nw instead of the tuple's stale
 pk_w, honouring `compute_ept`'s docstring promise that the wiggle component is
 recomputed as pk_lin_h - pk_nw. New `tests/test_ept_rsd_basis_gradients.py` runs

@@ -36,11 +36,11 @@ finiteness (`test_e2e_gradient_finite`) or differentiate the AP ratios with P_li
 and no analysis uses, a value of this channel; `test_e2e_gradient_finite` (tests/test_ept_e2e_multicosmo.py on
 branches feat/classpt-e2e-ap-validation and feat/e2e-ap-on-tau0-fix, not on `main`) logs three
 d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (the test asserts finite and nonzero only),
-and they are biased. No gradient-driven multipole likelihood exists on `main`.
+and they are wrong at order unity. No gradient-driven multipole likelihood exists on `main`.
 
 **Who is affected.** Any gradient of P_ℓ(RSD) taken through `compute_ept_from_clax` with respect to parameters that
 move P_lin (A_s, n_s, ω_b, ω_cdm, h, m_ν, …). HMC stays exact (the accept step uses exact energies) but samples less
-efficiently; Fisher matrices, optimisers and gradient diagnostics are biased.
+efficiently; Fisher matrices, optimisers and gradient diagnostics built from them are wrong at order unity.
 
 ## 2. Fix
 
@@ -48,7 +48,7 @@ In `compute_ept`'s `_ir_precomputed` branch, build the RSD basis from the traced
 that the function already computes a few lines earlier, instead of the `stop_gradient` snapshot. On the NumPy path
 (`_ir_precomputed` None) its np.array round trip is removed; values unchanged. On the traced path values do not change
 either: `_ir_resummation_jax` returns `pk_w = pk_lin_h − pk_nw`
-(`ept.py:967`), the same arithmetic as the traced `pk_w`, so the decomposition sees bit-identical inputs.
+(`ept.py:967`), the same arithmetic as the traced `pk_w`, so the decomposition sees bit-identical inputs for a tuple built from this `pk_lin_h`.
 
 Documentation that describes the freeze is updated to describe the new state: `ept.py` lines ~820, 831, 862,
 2001–2009, 2106–2124, 2686, 2725, and the `tests/test_ept_gradients.py` docstrings at 567, 687–701, 772–783 (which
@@ -59,7 +59,7 @@ documented separately); the IR-resummation scheme; the model differences recorde
 
 ## 3. Consequences
 
-- Primal values are unchanged for every caller whose tuple was built from this pk_lin_h (every caller in the repo):
+- Primal values are unchanged for every caller whose tuple was built from this pk_lin_h (`compute_ept_from_clax` and the new test; `tests/test_ept_gradients.py` reuses a fixed tuple at perturbed P_lin but reads only real-space functionals, which never touch this basis):
   at lcdm_fiducial the basis inputs and their decompositions are bitwise equal (scratch check, eager and jit) and the
   traced-vs-NumPy primal gap is 7.657e-15 before and after. A legacy NumPy tuple reused at a different P_lin now gets
   the wiggle basis from pk_lin_h − pk_nw instead of the tuple's stale pk_w, honouring `compute_ept`'s docstring

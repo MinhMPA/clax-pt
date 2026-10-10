@@ -2130,7 +2130,8 @@ def compute_ept(
         # ~90%/~100% in the ps_1loop validation, jobs 24165/24167, z=0.38; fixed Oct 10, 2026).
         # On the NumPy path (no _ir_precomputed) pk_nw / pk_w are concrete and nothing is traced,
         # exactly as before. Values are bit-identical for every caller whose tuple was built from
-        # this pk_lin_h (every caller in the repo; _ir_resummation_jax's pk_w is pk_lin_h - pk_nw
+        # this pk_lin_h (compute_ept_from_clax and tests/test_ept_rsd_basis_gradients.py;
+        # _ir_resummation_jax's pk_w is pk_lin_h - pk_nw
         # too); a legacy NumPy tuple reused at a different P_lin now gets the wiggle basis
         # from pk_lin_h - pk_nw instead of the tuple's stale pk_w, honouring the docstring
         # promise at ~1991-1994.
