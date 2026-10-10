@@ -278,6 +278,51 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
 
 
 # ---------------------------------------------------------------------------
+# Shared L-stable stiff step for the recombination Peebles equations (#48)
+# ---------------------------------------------------------------------------
+
+_ROS2_GAMMA = 1.0 + 1.0 / math.sqrt(2.0)   # ROS2, Verwer et al. 1999 (L-stable)
+
+
+def _smoothstep(s):
+    """CLASS's stage-transition weight f2(s) = 3 s^2 - 2 s^3 (thermodynamics.h:49),
+    with s clipped to [0, 1] so it is exactly 0 or 1 outside the window."""
+    s = jnp.clip(s, 0.0, 1.0)
+    return s * s * (3.0 - 2.0 * s)
+
+
+def _ros2_scalar_step(rate, xe_of, x, h, env0, env1):
+    """One two-stage linearly implicit (ROS2) step of dx/dlna = rate(x_e, x, *env).
+
+    W = 1 - gamma h J,  k1 = h f(s_j, x_j)/W,  k2 = (h f(s_j+1, x_j + k1) - 2 k1)/W,
+    x_j+1 = x_j + 3/2 k1 + 1/2 k2, with gamma = 1 + 1/sqrt(2). J = d rate/d x at
+    the sub-step start with x_e held fixed (ROS2 stays second order for any J).
+    L-stable: a stiff relaxation lands on its equilibrium without overshoot, so
+    no clip is needed. env0/env1: environment tuples at the sub-step's two ends.
+    """
+    xe_j = xe_of(x)
+    f0, J = jax.jvp(lambda y: rate(xe_j, y, *env0), (x,), (jnp.ones_like(x),))
+    W = 1.0 - _ROS2_GAMMA * h * J
+    k1 = h * f0 / W
+    x2 = x + k1
+    f1 = rate(xe_of(x2), x2, *env1)
+    k2 = (h * f1 - 2.0 * k1) / W
+    return x + 1.5 * k1 + 0.5 * k2
+
+
+def _ros2_advance(rate, xe_of, x0, env_of_s, h_total, n_sub):
+    """Advance x over one grid step of length h_total (in ln a) with n_sub ROS2
+    sub-steps; env_of_s(s) gives the environment at fraction s in [0, 1]."""
+    h = h_total / n_sub
+
+    def body(j, x):
+        s0 = jnp.asarray(j, dtype=jnp.result_type(float)) / n_sub
+        return _ros2_scalar_step(rate, xe_of, x, h, env_of_s(s0), env_of_s(s0 + 1.0 / n_sub))
+
+    return jax.lax.fori_loop(0, n_sub, body, x0)
+
+
+# ---------------------------------------------------------------------------
 # Semi-implicit ionization solver (MB95)
 # cf. DISCO-EB thermodynamics_mb95.py:ionize()
 # ---------------------------------------------------------------------------
