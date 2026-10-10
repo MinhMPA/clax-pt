@@ -77,3 +77,30 @@ def xe_on_ref_grid(prim, ref_z):
     from clax.interpolation import CubicSpline
     sp = CubicSpline(jnp.asarray(prim["loga"]), jnp.asarray(prim["xe"]))
     return np.asarray(sp.evaluate(jnp.log(1.0 / (1.0 + jnp.asarray(ref_z)))))
+
+
+def dm_functional(prec, base):
+    """f(h) = sum_k delta_m(k, tau0)^2 through the matter solve (spec D8)."""
+    from clax.perturbations import perturbations_solve_mpk
+
+    def f(h_val):
+        p = replace(as_traced(base), h=h_val)
+        bg = background_solve(p, prec)
+        th = thermodynamics_solve(p, prec, bg)
+        pt = perturbations_solve_mpk(p, prec, bg, th)
+        return jnp.sum(pt.delta_m[:, -1] ** 2)
+    return f
+
+
+def dm_functional_production(prec, base):
+    """Same functional through solve_background_and_thermo (ADR 0001's stable
+    custom_vjp), the path clax.compute and NUTS use. Reverse mode only."""
+    from clax.perturbations import perturbations_solve_mpk
+    from clax.thermodynamics import solve_background_and_thermo
+
+    def f(h_val):
+        p = replace(as_traced(base), h=h_val)
+        bg, th = solve_background_and_thermo(p, replace(prec, th_grad_mode="stable"))
+        pt = perturbations_solve_mpk(p, prec, bg, th)
+        return jnp.sum(pt.delta_m[:, -1] ** 2)
+    return f
