@@ -150,6 +150,22 @@ def test_gate_flags_non_finite_and_attributes():
     assert "vs CLASS-PT" in lines[0]
 
 
+def test_omitted_predicted_covers_exactly_the_closure_lines():
+    """omitted_predicted and restrict_to_closure_lines (used by ps_scheme_predicted) are non-zero on
+    exactly the 13 br.CLOSURE_LINES, one entry per br.CLOSURE_MONOMIALS monomial (pure bookkeeping,
+    synthetic projections)."""
+    names = [f"{n}:{l}" for n in ("IFG2", "fmu2IFG2", "Pk_Id2d2", "Pk_Id2G2", "Pk_IG2G2", "b1b2", "b1bG2")
+             for l in br.ELLS]
+    labels = {br.label(m) for m in br.CLOSURE_MONOMIALS}
+    pred = br.omitted_predicted({n: np.ones(4) for n in names})
+    restricted = br.restrict_to_closure_lines({lab: np.ones((3, 4)) for lab in labels})
+    for p in (pred, restricted):
+        assert set(p) == labels
+        nonzero = {f"{lab}:{ch}" for lab, arr in p.items()
+                   for i, ch in enumerate(br.CHANNELS) if np.any(arr[i] != 0.0)}
+        assert nonzero == set(br.CLOSURE_LINES) and len(br.CLOSURE_LINES) == 13
+
+
 def test_log_record_carries_both_commits(tmp_path, monkeypatch):
     monkeypatch.setattr(br, "LOG_DIR", tmp_path)
     monkeypatch.setattr(br, "ERROR_LOG", tmp_path / "errors.jsonl")

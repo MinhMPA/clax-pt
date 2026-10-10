@@ -2,8 +2,9 @@
 """Code-accuracy gate on coefficient spectra (spec §5.1): ps_1loop vs clax-pt on CLASS-PT's
 own inputs, for every monomial whose translation is exact (spec §4.1). 14 cosmologies x
 z in (0, 0.38, 0.8) in full mode; vc.FAST_CASES x vc.FAST_Z under --fast. Multi-cosmology
-rule: satisfied by construction. The twelve br.CLOSURE_LINES (six F_G2 C1 lines plus the six
-isotropic-loop l2/l4 lines of b2*b2, bG2*bG2, b2*bG2) are logged but not gated here; they are asserted by the
+rule: satisfied by construction. The thirteen br.CLOSURE_LINES (six F_G2 C1 lines, the six
+isotropic-loop l2/l4 lines of b2*b2, bG2*bG2, b2*bG2, and b1*b2:l4 = CLASS-PT's computed-but-unused
+pm[40]) are logged but not gated here; they are asserted by the
 closed-form closure in tests/test_ps1loop_model_difference.py. Failures carry the CLASS-PT tie-breaker verdict (spec §6)."""
 from __future__ import annotations
 
