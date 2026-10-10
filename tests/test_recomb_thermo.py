@@ -9,7 +9,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from clax.background import background_solve
 from clax.interpolation import CubicSpline
+from clax.thermodynamics import thermodynamics_solve
 from tests.recomb_test_utils import (QS, THETAS, THERMO_GRIDS, as_traced, load_ref,
                                      spike_ratio, tables, tangent_tables, thermo_prec,
                                      xe_on_ref_grid, z_of)
@@ -265,9 +267,13 @@ def test_coarse_grid_1500_helium_hydrogen_spike_free(recomb_cosmology, theta):
 @pytest.mark.slow
 def test_jit_and_eager_primal_agree(recomb_cosmology):
     name, p = recomb_cosmology
-    prec = thermo_prec(3000)
-    a = np.asarray(tables(as_traced(p), prec)["xe"])
-    b = np.asarray(jax.jit(lambda q: tables(q, prec))(as_traced(p))["xe"])
+    prec = thermo_prec(20000)
+    pt = as_traced(p)
+    # thermodynamics_solve is itself @jax.jit, so tables() always runs it compiled;
+    # __wrapped__ is the uncompiled function (R20, what the probe's floor_diag measured).
+    # R21: 20000 points, where the probe measured and the RK4 code amplifies the rounding-level jit/eager gap; 3000 does not.
+    a = np.asarray(thermodynamics_solve.__wrapped__(pt, prec, background_solve(pt, prec)).xe_of_loga.y)
+    b = np.asarray(jax.jit(lambda q: tables(q, prec))(pt)["xe"])
     d = float(np.max(np.abs(a - b)))
     print(f"{name}: max |x_e(jit) - x_e(eager)| = {d:.3e}")
     assert d < 1e-12, f"ERROR jit vs eager x_e differ by {d:.3e} ({name})"
