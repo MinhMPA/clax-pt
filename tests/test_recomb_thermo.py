@@ -14,8 +14,11 @@ from tests.recomb_test_utils import (QS, THETAS, THERMO_GRIDS, as_traced, load_r
                                      spike_ratio, tables, tangent_tables, thermo_prec,
                                      xe_on_ref_grid, z_of)
 
-pytestmark = pytest.mark.slow
 _CACHE = {}
+# R12: under --fast the 3000-point (fit_cl) grid runs at fiducial; the default
+# 20000-point grid and the FD tests (a jvp compile per cosmology and theta) are slow.
+GRIDS = [pytest.param(n, marks=pytest.mark.slow, id=str(n)) if n > 3000 else n
+         for n in THERMO_GRIDS]
 
 
 def _prim_tan(name, p, n, theta="h"):
@@ -64,6 +67,9 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
     for q in QS:
         Q, jv = np.asarray(prim[q]), np.asarray(tan[q])
         f1, f3 = fds[0][q], fds[1][q]
+        # R13: a NaN tangent would fall out of every max() below, so reject it first.
+        assert np.all(np.isfinite(jv)) and np.all(np.isfinite(Q)), \
+            f"ERROR non-finite {q} tangent or value at the sample z ({name}, {theta})"
         small1, small3 = np.abs(f1 / Q) <= floor, np.abs(f3 / Q) <= floor
         cls_a = ~small1 & ~small3 & (np.abs(f1 - f3) <= 1e-4 * np.abs(f1))
         cls_b = small1 & small3
@@ -78,18 +84,22 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
                 worst_b, loc_b = float(r), (q, float(zs[i]))
     print(f"{name} d/d{theta}: A {n_a} B {n_b} C {n_c} of {len(zs) * len(QS)}, "
           f"worst A |jvp/FD-1| {worst_a:.3e}, worst B |jvp/Q| {worst_b:.3e}")
-    # Minimum resolved points: a third of the sample, except theta = h. At fixed
-    # z >= 400 with omega_b and omega_cdm fixed, h enters the tables only through
-    # Lambda (~1e-9 of H), so d ln Q/dh is at the rounding floor, class B, and
-    # the h tangent is checked there instead.
-    min_a = 0 if theta == "h" else len(zs) * len(QS) // 3
+    # Minimum resolved points: a third of the sample must be in class A, except
+    # theta = h. At fixed z >= 400 with omega_b and omega_cdm fixed, h enters the
+    # tables only through Lambda (~1e-9 of H), so d ln Q/dh is at the rounding
+    # floor, class B, and the h tangent is checked there instead. A third of the
+    # sample must still be classified (A or B), so an h test cannot pass with
+    # every point skipped in class C.
+    n_min = len(zs) * len(QS) // 3
+    min_a = 0 if theta == "h" else n_min
     assert n_a >= min_a, f"ERROR resolved FD points {n_a} < {min_a} ({name}, {theta})"
+    assert n_a + n_b >= n_min, f"ERROR classified FD points {n_a + n_b} < {n_min} ({name}, {theta})"
     assert worst_a <= 1e-3, f"ERROR tangent vs FD {worst_a:.3e} > 1e-3 ({name}, {theta})"
     assert worst_b <= 1e-6, (f"ERROR tangent where the derivative vanishes: |jvp/Q| {worst_b:.3e} > 1e-6 "
                              f"at {loc_b} ({name}, {theta})")
 
 
-@pytest.mark.parametrize("n", THERMO_GRIDS)
+@pytest.mark.parametrize("n", GRIDS)
 def test_xe_helium_window_matches_class(recomb_cosmology, n):
     name, p = recomb_cosmology
     prim, _ = _prim_tan(name, p, n)
@@ -101,18 +111,21 @@ def test_xe_helium_window_matches_class(recomb_cosmology, n):
     assert rel[i] <= 1e-3, f"ERROR x_e helium window {rel[i]:.3e} > 1e-3 ({name}, n={n})"
 
 
-@pytest.mark.parametrize("n", THERMO_GRIDS)
+@pytest.mark.parametrize("n", GRIDS)
 @pytest.mark.parametrize("theta", THETAS)
 def test_no_derivative_spikes_helium_window(recomb_cosmology, n, theta):
     name, p = recomb_cosmology
     prim, tan = _prim_tan(name, p, n, theta)
+    for q in QS:      # R13: max() below would silently drop a NaN ratio
+        assert np.all(np.isfinite(tan[q])) and np.all(np.isfinite(prim[q])), \
+            f"ERROR non-finite {q} table or tangent ({name}, {theta}, n={n})"
     z = z_of(prim["loga"])
     worst = max(spike_ratio(tan[q] / prim[q], z, 1800.0, 6000.0) + (q,) for q in QS)
     print(f"{name} n={n} d/d{theta}: worst helium-window spike ratio {worst[0]:.3g} ({worst[2]} at z={worst[1]:.1f})")
     assert worst[0] < 10.0, f"ERROR spike ratio {worst[0]:.3g} ({name}, {theta}, n={n})"
 
 
-@pytest.mark.parametrize("n", THERMO_GRIDS)
+@pytest.mark.parametrize("n", GRIDS)
 def test_values_smooth_helium_window(recomb_cosmology, n):
     name, p = recomb_cosmology
     prim, _ = _prim_tan(name, p, n)
@@ -127,6 +140,7 @@ def test_values_smooth_helium_window(recomb_cosmology, n):
 ZS_HE = np.array([5500., 4500., 3800., 3400., 3200., 3000., 2800., 2600., 2400., 2200., 2000.])
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("theta", THETAS)
 def test_tangents_match_converged_fd_helium(recomb_cosmology, theta):
     _fd_check(recomb_cosmology, theta, ZS_HE)

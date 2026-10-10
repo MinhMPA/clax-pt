@@ -287,8 +287,10 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     inv_A_He = 1.0 / jnp.maximum(A_He, 1e-300)
     C_He = (inv_A_He + _Lambda_He) / (inv_A_He + _Lambda_He + Rup_He)
     # CLASS has no C_He switch near x_He = 1: its x_He switches are the K_He form
-    # (Heflag, wrap_recfast.c:243-244) and dx_He/dz = 0 for x_He < 1e-15
-    # (wrap_recfast.c:328-329); C_He is always wrap_recfast.c:346.
+    # (Heflag, wrap_recfast.c:243-244), and C_He is always wrap_recfast.c:346.
+    # For x_He < 1e-15 CLASS sets dx_He/dz = 0 (wrap_recfast.c:328-329); clax
+    # instead keeps the probe's C_He = 1 guard here and still evaluates the rate.
+    # The effect on x_e is at most fHe * 1e-15 (x_He itself is below 1e-15).
     C_He = jnp.where(xHe < 1e-15, 1.0, C_He)
 
     dxHe_dlna = -(
@@ -687,7 +689,8 @@ def thermodynamics_solve(
         dlna_main = new_loga - lna0
         lnH0 = jnp.log(adot / a**2)          # a' = a^2 H -> H at the step start
         lnH1 = jnp.log(new_H)
-        f_He_xe = 0.25 * Y_He / (1.0 - Y_He)  # x_e bookkeeping (made CLASS's in D4)
+        f_He_xe = 0.25 * Y_He / (1.0 - Y_He)  # exactly-4 helium/hydrogen ratio; a later commit
+        # switches every site to CLASS's 3.9715
 
         def sub_env(s):
             a_s = jnp.exp(lna0 + s * dlna_main)
@@ -729,8 +732,9 @@ def thermodynamics_solve(
         w_saha = jax.nn.sigmoid(0.1 * (z_half - 1600.0))
         new_xHII = w_saha * xHII_saha + (1.0 - w_saha) * new_xHII_recfast
 
-        # Helium: Peebles ODE for HeII→HeI (replaces Saha at z<5000)
-        # HeIII→HeII uses Saha (accurate at z>5000)
+        # Helium. HeIII->HeII: Saha (_ionHe). HeII->HeI: the MB95 Saha above
+        # z ~ 5000, then the CLASS-style HeI Saha down to z = 2870, then the
+        # Peebles ODE below it, blended over z 2770-2870 (staging block below).
         fHe = Y_He / (4.0 * (1.0 - Y_He))
         _, new_xHeIII = _ionHe(
             new_tb, new_a, new_xHII, xHeII, xHeIII, Y_He, H0_kmsMpc, Omega_b
@@ -767,7 +771,8 @@ def thermodynamics_solve(
             new_tb, new_a, new_xHII, xHeII, xHeIII, Y_He, H0_kmsMpc, Omega_b
         )
 
-        # Blend: Saha at z>5000, Peebles below
+        # Blend: the MB95 Saha above z ~ 5000; below it the staged value (HeI Saha
+        # down to z = 2870, the Peebles ODE below, blended over z 2770-2870).
         w_saha_He = jax.nn.sigmoid(0.05 * (z_half - 5000.0))
         new_xHeII = w_saha_He * new_xHeII_saha + (1.0 - w_saha_He) * xHeII_staged
 
