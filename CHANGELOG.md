@@ -8,6 +8,47 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 10, 2026: RSD one-loop basis now differentiable through the traced IR split (clax-pt)
+
+**Bug.** `compute_ept`'s `_ir_precomputed` path built the redshift-space FFTLog
+basis from a `stop_gradient` snapshot of the IR split (the "PHASE-2 FREEZE"
+comment, explicit since 322a6ab; a leftover of the NumPy-only splitter).
+d(P_0,2,4)/d(P_lin) therefore omitted the one-loop response. Forward-mode AD
+vs central finite differences was ~90-200% off on the amplitude and stretch
+tangents at lcdm z=0.38 (job 24203, lcdm_fiducial, relative error at l=0/2/4):
+amplitude 0.91/0.93/1.98, stretch 1.06/1.60/1.70, wiggle 0.035/0.027/0.13,
+matter monopole 0.92. Found by Task 7 of the clax-pt vs ps_1loop_jax
+cross-validation plan. f and AP-ratio derivatives were unaffected. No earlier
+clax result depended on this channel: the existing gradient tests hold the IR
+split fixed in both arms or use real-space functionals, and the e2e campaign's
+gradient tests assert finiteness / AP ratios only.
+
+**Fix.** The basis is decomposed from the traced pk_nw / pk_w already in hand
+(`clax/ept.py`, commit 01816a9). Values are identical to the last bit: the old
+and new basis inputs and their decompositions are bitwise equal (max |old - new|
+= 0 in a scratch check), and the NumPy path is untouched. New
+`tests/test_ept_rsd_basis_gradients.py` runs AD vs FD along the amplitude,
+stretch and wiggle tangents (plus the matter monopole) on the `lcdm_cosmology`
+grid.
+
+**Measured (after the fix, 5-cosmology grid, job 24208, 30 passed).**
+- AD vs FD, worst over the grid: amplitude 1.5e-10 (omega_b_high, l=4),
+  stretch 2.8e-9 (omega_cdm_low, l=4), wiggle 5.3e-10 (h_high, l=4); matter
+  monopole <= 1.5e-11. Before the fix the same quantities were 0.03-2 at
+  lcdm_fiducial (job 24203, above).
+- Forward mode = reverse mode: <= 3.8e-14 over the grid.
+- Traced path vs NumPy path, primal: 7.657e-15 at fiducial before AND after the
+  fix (max 1.1e-14 over the grid), i.e. the fix does not move P_ell.
+
+**Test pass rates.** The five EPT test files: 40 passed / 20 skipped (job
+24209), identical to the pre-fix baseline (job 24201).
+`tests/test_ept_accuracy.py` 9/9 (job 24211). Fast suite PASS (job 24210). New
+test file: red before the fix (job 24203), green at fiducial after it (job
+24205), green on the full grid (job 24208).
+
+**Still pinned (documented).** The DST grid endpoints inside
+`_ir_resummation_jax` (h-derivative boundary term).
+
 ### Oct 7, 2026: Linear P(k) at z=0 was 0.33% low through the C_l solve -- fixed, and the silent clamp now raises
 
 **Bug (smsharma/clax#42, part 1).** `perturbations_solve` integrates to
