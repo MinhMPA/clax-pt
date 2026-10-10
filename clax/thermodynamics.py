@@ -113,6 +113,18 @@ _a_VF_He_CGS = 10.0**(-16.744) * 1e6  # ≈ 1.803e-11 cm^3/s
 _b_VF_He = 0.711
 _T_0_He = 10.0**0.477121      # ≈ 3.0 K
 _T_1_He = 10.0**5.114         # ≈ 1.3e5 K
+# HeI ionization temperature, cf. wrap_recfast.c:78 and thermodynamics.c:823
+# (const_Tion_HeI = h c L_He1_ion / k_B), ~285,335 K.
+_CB1_He1 = _hP_SI * _c_SI * _L_He1_ion / _kB_SI
+# CLASS approximation-stage boundaries (smsharma/clax#48):
+# start of regime "H" (x_He evolved below it): precisions.h:201-202,
+# thermodynamics.c:868 (ap_z_limits) and :894 (smoothing delta);
+# start of regime "frec" (x_H evolved below it): precisions.h:204-205,
+# thermodynamics.c:870 and :895.
+_Z_EARLY_H_RECOMB = 2870.0
+_DZ_EARLY_H_RECOMB = 50.0
+_Z_FULL_H_RECOMB = 1600.0
+_DZ_FULL_H_RECOMB = 50.0
 
 # Legacy constants kept for MB95 helium Saha / _ionize
 _EI_eV = 13.598286071938324     # H ionization energy [eV]
@@ -257,7 +269,14 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     # cf. wrap_recfast.c:254-260
     tauHe_s = _A2P_s_He * _CK_He_CGS * 3.0 * n_1s_He / Hz_safe
     tauHe_s_safe = jnp.maximum(tauHe_s, 1e-30)
-    pHe_s = (1.0 - jnp.exp(-tauHe_s_safe)) / tauHe_s_safe
+    # p_s = (1 - e^{-tau})/tau, wrap_recfast.c:260, cancellation-free (expm1),
+    # series below tau = 1e-4 (truncation tau^4/120 < 1e-18); double-where
+    # keeps both branches finite for AD.
+    _small = tauHe_s_safe < 1e-4
+    _t_big = jnp.where(_small, 1.0, tauHe_s_safe)
+    pHe_s = jnp.where(_small,
+                      1.0 - tauHe_s_safe / 2.0 + tauHe_s_safe**2 / 6.0 - tauHe_s_safe**3 / 24.0,
+                      -jnp.expm1(-_t_big) / _t_big)
     K_He = 1.0 / jnp.maximum(_A2P_s_He * pHe_s * 3.0 * n_1s_He, 1e-30)
 
     # Peebles C_He with Boltzmann 2s-2p factor
@@ -267,7 +286,10 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     A_He = K_He * n_1s_He * He_Boltz
     inv_A_He = 1.0 / jnp.maximum(A_He, 1e-300)
     C_He = (inv_A_He + _Lambda_He) / (inv_A_He + _Lambda_He + Rup_He)
-    C_He = jnp.where((xHe < 1e-15) | (xHe > 0.999), 1.0, C_He)
+    # CLASS has no C_He switch near x_He = 1: its x_He switches are the K_He form
+    # (Heflag, wrap_recfast.c:243-244) and dx_He/dz = 0 for x_He < 1e-15
+    # (wrap_recfast.c:328-329); C_He is always wrap_recfast.c:346.
+    C_He = jnp.where(xHe < 1e-15, 1.0, C_He)
 
     dxHe_dlna = -(
         xe * xHe * nH * Rdown_He
@@ -584,7 +606,7 @@ def thermodynamics_solve(
     init = {
         'a': a0, 'adot': adot0, 'tau': tau0, 'tb': tb0,
         'xHII': xHII0, 'xe': xe0, 'xHeII': xHeII0, 'xHeIII': xHeIII0,
-        'cs2': cs20,
+        'cs2': cs20, 'xHeII_ode': xHeII0,
     }
     keys = ('a', 'adot', 'tau', 'tb', 'xHII', 'xe', 'xHeII', 'xHeIII', 'cs2')
 
@@ -658,6 +680,23 @@ def thermodynamics_solve(
         H_new = new_H * _c_over_Mpc
         TR_new = T_cmb / new_a
 
+        # Sub-step environment for the recombination ROS2 steps (#48): at
+        # fraction s of this grid step, ln a is linear and ln H, T_b are linear
+        # in ln a. Returns the rate arguments (n_H, H, z, T_b, T_r) in CGS.
+        lna0 = jnp.log(a)
+        dlna_main = new_loga - lna0
+        lnH0 = jnp.log(adot / a**2)          # a' = a^2 H -> H at the step start
+        lnH1 = jnp.log(new_H)
+        f_He_xe = 0.25 * Y_He / (1.0 - Y_He)  # x_e bookkeeping (made CLASS's in D4)
+
+        def sub_env(s):
+            a_s = jnp.exp(lna0 + s * dlna_main)
+            return (n_H_0_cgs / a_s**3,
+                    jnp.exp(lnH0 + s * (lnH1 - lnH0)) * _c_over_Mpc,
+                    1.0 / a_s - 1.0,
+                    tb + s * (new_tb - tb),
+                    T_cmb / a_s)
+
         k1 = _recfast_dxHII_dlna(xe, xHII, n_H_cgs, H_cgs, z_half, tbhalf, TR_half)
         xHII_2 = jnp.clip(xHII + 0.5 * dlna_step * k1, 0.0, 1.0)
         xe_2 = xHII_2 + 0.25 * Y_He / (1.0 - Y_He) * (xHeII + 2.0 * xHeIII)
@@ -697,21 +736,31 @@ def thermodynamics_solve(
             new_tb, new_a, new_xHII, xHeII, xHeIII, Y_He, H0_kmsMpc, Omega_b
         )
 
-        # HeII Peebles ODE with sub-stepped Heun (10 sub-steps for stability)
-        # The helium Peebles rate can be ~200/efold, requiring dlna << 0.005.
-        # Main steps have dlna~0.02, so we sub-step to avoid overshoot.
-        n_He_sub = 10
-        dlna_He_sub = dlna_step / n_He_sub
-        def he_sub_step(i, xHe_i):
-            xe_i = new_xHII + 0.25 * Y_He / (1.0 - Y_He) * (xHe_i + 2.0 * new_xHeIII)
-            dxHe_1 = _recfast_dxHe_dlna(
-                xe_i, xHe_i, n_H_cgs, H_cgs, z_half, tbhalf, TR_half, fHe)
-            xHe_pred = jnp.clip(xHe_i + dlna_He_sub * dxHe_1, 0.0, 1.0)
-            xe_pred = new_xHII + 0.25 * Y_He / (1.0 - Y_He) * (xHe_pred + 2.0 * new_xHeIII)
-            dxHe_2 = _recfast_dxHe_dlna(
-                xe_pred, xHe_pred, nH_new, H_new, z_new, new_tb, TR_new, fHe)
-            return jnp.clip(xHe_i + 0.5 * dlna_He_sub * (dxHe_1 + dxHe_2), 0.0, 1.0)
-        new_xHeII_peebles = jax.lax.fori_loop(0, n_He_sub, he_sub_step, xHeII)
+        # HeII -> HeI (smsharma/clax#48): CLASS staging. Regime "He2" (z > 2870)
+        # is Saha; below, the Peebles equation (wrap_recfast.c:346-349, dx_He/dz
+        # -> d/dlna) advanced by the shared L-stable ROS2 step, 10 sub-steps,
+        # no clip.
+        new_xHeII_peebles = _ros2_advance(
+            lambda xe_, x_, *env: _recfast_dxHe_dlna(xe_, x_, *env, fHe),
+            lambda x_: new_xHII + f_He_xe * (x_ + 2.0 * new_xHeIII),
+            carry['xHeII_ode'], sub_env, dlna_main, 10)
+        # Saha HeII <-> HeI with H fully ionized, thermodynamics.c:4053-4067:
+        #   rhs = 4 (C_R T_b)^{3/2} exp(-T_HeI/T_b) / n_H(z)          (:4057)
+        #   x_e = 0.5 (sqrt((rhs-1)^2 + 4(1+fHe) rhs) - (rhs-1)),  x_He = (x_e-1)/fHe
+        # taken in the cancellation-free root of y = fHe x_He:
+        #   y^2 + (1+rhs) y - fHe rhs = 0.
+        rhs_He = 4.0 * (_CR_CGS * new_tb)**1.5 * jnp.exp(
+            jnp.maximum(-_CB1_He1 / new_tb, -500.0)) / nH_new
+        xHeII_saha_he2 = 2.0 * rhs_He / (
+            (1.0 + rhs_He) + jnp.sqrt((1.0 + rhs_He)**2 + 4.0 * fHe * rhs_He))
+        # ODE state: the Saha value while z > 2870 (initial condition on entering
+        # regime "H", thermodynamics.c:2059-2065), the Peebles step below.
+        new_xHeII_ode = jnp.where(z_new > _Z_EARLY_H_RECOMB, xHeII_saha_he2,
+                                  new_xHeII_peebles)
+        # Output smoothing after the switch, thermodynamics.c:2973-2987:
+        # f2((z_lim - z)/(2 Dz)), exactly 0 or 1 outside z in [2770, 2870].
+        w_He = _smoothstep((_Z_EARLY_H_RECOMB - z_new) / (2.0 * _DZ_EARLY_H_RECOMB))
+        xHeII_staged = w_He * new_xHeII_ode + (1.0 - w_He) * xHeII_saha_he2
 
         # Saha fallback for z>5000 (HeIII→HeII epoch, Peebles not needed)
         new_xHeII_saha, _ = _ionHe(
@@ -720,7 +769,7 @@ def thermodynamics_solve(
 
         # Blend: Saha at z>5000, Peebles below
         w_saha_He = jax.nn.sigmoid(0.05 * (z_half - 5000.0))
-        new_xHeII = w_saha_He * new_xHeII_saha + (1.0 - w_saha_He) * new_xHeII_peebles
+        new_xHeII = w_saha_He * new_xHeII_saha + (1.0 - w_saha_He) * xHeII_staged
 
         # Total ionization fraction
         new_xe = new_xHII + 0.25 * Y_He / (1.0 - Y_He) * (new_xHeII + 2.0 * new_xHeIII)
@@ -734,6 +783,7 @@ def thermodynamics_solve(
             'a': new_a, 'adot': new_adot, 'tau': new_tau, 'tb': new_tb,
             'xHII': new_xHII, 'xe': new_xe, 'xHeII': new_xHeII,
             'xHeIII': new_xHeIII, 'cs2': new_cs2,
+            'xHeII_ode': new_xHeII_ode,
         }
         return new_carry, new_carry
 
