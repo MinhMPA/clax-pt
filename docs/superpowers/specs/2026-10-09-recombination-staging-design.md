@@ -135,7 +135,7 @@ This is the variant ("VE") that met all four of the user's criteria at 12 cosmol
 
 **D8. The downstream functional is defined in the spec, not imported from a parked branch.**
 - f = Σ_k δ_m(k, τ₀)², from `perturbations_solve_mpk`.
-- Preset: `fast_cl` with `pt_ode_solver="rodas5"`, `pt_k_max_cl = 0.15` Mpc⁻¹, `pt_ode_rtol = pt_ode_atol = 1e-4`.
+- Preset: `fast_cl` (whose `pt_k_max_cl` is 0.15 Mpc⁻¹) with `pt_ode_solver="rodas5"`, `pt_ode_rtol = pt_ode_atol = 1e-4` and `ode_max_steps = 16384`, exactly the probe's preset.
 - For the C_ℓ seam (S4): F = Σ_{ℓ=30}^{1200} ln C_ℓ^TT at the `fit_cl` preset.
 
 **D9. Delivery.** Branch `fix/recombination-staging` from `4d084b5`; **every commit passes the full suite**. Commits:
@@ -179,11 +179,15 @@ Prior art: the toy-ODE tests in `tests/test_rosenbrock.py`.
 | x_e vs CLASS, z 2870–5000 | ≤ 1×10⁻³ | 6.3×10⁻³ | 6.4×10⁻⁴ |
 | x_e vs CLASS, z 1590–1650 | ≤ 1×10⁻³ | 0.18 | 2.8×10⁻⁴ |
 | x_e vs CLASS, z 800–1550 | ≤ 1×10⁻³ | 5.5×10⁻⁴ (0.97 on `fit_cl`) | 1.2×10⁻⁴ (4.4×10⁻⁴ on `fit_cl`) |
-| Visibility-peak shift vs CLASS | < 0.01 in z | 0.040 (0.256 on `fit_cl`) | 0.001 (0.013 on `fit_cl`) |
-| Values smooth: max \|Δ² x_e\|, z 1500–6000 | < 3×10⁻⁵ | 0.36 | 8.4×10⁻⁶ |
+| Visibility-peak shift vs CLASS | < 0.01 in z (20000 points); < 0.03 (3000 points) | 0.040 (0.256 on `fit_cl`) | 0.001 (0.013 on `fit_cl`) |
+| Values smooth: max \|Δ² x_e\|, z 1500–6000 | < 3×10⁻⁵ (20000 points); < 1.33×10⁻³ (3000 points) | 0.36 | 8.4×10⁻⁶ (20000 points) |
 | Spike ratio†, Q ∈ {x_e, c_s², T_b}, θ ∈ {h, ω_b, ω_cdm, Y_He, N_eff}, z 300–6000 | < 10 | 9.5×10¹⁴ | ≤ 1.19 (20000); ≤ 2.55 (3000) |
 | Tangents vs converged FD at sampled z‡ | ≤ 1×10⁻³ | up to 7.4 | ≤ 1×10⁻³ |
 | CPU vs GPU tangents (GPU-only§) | < 10⁻¹⁰ | factor 21 | 2.7×10⁻¹³ |
+
+The two per-grid bars were corrected while planning (Oct 10, 2026):
+- **Visibility peak:** grid spacing limits peak location on the coarse grid, where the fix itself measures 0.013. The 3000-point bar is 2× that, rounded up.
+- **Values smooth:** second differences scale as the square of the grid spacing, so the 3000-point bar is 3×10⁻⁵ × (20000/3000)² = 1.33×10⁻³. The probe did not measure it; the plan measures it first, and if the fix misses, it is reported as a design question.
 
 † max over grid points of |d ln Q/dθ| ÷ its median over ±25 neighbours, median floored at 10⁻⁸.
 ‡ only at redshifts where FD's own two steps (relative 10⁻³, 3×10⁻³) agree to better than 10⁻⁴. Skipped points are counted in the printout. The probe's 1.1×10⁻³ for z ≤ 2000 came from FD-limited points.
