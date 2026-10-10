@@ -1113,7 +1113,7 @@ def log_record(*, layer: str, case: str, z: float, preset: str, errors: dict, ex
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `slurm/run-ps1loop-pytest.sh tests/test_ps1loop_bridge.py -q`
-Expected: `12 passed`. If `test_three_in_one_projection_matches_get_pk_ell_ref` fails, `ps_multipoles_jax` has drifted from `get_pk_ell_ref`. Re-read ps_1loop.py:316-357 and fix the bridge. Never widen the tolerance.
+Expected: `12 passed` (13 once Task 5 adds `test_omitted_predicted_covers_exactly_the_closure_lines`). If `test_three_in_one_projection_matches_get_pk_ell_ref` fails, `ps_multipoles_jax` has drifted from `get_pk_ell_ref`. Re-read ps_1loop.py:316-357 and fix the bridge. Never widen the tolerance.
 
 - [ ] **Step 5: Fast suite, then commit**
 
@@ -1348,12 +1348,12 @@ def model_difference_factory(model, inp, kw, *, ndens=NDENS_PROBE):
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `slurm/run-ps1loop-pytest.sh tests/test_ps1loop_model_difference.py --fast -q`
-Expected: `6 passed`, with closure lines naming the largest model difference.
+Expected: `12 passed` (3 closure + 3 IR-off + 3 omitted-projection reproduction + 3 omitted-projection closure; Task 5 amendments), with closure lines naming the largest model difference.
 
 If the closure fails while the IR-off test passes, the remaining gap is not the documented model difference. Treat it as a finding, following the Task 4 Step 2 protocol. One case to check first: if the residual's shape is k²·P_IR, record it as a UV-convention difference (spec §6) and ask the user. Do not re-fit anything.
 
 Run: `slurm/run-ps1loop-pytest.sh tests/test_ps1loop_model_difference.py -q`
-Expected: `56 passed` (42 closure + 14 IR-off).
+Expected: `140 passed` (42 closure + 14 IR-off + 42 omitted-projection reproduction + 42 omitted-projection closure; Task 5 amendments).
 
 - [ ] **Step 5: Fast suite, then commit**
 

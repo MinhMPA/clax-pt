@@ -90,8 +90,9 @@ Pd2d2_0 is each code's own (clax-pt: `EPTComponents.Pd2d2_0`; CLASS-PT: the file
 
 ### 4.2 Model differences (what the map cannot remove)
 
-These are differences of *model*, not numerics. Each has a closed form evaluated on a
-common P_IR(k,μ) (ps_1loop's own), and §5.2 tests that the measured difference equals it.
+These are differences of *model*, not numerics. Each has a closed form, and §5.2 tests that the
+measured difference equals it. Items 1-3 are evaluated on ps_1loop's own P_IR(k,μ). Items 4-5 use
+clax's μ-loop inputs and clax's P_nw, which ps_1loop 0.5.0's P_nw matches to 1.4e-5 of P.
 
 1. **k² counterterms** — clax-pt projects each cs_ℓ term onto its own ℓ only
    (ept.py:1207-1209, nonlinear_pt.c:4498-4552); ps_1loop projects the whole
@@ -102,9 +103,24 @@ common P_IR(k,μ) (ps_1loop's own), and §5.2 tests that the measured difference
    ps_1loop multiplies the full μ-dependent P_IR in true coordinates.
 3. **a0 under AP** — ps_1loop's k_t² carries μ² dependence; clax-pt adds a0 to ℓ = 0
    in observed k. Leak: Δ₂ = (2/3)·V·a0/ndens·(hratio² − 1/Dratio²)·(k/k_nl)².
-4. **Omitted projections** — CLASS-PT (and clax-pt, which mirrors it) store no ℓ = 4
-   F_G2 term; with μ-dependent damping and AP ps_1loop has a small one. These show up
-   as *structural zeros* (§5.1) and are attributed as "CLASS-PT convention" (§6).
+4. **Omitted projections** (13 lines; user decisions Oct 8, 2026). CLASS-PT, and clax-pt,
+   which mirrors it, build these projections' integrands inside the 40-node μ-loop but never
+   add them to P_ℓ. ps_1loop keeps them; the μ-dependent BAO damping and AP generate them.
+   - F_G2 ℓ2/ℓ4: bG2:ℓ4, bGamma3:ℓ4, b1·bG2:ℓ2/ℓ4, b1·bGamma3:ℓ2/ℓ4.
+   - Isotropic loops ℓ2/ℓ4: b2², bG2², b2·bG2.
+   - b1·b2:ℓ4: CLASS-PT's computed-but-unused pm[40]; pm[41] P_4_b1bG2 enters b1·bG2:ℓ4.
+   They are excluded from the §5.1 gate and asserted by closure (§5.2). The closed form
+   rebuilds each integrand from clax's own μ-loop inputs, after a reproduction check
+   (≤ 1e-10) of every projection clax keeps.
+5. **IR-resummation scheme** (user decision Oct 10, 2026). The two codes resum the loops differently:
+   - ps_1loop (and its successor elf): loop[P_nw] + e^{−x(μ)}(loop[P] − loop[P_nw]).
+   - CLASS-PT and clax-pt: an isotropically damped input P_nw + e^{−k²Σ²}P_w for the bias loops, plus
+     p_lo(μ) = (P_nw + e^{−x(μ)}P_w)/P_res on F_G2 only.
+
+   The difference nearly cancels at ℓ = 0 and survives at ℓ = 2, 4, i.e. on the item-4 lines.
+   Its closed form, X_ps = C[P_nw] + e^{−x(μ)}(C[P] − C[P_nw]), is built from clax's IR-off
+   channels C[·] on the shared P and on clax's P_nw, with clax's Σ², δΣ² and AP geometry. The
+   item-4 closure predicts ps − clax = ⟨X_ps⟩_ℓ − clax_ℓ.
 
 ## 5. Gates
 

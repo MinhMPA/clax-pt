@@ -4,19 +4,29 @@
 
 Closure: for c0, c2, c4, cfog, cfog*b1, cfog*b1^2 and a0, the measured ps_1loop - clax-pt
 coefficient difference must EQUAL the closed-form model difference evaluated on ps_1loop's own
-P_IR.
+P_IR (ps's _get_pk_irres_rsd).
 
-Omitted projections (controller amendments, Oct 8, 2026; user decision Oct 9, 2026): the 13
+Omitted projections (user decisions Oct 8 and Oct 10, 2026; spec §4.2 items 4-5): the 13
 br.CLOSURE_LINES -- six F_G2 (C1) lines, the l = 2, 4 moments of the isotropic loops b2*b2,
 bG2*bG2, b2*bG2, and b1*b2:l4 -- are projections whose integrand clax-pt's mu-loop builds
 (mirroring CLASS-PT) but never adds to P_l. The closure asserts these omitted projections PLUS
 ps_1loop's IR-resummation scheme difference (ps: loop[P_nw] + e^{-x(mu)}(loop[P] - loop[P_nw]);
-clax-pt / CLASS-PT: the channel scheme), a documented model difference with a closed form on
-ps's own P_IR (spec §4.2): br.ps_scheme_predicted, built from clax's own mu-loop inputs and its
-IR-off channels. The rebuild of clax's mu-loop must first reproduce every projection clax DOES
-keep to <= 1e-10 (it guards the port). ps_1loop runs at its default nfft = 256 (locked
-decision); the closure remainder (<= 0.56% of max|clax b1*bG2:l2|, BAO-phased) shrinks
-0.52% -> 0.14% at nfft = 512, which the Task 9 convergence ladder records.
+clax-pt / CLASS-PT: isotropically damped loop input, p_lo(mu) on F_G2 only), a documented model
+difference whose closed form, br.ps_scheme_predicted, is built from clax's own IR-off channels on
+clax's P_nw, Sigma^2 and AP geometry. Three checks guard it:
+  * reproduction: the rebuild of clax's mu-loop equals every projection clax keeps to <= 1e-10;
+  * kept coefficient: the rebuilt full clax-scheme projection minus the omitted part equals clax's
+    reported coefficient to <= 1e-10, on every multipole of the closure monomials;
+  * discrimination: on each closure line whose measured |ps - clax| exceeds 1e-3 of the gate
+    denominator, the closure residual must be <= 0.5 x the measured difference, so a line cannot
+    pass the gate merely by being small. Lines measured at <= 1e-3 (0.1% of the coefficient's
+    scale, e.g. the l = 4 isotropic loops) are physically negligible and held to the gate only.
+ps_1loop runs at its default nfft = 256 (locked decision). The closure remainder is BAO-phased and
+on the 1% gate worst for b1*bG2:l2, 0.56% of its max|clax| at z = 0; the candidate is ps
+interpolating its loops in k on its 256-point grid (not O(P_w^2), which cancels, nor AP, since that
+worst case has none).
+Scratch measurement (Oct 10, 2026; 3 files at z = 0.38): the b1*bG2:l2 remainder 0.52% -> 0.14% at
+nfft = 512; to be formalised by Task 9.
 
 42 files in full mode (closures, reproduction) and the 14 z = 0 files (IR off); vc.FAST_CASES at
 vc.FAST_Z under --fast. Multi-cosmology rule: by construction."""
@@ -31,7 +41,9 @@ from scripts import validation_cosmologies as vc
 from tests import ept_campaign_utils as cu
 from tests import ps1loop_bridge as br
 
-REPRO_TOL = 1e-10
+REPRO_TOL = 1e-10      # rebuilt vs clax's own projections / coefficients, fraction of their scale
+DISCRIM_MIN = 1e-3     # lines measured below this (fraction of the gate denominator) are negligible
+DISCRIM_RATIO = 0.5    # closure residual <= DISCRIM_RATIO x measured difference above DISCRIM_MIN
 
 
 def pytest_generate_tests(metafunc):
@@ -109,8 +121,10 @@ def test_omitted_projections_reproduce_clax(case_z):
 def test_omitted_projections_close(case_z):
     """closure = clax + (ps - clax) - predicted on the 13 br.CLOSURE_LINES, normal gate thresholds;
     predicted = the omitted projections plus ps's IR-scheme difference (br.ps_scheme_predicted).
-    Logged per line: the measured difference, the prediction, and its split into the pure omitted
-    projection (br.omitted_predicted) and the scheme term (the rest)."""
+    Also asserts the kept-coefficient check and the discrimination check (module docstring). Logged
+    per line: measured, predicted, residual, residual/measured, the split of the prediction into the
+    pure omitted projection (br.omitted_predicted) and the scheme term, the kept-coefficient error,
+    and clax vs the CLASS-PT twin (tie-breaker, not asserted)."""
     case, z = case_z
     inp = br.shared_inputs(cu.require_reference(case, z))
     res, kw = br.coefficient_triplet(inp, br.CLOSURE_MONOMIALS)
@@ -119,26 +133,50 @@ def test_omitted_projections_close(case_z):
     captured = br.capture_gl_inputs(inp)
     pred = br.ps_scheme_predicted(inp, kw, clax, captured=captured)
     omitted = br.omitted_predicted(br.omitted_projections(inp, kw, captured=captured))
-    closure = {"ps": {lab: clax[lab] + (res["ps"][lab] - clax[lab]) - pred[lab] for lab in pred},
+    full_clax = br.clax_scheme_projections(inp, kw, captured=captured)
+    closure = {"ps": {lab: clax[lab] + (res["ps"][lab] - clax[lab]) - pred[lab] for lab in labels},
                "clax": clax, "classpt": {}}
-    others = tuple(f"{lab}:{ch}" for lab in pred for ch in br.CHANNELS
+    others = tuple(f"{lab}:{ch}" for lab in labels for ch in br.CHANNELS
                    if f"{lab}:{ch}" not in br.CLOSURE_LINES)
     errs, lines = br.gate(closure, kw, exclude=others)
-    measured, _ = br.gate({"ps": {lab: res["ps"][lab] for lab in pred}, "clax": clax, "classpt": {}}, kw)
+    measured, _ = br.gate({"ps": {lab: res["ps"][lab] for lab in labels}, "clax": clax, "classpt": {}}, kw)
     errs = {n: errs[n] for n in br.CLOSURE_LINES}
-    size, size_omitted, size_scheme = {}, {}, {}
+
+    # kept coefficient: <X_clax>_l - omitted == clax's reported coefficient, every multipole
+    kept = {}
+    for lab in labels:
+        sc = max(float(np.max(np.abs(clax[lab]))), 1e-300)
+        for i, ch in enumerate(br.CHANNELS):
+            d = np.abs(full_clax[lab][i] - omitted[lab][i] - clax[lab][i])
+            kept[f"{lab}:{ch}"] = float(np.max(d) / sc) if np.all(np.isfinite(d)) else float("nan")
+    for n, e in kept.items():
+        if not e <= REPRO_TOL:
+            lines.append(f"ERROR kept-coefficient {n}: rebuilt clax-scheme minus omitted vs clax {e:.2e} > {REPRO_TOL:.0e}")
+
+    per_line, ratios = {}, {}
     for n in br.CLOSURE_LINES:
         lab, ch = n.split(":")
         i = br.CHANNELS.index(ch)
         sc = float(np.max(np.abs(clax[lab])))
-        size[n] = br.coef_error(clax[lab][i] + pred[lab][i], clax[lab][i], kw, scale=sc)["err"]
-        size_omitted[n] = br.coef_error(clax[lab][i] + omitted[lab][i], clax[lab][i], kw, scale=sc)["err"]
-        size_scheme[n] = br.coef_error(clax[lab][i] + pred[lab][i] - omitted[lab][i], clax[lab][i], kw,
-                                       scale=sc)["err"]
+        m, r = measured[n]["err"], errs[n]["err"]
+        rec = {"measured": m, "residual": r, "k_residual": errs[n]["k"],
+               "predicted": br.coef_error(clax[lab][i] + pred[lab][i], clax[lab][i], kw, scale=sc)["err"],
+               "omitted": br.coef_error(clax[lab][i] + omitted[lab][i], clax[lab][i], kw, scale=sc)["err"],
+               "scheme": br.coef_error(clax[lab][i] + pred[lab][i] - omitted[lab][i], clax[lab][i], kw,
+                                       scale=sc)["err"],
+               "clax_vs_classpt": (br.coef_error(clax[lab][i], res["classpt"][lab][i], kw, scale=sc)["err"]
+                                   if lab in res.get("classpt", {}) else None)}
+        if m > DISCRIM_MIN:
+            rec["ratio"] = ratios[n] = r / m
+            if not ratios[n] <= DISCRIM_RATIO:
+                lines.append(f"ERROR discrimination {n}: closure residual {100 * r:.3f}% > {DISCRIM_RATIO} x "
+                             f"measured {100 * m:.3f}% (ratio {ratios[n]:.3f}) at k={errs[n]['k']:.3f}")
+        per_line[n] = rec
     br.log_record(layer="closure", case=case, z=z, preset="omitted-projections+ps-scheme", errors=errs,
-                  extra={"measured": {n: measured[n] for n in br.CLOSURE_LINES}, "predicted_size": size,
-                         "omitted_size": size_omitted, "scheme_size": size_scheme})
-    w = max(errs, key=lambda n: np.inf if not np.isfinite(errs[n]["err"]) else errs[n]["err"])
-    print(f"{case} z={z:.2f} [omitted closure] {br.worst(errs)} (measured {100 * measured[w]['err']:.3f}%, "
-          f"predicted {100 * size[w]:.3f}%)")
+                  extra={"lines": per_line, "kept_coefficient": kept})
+    wr = max(ratios, key=ratios.get) if ratios else None
+    wk = max(kept, key=lambda n: np.inf if not np.isfinite(kept[n]) else kept[n])
+    print(f"{case} z={z:.2f} [omitted closure] {br.worst(errs)}; worst ratio "
+          + (f"{wr} {ratios[wr]:.3f} (of {len(ratios)} lines > {DISCRIM_MIN:.0e})" if wr else "n/a")
+          + f"; kept-coefficient worst {kept[wk]:.1e}")
     assert not lines, f"{case} z={z:.2f}:\n" + "\n".join(lines)

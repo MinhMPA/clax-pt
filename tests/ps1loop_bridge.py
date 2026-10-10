@@ -8,7 +8,7 @@ residual is one-loop numerics or a documented model difference (spec §4.2).
 
 Conventions pinned here, each with its test in tests/test_ps1loop_bridge.py:
   * AP: ps_1loop alpha_perp = Dratio, alpha_para = 1/hratio, Jacobian V = hratio/Dratio^2
-    (ps_1loop.py:328-344 vs ept.py:1135-1141).
+    (ps_1loop.py:320-335 vs ept.py:1135-1141).
   * Basis: THETA_NAMES is ps_1loop's; `to_clax` is the basis translation (spec §4.1).
   * Coefficient spectra: exact stencils on {-1, 0, 1} per parameter. P_l has degree <= 2 in
     every parameter, so the stencils have no truncation error -- only round-off.
@@ -148,7 +148,7 @@ def ps_params(theta: dict, *, h, f, ndens) -> dict:
 
 def ps_multipoles_jax(model, k_h, pk, h, f, a_perp, a_para, theta, k, *, ap, ndens, num=256):
     """All three multipoles from ONE P(k, mu), with the numerics of
-    PowerSpectrum1Loop.get_pk_ell / get_pk_ell_ref (ps_1loop.py:316-357): mu = linspace(0,1,num),
+    PowerSpectrum1Loop.get_pk_ell / get_pk_ell_ref (ps_1loop.py:308-347): mu = linspace(0,1,num),
     Simpson's rule, weight (2l+1) L_l(mu). Parity: test_three_in_one_projection_matches_get_pk_ell_ref."""
     import quadax
     from ps_1loop_jax.utils_math import legendre
@@ -197,10 +197,10 @@ def to_clax(theta: dict, *, f, ndens, Pd2d2_0, hratio, Dratio) -> dict:
             "cs4": c4,
             "cs": 0.0,
             "b4": theta["cfog"],
-            # ps_1loop: P_shot/ndens x Jacobian V, P_d2d2(k->0) subtracted (ps_1loop.py:381-384);
+            # ps_1loop: P_shot/ndens x Jacobian V, P_d2d2(k->0) subtracted (ps_1loop.py:124-135, _p22);
             # clax-pt: Pshot in observed coordinates, +0.25 b2^2 Pd2d2_0 added back (classy.pyx:4911).
             "Pshot": V * theta["P_shot"] / ndens - 0.25 * theta["b2"] ** 2 * Pd2d2_0,
-            # ps_1loop.py:576-588 in true coordinates: a0 (k_t/k_nl)^2 -> l=0 moment; a2 k_t^2 mu_t^2 = k^2 mu^2 hratio^2
+            # ps_1loop.py:577-591 in true coordinates: a0 (k_t/k_nl)^2 -> l=0 moment; a2 k_t^2 mu_t^2 = k^2 mu^2 hratio^2
             "a0": V * theta["a0"] / ndens * knl2 * (2.0 / (3.0 * Dratio**2) + hratio**2 / 3.0),
             "a2": V * hratio**2 * theta["a2"] / ndens * knl2}
 
@@ -394,7 +394,7 @@ def model_difference_factory(model, inp, kw, *, ndens=NDENS_PROBE):
     fingers-of-god term and a0, both on ps_1loop's own P_IR(k_t, mu_t). P_IR is built once
     (theta-independent); the returned F is polynomial in theta, so `coefficients` applies.
 
-    ps_1loop model (true coordinates, Jacobian V; ps_1loop.py:496-547, 576-588, 328-344):
+    ps_1loop model (true coordinates, Jacobian V; ps_1loop.py:497-547, 577-591, 320-335):
       V [-2 k_t^2 (c0 + c2 f mu_t^2 + c4 f^2 mu_t^4) P_IR - cfog f^4 k_t^4 mu_t^4 (b1 + f mu_t^2)^2 P_IR
          + a0 (k_t/k_nl)^2 / ndens], projected on L_l(mu) over the observed mu.
     clax-pt model (ept.py:1207-1209 and pk_gg_l0/l2/l4):
@@ -403,7 +403,7 @@ def model_difference_factory(model, inp, kw, *, ndens=NDENS_PROBE):
     from ps_1loop_jax import ir_resum
     h, f, hr, Dr = inp["h"], inp["f"], inp["hratio"], inp["Dratio"]
     pk_data = {"k": jnp.asarray(inp["k_h"]), "pk": jnp.asarray(inp["pk"])}
-    # same call as PowerSpectrum1Loop.get_pkmu (ps_1loop.py:291-292)
+    # same call as PowerSpectrum1Loop.get_pkmu (ps_1loop.py:284)
     pk_nw_data = ir_resum.get_pk_nw_data(pk_data, h, khmin=7e-5, khmax=7.0,
                                          kmin_interp=model._kmin, kmax_interp=model._kmax)
     a_perp, a_para = ap_alphas(hr, Dr)
@@ -437,8 +437,8 @@ def model_difference_factory(model, inp, kw, *, ndens=NDENS_PROBE):
 
 # --------------------------------------------------------------------------- omitted projections (spec §4.2 item 4)
 # The 13 CLOSURE_LINES are projections whose integrand clax-pt's 40-node mu-loop builds but never adds to
-# P_l (mirroring CLASS-PT), while ps_1loop keeps them. Closed form (task-4-diagnosis.md §2.1; controller
-# amendments of Oct 8, 2026): rebuild each mu-loop integrand from the EXACT arguments clax's
+# P_l (mirroring CLASS-PT), while ps_1loop keeps them. Closed form (controller amendments and user decisions
+# of Oct 8, 2026): rebuild each mu-loop integrand from the EXACT arguments clax's
 # `_gl_multipoles` receives (spy below), with clax's own `_channels_at` and GL table, and project it on the
 # omitted l with clax's AP-folded weights W_l = (2l+1)/2 w L_l(mu) hratio/Dratio^2.
 # Provenance: ported from the validated scratch implementation
@@ -491,15 +491,15 @@ def capture_gl_inputs(inp, **overrides):
     return e, calls[0]
 
 
-def mu_loop_projections(cap) -> dict[str, np.ndarray]:
-    """{"<integrand>:<l>": (Nk,)} -- the l = 0, 2, 4 projections, on clax's whole k grid, of the mu-loop
-    integrands behind the closure lines: "IFG2" = IFG2_in, "fmu2IFG2" = f mu_t^2 IFG2_in, the isotropic
-    loops c(Pk_Id2d2), c(Pk_Id2G2), c(Pk_IG2G2), and "b1b2" / "b1bG2" = c(Pk_0_b) + L2(mu_t) c(Pk_2_b).
-    Line-by-line mirror of clax/ept.py _gl_multipoles: geometry and weights 1133-1150, channels at k_t
-    1155, damping Sigma_tot(mu_t) 1167-1169, p_lin 1175, p_lo and IFG2_in 1214-1216, isotropic loops
-    1222-1223, b1b2/b1bG2 1224-1232 (CLASS-PT nonlinear_pt.c:4382-4481, 5273-5351)."""
+def mu_loop_geometry(cap) -> dict:
+    """clax's mu-loop geometry for one captured `_gl_multipoles` call, shared by every rebuild below
+    (`mu_loop_projections`, `clax_scheme_projections`, `ps_scheme_predicted`), so the reproduction test
+    covers the gated path. Returns k (knots, (Nk,)), f, mu2t = mu_t^2 (40, 1), kk = k_t (40, Nk),
+    W = {l: AP-folded GL weights (2l+1)/2 w L_l(mu) hratio/Dratio^2} and Exp = e^{-k_t^2 Sigma_tot^2(mu_t)}
+    (40, Nk). Line-by-line mirror of clax/ept.py _gl_multipoles 1133-1150 and 1167-1169 (CLASS-PT
+    nonlinear_pt.c:4382-4394, 4470-4481)."""
     import clax.ept as E
-    chan, k, f, s2, ds2 = cap["chan"], cap["k"], cap["f"], cap["s2"], cap["ds2"]
+    k, f, s2, ds2 = cap["k"], cap["f"], cap["s2"], cap["ds2"]
     mu = jnp.asarray(E._GAUSS_NODES)
     w = jnp.asarray(E._GAUSS_WEIGHTS)
     if mu.shape != (40,):
@@ -515,19 +515,47 @@ def mu_loop_projections(cap) -> dict[str, np.ndarray]:
     L2 = 0.5 * (3.0 * mu ** 2 - 1.0)
     L4 = (35.0 * mu ** 4 - 30.0 * mu ** 2 + 3.0) / 8.0
     W = {0: 0.5 * w * V, 2: 2.5 * w * L2 * V, 4: 4.5 * w * L4 * V}
-    at = E._channels_at(k, chan, kk)
     Sig = (s2 * (1.0 + f * mu2t * (2.0 + f))
            + ds2 * f ** 2 * mu2t * (mu2t - 1.0))
     Exp = jnp.exp(-Sig * kk ** 2)
+    return {"k": k, "f": f, "mu2t": mu2t, "kk": kk, "W": W, "Exp": Exp}
+
+
+def _ifg2_in(at, Exp):
+    """clax's F_G2 integrand IFG2_in = p_lo P_IFG2, p_lo = (P_nw + P_w e^{-x})/P_bin (ept.py:1175, 1214-1216)."""
     p_lin = at["pk_nw"] + at["pk_w"] * Exp
     Pbin = at["pk_disc"]
     p_lo = p_lin / jnp.where(Pbin > 1e-100, Pbin, 1.0)
-    IFG2_in = p_lo * at["Pk_IFG2"]
+    return p_lo * at["Pk_IFG2"]
+
+
+def _window_mask(inp, kw, caps) -> np.ndarray:
+    """The comparison-window mask, after checking kw and every captured mu-loop k grid against inp."""
+    mask = cu.window(inp["k_h"])
+    if not np.array_equal(np.asarray(kw, dtype=float), inp["k_h"][mask]):
+        raise ValueError("ERROR kw is not the comparison window of these inputs")
+    for cap in caps:
+        if not np.array_equal(np.asarray(cap["k"]), inp["k_h"]):
+            raise RuntimeError("ERROR clax's mu-loop k grid differs from the shared-input k grid")
+    return mask
+
+
+def mu_loop_projections(cap) -> dict[str, np.ndarray]:
+    """{"<integrand>:<l>": (Nk,)} -- the l = 0, 2, 4 projections, on clax's whole k grid, of the mu-loop
+    integrands behind the closure lines: "IFG2" = IFG2_in, "fmu2IFG2" = f mu_t^2 IFG2_in, the isotropic
+    loops c(Pk_Id2d2), c(Pk_Id2G2), c(Pk_IG2G2), and "b1b2" / "b1bG2" = c(Pk_0_b) + L2(mu_t) c(Pk_2_b).
+    Mirror of clax/ept.py _gl_multipoles: geometry `mu_loop_geometry`, channels at k_t 1155, IFG2_in
+    1214-1216, isotropic loops 1222-1223, b1b2/b1bG2 1224-1232 (CLASS-PT nonlinear_pt.c:5273-5351)."""
+    import clax.ept as E
+    g = mu_loop_geometry(cap)
+    f, mu2t = g["f"], g["mu2t"]
+    at = E._channels_at(g["k"], cap["chan"], g["kk"])
+    IFG2_in = _ifg2_in(at, g["Exp"])
     L2t = 0.5 * (3.0 * mu2t - 1.0)
     integrands = {"IFG2": IFG2_in, "fmu2IFG2": IFG2_in * f * mu2t,
                   **{n: at[n] for n in ("Pk_Id2d2", "Pk_Id2G2", "Pk_IG2G2")},
                   **{b: at[f"Pk_0_{b}"] + L2t * at[f"Pk_2_{b}"] for b in ("b1b2", "b1bG2")}}
-    return {f"{name}:{l}": np.asarray(jnp.einsum("m,mk->k", W[l], val))
+    return {f"{name}:{l}": np.asarray(jnp.einsum("m,mk->k", g["W"][l], val))
             for name, val in integrands.items() for l in ELLS}
 
 
@@ -535,11 +563,7 @@ def omitted_projections(inp, kw, *, captured=None) -> dict[str, np.ndarray]:
     """`mu_loop_projections` of clax's own mu-loop on the shared inputs, on the comparison window kw
     (= window_k(inp)). `captured` = capture_gl_inputs(inp), to reuse one compute_ept."""
     _, cap = capture_gl_inputs(inp) if captured is None else captured
-    mask = cu.window(inp["k_h"])
-    if not np.array_equal(np.asarray(kw, dtype=float), inp["k_h"][mask]):
-        raise ValueError("ERROR kw is not the comparison window of these inputs")
-    if not np.array_equal(np.asarray(cap["k"]), inp["k_h"]):
-        raise RuntimeError("ERROR clax's mu-loop k grid differs from the shared-input k grid")
+    mask = _window_mask(inp, kw, (cap,))
     return {n: v[mask] for n, v in mu_loop_projections(cap).items()}
 
 
@@ -568,19 +592,22 @@ def omitted_predicted(proj) -> dict[str, np.ndarray]:
     return {lab: np.stack(r) for lab, r in rows.items()}
 
 
-# --------------------------------------------------------------------------- ps IR-resummation scheme (spec §4.2)
+# --------------------------------------------------------------------------- ps IR-resummation scheme (spec §4.2 item 5)
 # `omitted_predicted` is clax's OWN mu-loop integrand projected on the omitted l. ps_1loop also resums every
-# loop differently: loop[P_nw] + e^{-x(mu)} (loop[P] - loop[P_nw]) (ps_1loop.py get_pkmu_irres_LO_NLO), while
-# clax-pt / CLASS-PT feed the isotropically damped P_nw + e^{-k^2 Sigma^2} P_w into the bias loops and rescale
-# only F_G2 by p_lo(mu). The two schemes nearly cancel at l = 0 but not at l = 2, 4 -- exactly the omitted
-# projections (task-4-diagnosis.md §1 E3c, §2.3). USER DECISION (Oct 9, 2026; option (a) of task-5-report.md
-# §6): the closure predicts ps - clax = <X_ps>_l - clax_l, with each monomial's integrand X_ps rebuilt in ps's
-# scheme from clax's own IR-OFF channels -- a documented model difference with a closed form (spec §4.2).
+# loop differently: loop[P_nw] + e^{-x(mu)} (loop[P] - loop[P_nw]) (ps_1loop.py:474-494,
+# get_pkmu_irres_LO_NLO), while clax-pt / CLASS-PT feed the isotropically damped P_nw + e^{-k^2 Sigma^2} P_w
+# into the bias loops and rescale only F_G2 by p_lo(mu) = (P_nw + e^{-x(mu)} P_w)/P_res. For F_G2 the
+# difference is f mu^2 [-P_nw J[D P_w] + e^{-x(mu)} P_nw J[P_w]] + O(P_w^2) (D = e^{-q^2 Sigma^2} on the loop
+# momentum): the two pieces nearly cancel in the monopole, but the mu-dependent e^{-x(mu)} survives at
+# l = 2, 4 -- exactly the omitted projections. USER DECISION (Oct 10, 2026): the closure predicts
+# ps - clax = <X_ps>_l - clax_l, with each monomial's integrand X_ps rebuilt in ps's scheme from clax's own
+# IR-OFF channels, on clax's P_nw, Sigma^2, dSigma^2 and AP geometry (ps 0.5.0's P_nw equals CLASS-PT's to
+# 1.4e-5 of P) -- a documented model difference with a closed form.
 # Provenance: ported from the scratch diagnostic
 # /lustre/work/n2minh/std/clax/ps1loop/scratch-task5/test_t5_diag.py (`geometry`, `mono_integrands`, `one`),
 # validated over all 42 files in job 23255 (all 13 lines close; worst 0.56% on a 1% gate, 0.71% on a 2% gate).
 
-# The IR-off bias channels the closure monomials' integrands read (clax sign convention, ept.py:1907-1926).
+# The bias channels the closure monomials' integrands read (clax sign convention, ept.py:1907-1926).
 PS_SCHEME_CHANNELS = ("Pk_IFG2", "Pk_Id2d2", "Pk_Id2G2", "Pk_IG2G2", "Pk_0_b1b2", "Pk_2_b1b2",
                       "Pk_0_b1bG2", "Pk_2_b1bG2", "Pk_0_bG2", "Pk_2_bG2", "Pk_4_bG2")
 
@@ -615,48 +642,42 @@ def restrict_to_closure_lines(pred: dict) -> dict:
     return out
 
 
+def _project_monomials(integ, W, mask) -> dict:
+    """{label: (3, Nw)}: l = 0, 2, 4 projections of each CLOSURE_MONOMIALS integrand, on the window."""
+    return {label(m): np.stack([np.asarray(jnp.einsum("m,mk->k", W[l], integ[label(m)]))[mask] for l in ELLS])
+            for m in CLOSURE_MONOMIALS}
+
+
+def clax_scheme_projections(inp, kw, *, captured=None) -> dict:
+    """{monomial label: (3, Nw)} = <X_clax(mono)>_l: each closure monomial's FULL integrand in clax's own
+    IR-on mu-loop (`closure_integrands` on the captured channels, F_G2 = IFG2_in) projected on l = 0, 2, 4.
+    Minus `omitted_predicted` it must equal clax's reported coefficient on all three multipoles -- the
+    kept-coefficient check that ties the rebuild to clax's accessors (test_omitted_projections_close)."""
+    import clax.ept as E
+    _, cap = capture_gl_inputs(inp) if captured is None else captured
+    mask = _window_mask(inp, kw, (cap,))
+    g = mu_loop_geometry(cap)
+    at = E._channels_at(g["k"], cap["chan"], g["kk"])
+    return _project_monomials(closure_integrands(at, g["f"], g["mu2t"], _ifg2_in(at, g["Exp"])), g["W"], mask)
+
+
 def ps_scheme_predicted(inp, kw, clax_coef, *, captured=None) -> dict:
     """{monomial label: (3, Nw)} predicted ps_1loop - clax-pt on the 13 CLOSURE_LINES, ps's IR scheme included:
         <X_ps(mono)>_l - clax_coef[mono]_l,   X_ps = C[P_nw](k_t) + e^{-x(k_t, mu_t)} (C[P] - C[P_nw])(k_t),
     with C[.] clax's IR-OFF bias channels computed on the shared P and on clax's own P_nw (both splined at k_t
     by clax's `_channels_at`), x = k_t^2 Sigma_tot^2(mu_t), and Sigma^2, dSigma^2, P_nw and the AP geometry
-    all taken from the same IR-on mu-loop (`captured` = capture_gl_inputs(inp)). IR off, the F_G2 channel
-    carries its external spectrum (p_lo = 1), so C_FG2[X] = X I_FG2[X], as in ps's loop[X]. <.>_l uses clax's
-    AP-folded GL weights. clax_coef = coefficient_triplet's "clax" entry on the same kw. Rows outside
-    CLOSURE_LINES are zero. Equals omitted_predicted + <X_ps - X_clax>_l (the scheme term) to round-off."""
+    all taken from the same IR-on mu-loop (`captured` = capture_gl_inputs(inp)) via `mu_loop_geometry`. IR
+    off, the F_G2 channel carries its external spectrum (p_lo = 1), so C_FG2[X] = X I_FG2[X], as in ps's
+    loop[X]. clax_coef = coefficient_triplet's "clax" entry on the same kw. Rows outside CLOSURE_LINES are
+    zero. Equals omitted_predicted + <X_ps - X_clax>_l (the scheme term) to round-off."""
     import clax.ept as E
     _, cap_on = capture_gl_inputs(inp) if captured is None else captured
     _, cap_off = capture_gl_inputs(inp, ir=False)
     _, cap_nw = capture_gl_inputs(inp, ir=False, pk=jnp.asarray(cap_on["chan"]["pk_nw"]))
-    mask = cu.window(inp["k_h"])
-    if not np.array_equal(np.asarray(kw, dtype=float), inp["k_h"][mask]):
-        raise ValueError("ERROR kw is not the comparison window of these inputs")
-    for cap in (cap_on, cap_off, cap_nw):
-        if not np.array_equal(np.asarray(cap["k"]), inp["k_h"]):
-            raise RuntimeError("ERROR clax's mu-loop k grid differs from the shared-input k grid")
-    k, f = cap_on["k"], cap_on["f"]
-    mu = jnp.asarray(E._GAUSS_NODES)
-    w = jnp.asarray(E._GAUSS_WEIGHTS)
-    hratio = jnp.asarray(cap_on["hratio"], dtype=k.dtype)
-    Dratio = jnp.asarray(cap_on["Dratio"], dtype=k.dtype)
-    inv_D2 = 1.0 / Dratio ** 2
-    ap_fac = jnp.sqrt(inv_D2 + (hratio ** 2 - inv_D2) * mu ** 2)[:, None]       # ept.py:1137-1140
-    mu2t = (mu[:, None] * hratio / ap_fac) ** 2
-    kk = k[None, :] * ap_fac
-    V = hratio / Dratio ** 2
-    L2 = 0.5 * (3.0 * mu ** 2 - 1.0)
-    L4 = (35.0 * mu ** 4 - 30.0 * mu ** 2 + 3.0) / 8.0
-    W = {0: 0.5 * w * V, 2: 2.5 * w * L2 * V, 4: 4.5 * w * L4 * V}              # ept.py:1150
-    Sig = (cap_on["s2"] * (1.0 + f * mu2t * (2.0 + f))
-           + cap_on["ds2"] * f ** 2 * mu2t * (mu2t - 1.0))                      # ept.py:1167-1168
-    Exp = jnp.exp(-Sig * kk ** 2)                                               # e^{-x(k_t, mu_t)}
-    C = E._channels_at(k, {n: cap_off["chan"][n] for n in PS_SCHEME_CHANNELS}, kk)
-    Cn = E._channels_at(k, {n: cap_nw["chan"][n] for n in PS_SCHEME_CHANNELS}, kk)
-    X = {n: Cn[n] + Exp * (C[n] - Cn[n]) for n in PS_SCHEME_CHANNELS}
-    integ = closure_integrands(X, f, mu2t, X["Pk_IFG2"])
-    pred = {}
-    for mono in CLOSURE_MONOMIALS:
-        lab = label(mono)
-        proj = np.stack([np.asarray(jnp.einsum("m,mk->k", W[l], integ[lab]))[mask] for l in ELLS])
-        pred[lab] = proj - np.asarray(clax_coef[lab], dtype=float)
-    return restrict_to_closure_lines(pred)
+    mask = _window_mask(inp, kw, (cap_on, cap_off, cap_nw))
+    g = mu_loop_geometry(cap_on)
+    C = E._channels_at(g["k"], {n: cap_off["chan"][n] for n in PS_SCHEME_CHANNELS}, g["kk"])
+    Cn = E._channels_at(g["k"], {n: cap_nw["chan"][n] for n in PS_SCHEME_CHANNELS}, g["kk"])
+    X = {n: Cn[n] + g["Exp"] * (C[n] - Cn[n]) for n in PS_SCHEME_CHANNELS}
+    proj = _project_monomials(closure_integrands(X, g["f"], g["mu2t"], X["Pk_IFG2"]), g["W"], mask)
+    return restrict_to_closure_lines({lab: proj[lab] - np.asarray(clax_coef[lab], dtype=float) for lab in proj})

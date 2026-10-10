@@ -47,7 +47,7 @@ def test_ap_alphas_reproduce_clax_true_coordinates():
     hratio, Dratio = 1.031, 0.974
     a_perp, a_para = br.ap_alphas(hratio, Dratio)
     mu, k = np.linspace(-1.0, 1.0, 11), 0.2
-    fac = np.sqrt(1.0 + mu**2 * ((a_perp / a_para) ** 2 - 1.0))          # ps_1loop.py:332-334
+    fac = np.sqrt(1.0 + mu**2 * ((a_perp / a_para) ** 2 - 1.0))          # ps_1loop.py:325-327
     mu_ps, k_ps = mu * (a_perp / a_para) / fac, k * fac / a_perp
     ap_fac = np.sqrt(1.0 / Dratio**2 + (hratio**2 - 1.0 / Dratio**2) * mu**2)   # ept.py:1138
     mu_cl, k_cl = mu * hratio / ap_fac, k * ap_fac                            # ept.py:1139-1140
