@@ -802,27 +802,29 @@ def _ir_resummation_jax(
     The separate out-of-DST-grid rule (P_nw = P_lin, P_w = 0, :2991-2997) is
     kept as in the numpy twin; see there for why dropping it is not cosmetic.
 
-    Wired into `compute_ept_from_clax` (Task 3), this retires two of the
-    three stop_gradient channels its "stop_gradient rationale" note used to
+    Wired into `compute_ept_from_clax` (Task 3), this function retired two
+    stop_gradient channels that its "stop_gradient rationale" note used to
     document: the numpy IR-resummation input snapshot of pk_h, and the
     rs_h channel feeding compute_ept -- both flow through here untouched
     by stop_gradient. This also closes the previously-documented 1.39%
     ln10A_s-class residual (job 13132): pk_nw structurally dropping
     d(pk_nw)/d(pk_lin_h) is exactly the derivative this function restores;
     `test_pk_nw_gradient_exists_and_matches_fd` in
-    tests/test_ir_resummation_jax.py checks it directly against FD. ONE
-    frozen channel survives this closure, consistent with
-    `compute_ept_from_clax`'s "stop_gradient rationale" note: THIS function's
-    own DST grid endpoints (k_min2/k_max2 above, built from a concrete
-    h_conc) and the static `in_range` mask derived from them -- now the
-    leading suspect for the measured h end-to-end residual (see the CAVEAT
-    on the ENDPOINTS DELIBERATELY STATIC comment below, and the h FINDING
-    in tests/test_ept_gradients.py). The second channel this note used to
-    list, the RSD FFTLog basis (a stop_gradient snapshot of this function's
-    pk_nw/pk_w at compute_ept's `_ir_precomputed` RSD consumption), was
-    removed Oct 10, 2026: compute_ept now decomposes the traced pk_nw and
-    pk_w = pk_lin_h - pk_nw, so d(P_ell)/d(pk_lin_h) carries the one-loop
-    response (tests/test_ept_rsd_basis_gradients.py).
+    tests/test_ir_resummation_jax.py checks it directly against FD. A
+    further channel, the RSD snapshot (a stop_gradient copy of this
+    function's pk_nw/pk_w at compute_ept's `_ir_precomputed` RSD
+    consumption), was removed Oct 10, 2026: it fed both the RSD one-loop
+    FFTLog basis and the no-wiggle spectrum of the angular integration, and
+    compute_ept now uses the traced pk_nw and pk_w = pk_lin_h - pk_nw, so
+    d(P_ell)/d(pk_lin_h) carries the no-wiggle tree response as well as
+    the one-loop response (tests/test_ept_rsd_basis_gradients.py). ONE
+    frozen channel is left, consistent with `compute_ept_from_clax`'s
+    "stop_gradient rationale" note: the h-dependence of THIS function's own
+    DST grid (k_min2/k_max2 above, built from a concrete h_conc, and the
+    static `in_range` mask derived from them) -- the leading suspect for the
+    measured h end-to-end residual (see the CAVEAT on the ENDPOINTS
+    DELIBERATELY STATIC comment below, and the h FINDING in
+    tests/test_ept_gradients.py).
 
     Args:
         pk_lin_h:   P_lin(k) in (Mpc/h)^3, shape (N,), TRACED
@@ -2119,13 +2121,19 @@ def compute_ept(
     # traced inputs, and returns jnp arrays for NumPy or jnp input alike.
     if prec.ir_resummation:
         # The RSD one-loop basis is decomposed from the SAME pk_nw / pk_w (= pk_lin_h - pk_nw)
-        # used for the tree and the real-space loops above. On the _ir_precomputed path both are
-        # traced, so d(P_ell)/d(pk_lin_h) carries the one-loop basis response (the earlier
-        # stop_gradient snapshot -- "PHASE-2 FREEZE", a leftover of the NumPy-only splitter --
-        # dropped it: AD vs FD was ~90-100% off along P_lin directions, ps_1loop validation
-        # Task 7, Oct 10, 2026; fixed Oct 10, 2026). On the NumPy path (no _ir_precomputed)
-        # pk_nw / pk_w are concrete and nothing is traced, exactly as before. Values are
-        # bit-identical on both paths: _ir_resummation_jax's pk_w is pk_lin_h - pk_nw too.
+        # used for the tree and the real-space loops above, and pk_nw_jnp (the no-wiggle spectrum
+        # of the angular integration) is that same pk_nw. On the _ir_precomputed path both are
+        # traced, so d(P_ell)/d(pk_lin_h) carries the no-wiggle tree and one-loop responses (the
+        # earlier stop_gradient snapshot -- "PHASE-2 FREEZE", a leftover of the NumPy-only
+        # splitter -- fed the basis AND pk_nw_jnp, i.e. the RSD tree, counterterms, P13ratio and
+        # IFG2 rescaling, and dropped both: AD vs FD 0.9-2.0 along amplitude/stretch, job 24203;
+        # ~90%/~100% in the ps_1loop validation, jobs 24165/24167, z=0.38; fixed Oct 10, 2026).
+        # On the NumPy path (no _ir_precomputed) pk_nw / pk_w are concrete and nothing is traced,
+        # exactly as before. Values are bit-identical for every caller whose tuple was built from
+        # this pk_lin_h (every caller in the repo; _ir_resummation_jax's pk_w is pk_lin_h - pk_nw
+        # too); a legacy NumPy tuple reused at a different P_lin now gets the wiggle basis
+        # from pk_lin_h - pk_nw instead of the tuple's stale pk_w, honouring the docstring
+        # promise at ~1991-1994.
         # cf. nonlinear_pt.c lines 8215, 8246, 8562, 8586 (x_nw / x_w bases).
         cmsym_nw_jnp, _ = _fftlog_decompose(pk_nw, kmin, kmax, nmax, b)
         cmsym_w_jnp, _  = _fftlog_decompose(pk_w,  kmin, kmax, nmax, b)
@@ -2684,10 +2692,13 @@ def compute_ept_from_clax(
     docstring). The RSD FFTLog basis is traced since Oct 10, 2026:
     compute_ept's `_ir_precomputed` branch builds cmsym_nw / cmsym_w from
     the traced pk_nw and pk_w = pk_lin_h - pk_nw instead of the former
-    stop_gradient snapshot ("PHASE-2 FREEZE"), so d(P_ell)/d(params)
-    carries the one-loop response (tests/test_ept_rsd_basis_gradients.py;
-    values unchanged). pk_mm_real is unaffected -- it never reads those
-    FFTLog bases, so neither the freeze nor its removal changes it.
+    stop_gradient snapshot ("PHASE-2 FREEZE"), which also fed the
+    no-wiggle spectrum of the angular integration (RSD tree, counterterms,
+    P13ratio, IFG2 rescaling), so d(P_ell)/d(params) now carries the
+    no-wiggle tree and one-loop responses
+    (tests/test_ept_rsd_basis_gradients.py; values unchanged). pk_mm_real
+    is unaffected -- it never reads those FFTLog bases or the angular
+    integration, so neither the freeze nor its removal changes it.
     """
     from clax.transfer import compute_pk_from_perturbations
     from clax.primordial import primordial_scalar_pk

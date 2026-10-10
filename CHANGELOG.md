@@ -10,31 +10,50 @@ power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 
 ### Oct 10, 2026: RSD one-loop basis now differentiable through the traced IR split (clax-pt)
 
-**Bug.** `compute_ept`'s `_ir_precomputed` path built the redshift-space FFTLog
-basis from a `stop_gradient` snapshot of the IR split (the "PHASE-2 FREEZE"
-comment, explicit since 322a6ab; a leftover of the NumPy-only splitter).
-d(P_0,2,4)/d(P_lin) therefore omitted the one-loop response. Task 7 of the
-clax-pt vs ps_1loop_jax cross-validation plan (branch
-feat/ps1loop-cross-validation) found forward-mode AD vs central finite
-differences ~90% (amplitude) / ~100% (stretch) off at lcdm z=0.38 (jobs
-24165/24167). The reproducer (job 24203, lcdm_fiducial z=0 table, f=0.75;
-relative error at l=0/2/4) reads amplitude 0.91/0.93/1.98, stretch
-1.06/1.60/1.70, wiggle 0.035/0.027/0.13, matter monopole 0.92, i.e. ~90-200% on
-the amplitude and stretch tangents. f and AP-ratio derivatives were unaffected.
+**Bug.** Before this fix most of d(P_0,2,4)/d(P_lin) was missing at every k in
+the 0.01-0.3 h/Mpc window, for any parameter that moves P_lin (A_s, n_s, ω_b,
+ω_cdm, h, m_ν): AD gradients of the redshift-space multipoles from
+`compute_ept_from_clax` were wrong at order unity. `compute_ept`'s
+`_ir_precomputed` path read a `stop_gradient` snapshot of the IR split (the
+split of P_lin into a smooth no-wiggle part P_nw and the BAO wiggle part
+P_w = P_lin - P_nw; the "PHASE-2 FREEZE" comment, explicit since 322a6ab; a
+leftover of the NumPy-only splitter). The snapshot fed both the one-loop
+FFTLog basis and the no-wiggle spectrum used by the angular integration (tree,
+counterterms, P13ratio, IFG2 rescaling), so d(P_0,2,4)/d(P_lin) lacked the
+no-wiggle tree response as well as the one-loop response; of the
+redshift-space tree only the wiggle share (P_w times the BAO damping factor, a
+few % of P) responded. Task 7 of the clax-pt vs ps_1loop_jax cross-validation
+plan (branch feat/ps1loop-cross-validation) found forward-mode AD vs central
+finite differences ~90% (amplitude) / ~100% (stretch) off at lcdm z=0.38 (jobs
+24165/24167), along two directions in P_lin: amplitude (δP ∝ P, a change of
+A_s) and stretch (δP ∝ dP/dln k, a rescaling of k). The reproducer (job 24203,
+lcdm_fiducial z=0 table, f=0.75; relative error at l=0/2/4) reads amplitude
+0.91/0.93/1.98, stretch 1.06/1.60/1.70, wiggle (δP ∝ P_w, the BAO wiggles
+alone) 0.035/0.027/0.13, matter monopole 0.92, i.e. ~90-200% on the amplitude
+and stretch tangents. f and AP-ratio derivatives were unaffected.
 The existing gradient tests did not see it: they hold the IR split fixed in both
 arms or use real-space functionals. No earlier test asserts, and no analysis
 uses, a value of this channel. The e2e campaign's `test_e2e_gradient_finite`
 (tests/test_ept_e2e_multicosmo.py on branches feat/classpt-e2e-ap-validation
 and feat/e2e-ap-on-tau0-fix, not on this branch) logs three
-d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (only
-finiteness was asserted), and they are biased.
+d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (the
+test asserts finite and nonzero only); they are wrong at order unity. Any
+Fisher matrix, optimiser or HMC mass matrix built from `compute_ept_from_clax`
+multipole gradients before this fix inherits that.
 
-**Fix.** The basis is decomposed from the traced pk_nw / pk_w already in hand
+**Fix.** The one-loop basis and the no-wiggle spectrum of the angular
+integration are both built from the traced pk_nw / pk_w already in hand
 (`clax/ept.py`, commit 01816a9). Values on the NumPy path are unchanged (its
 np.array round trip is gone; test_ept_accuracy 9/9). At lcdm_fiducial a scratch
-check (eager and jit) found the basis inputs and their decompositions bitwise
-equal (max |old - new| = 0), and the traced-vs-NumPy primal gap is unchanged
-(7.657e-15 before and after). New `tests/test_ept_rsd_basis_gradients.py` runs
+check (eager and jit; not committed; the argument: the same IEEE subtraction
+pk_lin_h - pk_nw on the same arrays feeds the same jnp FFT) found the basis
+inputs and their decompositions bitwise equal (max |old - new| = 0), and the
+traced-vs-NumPy primal gap is unchanged (7.657e-15 before and after). This
+holds for every caller whose IR-split tuple was built from the same pk_lin_h
+(every caller in the repo); a legacy NumPy tuple reused at a different P_lin
+now gets the wiggle basis from pk_lin_h - pk_nw instead of the tuple's stale
+pk_w, honouring `compute_ept`'s docstring promise that the wiggle component is
+recomputed as pk_lin_h - pk_nw. New `tests/test_ept_rsd_basis_gradients.py` runs
 AD vs FD along the amplitude, stretch and wiggle tangents (plus the matter
 monopole) on the `lcdm_cosmology` grid.
 
@@ -53,7 +72,11 @@ monopole) on the `lcdm_cosmology` grid.
 passed / 174 skipped, with the standing deselect of
 `test_pk_rosenbrock_vs_kvaerno5` (fails on upstream code too, see Oct 7). New
 test file: red before the fix (job 24203), green at fiducial after it (job
-24205), green on the full grid (job 24208).
+24205), green on the full grid (job 24208). Review hardening (Oct 11, 2026):
+the AD-vs-FD gate tightened from 1e-2 to 1e-6 (a partial re-freeze reads
+>= 3e-2), NaN-safe maxima, finiteness asserted on the FD arm and on both
+primal arms; green again, `--fast` 6 passed / 24 skipped (job 24248) and full
+grid 30 passed (jobs 24249, 24251).
 
 **Still pinned (documented).** The h-dependence of the DST grid inside
 `_ir_resummation_jax` (the grid itself, not just its endpoints; see the CAVEAT
@@ -458,7 +481,8 @@ anchor; it continues to serve `compute_ept`'s direct/NumPy branch
    `k_max2 = 7.0/h` and the boolean mask built from them stay outside the
    traced graph -- these mirror CLASS-PT's own hardcoded cuts
    (`nonlinear_pt.c:5322`), not a clax approximation.
-2. **RSD FFTLog basis inputs (PHASE-2 FREEZE).** Explicit `stop_gradient`,
+2. **RSD FFTLog basis inputs (PHASE-2 FREEZE)** (removed Oct 10, 2026 — see
+   the Oct 10, 2026 entry at the top). Explicit `stop_gradient`,
    deferred out of this branch's scope; verified below to be immaterial to
    the `pk_mm_real` observable these tests exercise.
 

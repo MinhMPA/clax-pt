@@ -14,8 +14,14 @@ no-wiggle and wiggle parts of the linear spectrum, `cmsym_nw` and `cmsym_w`. On 
 explicit in commit `322a6ab` (Sep 1, 2026) as the leftover of an earlier NumPy-only splitter; it has no physical
 motivation, and the code comment next to it says the decomposition itself is `jnp.fft` and differentiates fine.
 
-Consequence: the derivative of every redshift-space multipole P_0, P_2, P_4 with respect to the linear spectrum
-omits the response of the one-loop terms. Only the tree level and the resummed input spectrum respond.
+Consequence: most of the derivative of every redshift-space multipole P_0, P_2, P_4 with respect to the linear
+spectrum is missing, at every k in the 0.01–0.3 h/Mpc window. The snapshot fed both the one-loop FFTLog basis and
+the no-wiggle spectrum used by the angular integration (tree, counterterms, P13ratio, IFG2 rescaling; `pk_nw_jnp`,
+passed as `pk_nw=` to `_compute_bias_spectra`), so dP_ℓ/dP_lin lacked the no-wiggle tree response as well as the
+one-loop response. Of the redshift-space tree only the wiggle share (P_w times the BAO damping factor, a few % of P)
+responded; the real-space spectra, built from the traced resummed input spectrum, were unaffected. Measured RED
+(reproducer, job 24203, lcdm_fiducial z = 0 table, f = 0.75; ℓ = 0/2/4): amplitude 0.91/0.93/1.98, stretch
+1.06/1.60/1.70, wiggle 0.035/0.027/0.13.
 
 **Evidence** (ps validation, jobs 24165 and 24167, lcdm_fiducial z = 0.38, bias point of the PFS error-bar gate):
 clax's forward-mode derivative of P_ℓ along two directions in P_lin — a uniform amplitude change and a stretch in k
@@ -29,8 +35,8 @@ real-space functionals (`pk_mm_real`), which never read the RSD basis. The e2e A
 finiteness (`test_e2e_gradient_finite`) or differentiate the AP ratios with P_lin fixed. No earlier test asserts,
 and no analysis uses, a value of this channel; `test_e2e_gradient_finite` (tests/test_ept_e2e_multicosmo.py on
 branches feat/classpt-e2e-ap-validation and feat/e2e-ap-on-tau0-fix, not on `main`) logs three
-d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (only finiteness was asserted), and they are
-biased. No gradient-driven multipole likelihood exists on `main`.
+d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (the test asserts finite and nonzero only),
+and they are biased. No gradient-driven multipole likelihood exists on `main`.
 
 **Who is affected.** Any gradient of P_ℓ(RSD) taken through `compute_ept_from_clax` with respect to parameters that
 move P_lin (A_s, n_s, ω_b, ω_cdm, h, m_ν, …). HMC stays exact (the accept step uses exact energies) but samples less
@@ -39,8 +45,9 @@ efficiently; Fisher matrices, optimisers and gradient diagnostics are biased.
 ## 2. Fix
 
 In `compute_ept`'s `_ir_precomputed` branch, build the RSD basis from the traced `pk_nw` and `pk_w = pk_lin_h − pk_nw`
-that the function already computes a few lines earlier, instead of the `stop_gradient` snapshot. The NumPy path
-(`_ir_precomputed` None) is untouched. Values do not change: `_ir_resummation_jax` returns `pk_w = pk_lin_h − pk_nw`
+that the function already computes a few lines earlier, instead of the `stop_gradient` snapshot. On the NumPy path
+(`_ir_precomputed` None) its np.array round trip is removed; values unchanged. On the traced path values do not change
+either: `_ir_resummation_jax` returns `pk_w = pk_lin_h − pk_nw`
 (`ept.py:967`), the same arithmetic as the traced `pk_w`, so the decomposition sees bit-identical inputs.
 
 Documentation that describes the freeze is updated to describe the new state: `ept.py` lines ~820, 831, 862,
@@ -52,11 +59,15 @@ documented separately); the IR-resummation scheme; the model differences recorde
 
 ## 3. Consequences
 
-- All primal outputs are bit-identical on both paths. `tests/test_ept_accuracy.py` (NumPy path vs CLASS-PT, 9 tests)
-  and the ps validation's Tasks 4–6 numbers are unaffected.
+- Primal values are unchanged for every caller whose tuple was built from this pk_lin_h (every caller in the repo):
+  at lcdm_fiducial the basis inputs and their decompositions are bitwise equal (scratch check, eager and jit) and the
+  traced-vs-NumPy primal gap is 7.657e-15 before and after. A legacy NumPy tuple reused at a different P_lin now gets
+  the wiggle basis from pk_lin_h − pk_nw instead of the tuple's stale pk_w, honouring `compute_ept`'s docstring
+  promise (`ept.py` ~1991-1994). `tests/test_ept_accuracy.py` (NumPy path vs CLASS-PT, 9 tests) and the ps
+  validation's Tasks 4–6 numbers are unaffected.
 - The traced graph gains one more differentiable FFT pair; compile time and memory change negligibly.
-- `grad`/`jvp` of P_ℓ(RSD) through the traced splitter now carry the one-loop response. The documented ~1.4% end-to-end
-  h-gradient residual (real-space functional) is unrelated and stays as documented.
+- `grad`/`jvp` of P_ℓ(RSD) through the traced splitter now carry the no-wiggle tree and one-loop responses. The
+  documented ~1.4% end-to-end h-gradient residual (real-space functional) is unrelated and stays as documented.
 
 ## 4. Tests (acceptance)
 
