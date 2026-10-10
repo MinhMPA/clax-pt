@@ -78,8 +78,8 @@ New file `tests/test_ept_rsd_basis_gradients.py`, P_lin from `reference_data/<co
 
 1. **AD vs FD (the fix):** `jax.jvp` of (P_0, P_2, P_4) along three tangents in P_lin — amplitude (t = P), stretch
    (t = P dlnP/dlnk) and wiggle (t = P_w) — matches central finite differences (step 1e-4 along t) to
-   max|AD − FD| / max|FD| < 1e-2 per multipole (CLAUDE.md gradient target). Before the fix: ≈ 1 (RED).
-   Expected after: ≲ 1e-4.
+   max|AD − FD| / max|FD| < 1e-6 per multipole (tightened Oct 11, 2026 from the 1e-2 CLAUDE.md target: measured worst 2.8e-9 over the 5-point grid, central-FD floor ~1e-8 at step 1e-4). Before the fix: 0.03–2 (RED).
+   Measured after: ≤ 2.8e-9 (job 24251).
 2. **Forward = reverse:** for a fixed cotangent c, c·(J t) from `jvp` equals (Jᵀc)·t from `vjp`, to 1e-10 relative.
 3. **Primal unchanged:** the traced-path multipoles vs the NumPy-path multipoles (`compute_ept` without
    `_ir_precomputed`, same `rs_h`) differ by ≤ 1e-8 relative; the printed value must be the same before and after

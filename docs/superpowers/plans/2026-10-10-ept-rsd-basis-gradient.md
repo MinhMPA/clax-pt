@@ -1,5 +1,9 @@
 # clax-pt RSD-basis gradient fix — Implementation Plan
 
+> **Note (Oct 11, 2026):** the defect is larger than the task text below says. The frozen snapshot also fed the
+> no-wiggle spectrum of the angular integration, so the no-wiggle tree-level response of P_0,2,4 to P_lin was
+> missing as well as the one-loop response (spec §1, CHANGELOG). The AD-vs-FD gate was tightened to 1e-6 (spec §4).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make clax-pt's derivatives of the redshift-space multipoles with respect to the linear spectrum complete, by removing the `stop_gradient` snapshot that feeds the one-loop FFTLog basis, and prove it with AD-vs-finite-difference tests at several cosmologies.
