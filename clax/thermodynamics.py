@@ -608,7 +608,7 @@ def thermodynamics_solve(
     init = {
         'a': a0, 'adot': adot0, 'tau': tau0, 'tb': tb0,
         'xHII': xHII0, 'xe': xe0, 'xHeII': xHeII0, 'xHeIII': xHeIII0,
-        'cs2': cs20, 'xHeII_ode': xHeII0,
+        'cs2': cs20, 'xHeII_ode': xHeII0, 'xHII_ode': xHII0,
     }
     keys = ('a', 'adot', 'tau', 'tb', 'xHII', 'xe', 'xHeII', 'xHeIII', 'cs2')
 
@@ -617,7 +617,6 @@ def thermodynamics_solve(
         adot = carry['adot']
         tau = carry['tau']
         tb = carry['tb']
-        xHII = carry['xHII']
         xe = carry['xe']
         xHeII = carry['xHeII']
         xHeIII = carry['xHeIII']
@@ -662,25 +661,9 @@ def thermodynamics_solve(
         # Ionization step
         tbhalf = 0.5 * (tb + new_tb)
 
-        # RECFAST Peebles ODE in dlna (CLASS-matching coefficients)
-        # Convert from dτ stepping to dlna: dlna = (a'/a)*dτ = aH*dτ
-        H_half = bg.H_of_loga.evaluate(jnp.log(jnp.maximum(ahalf, 1e-30)))
-        dlna_step = ahalf * H_half * dtau
-        # n_H in CGS [cm^-3]
-        n_H_cgs = n_H_0_cgs / ahalf**3
-        # H in CGS [s^-1]
-        H_cgs = H_half * _c_over_Mpc
-        # Temperatures
-        TR_half = T_cmb / ahalf
-
         z_half = 1.0 / ahalf - 1.0
-
-        # --- RK4 (4th order) for hydrogen RECFAST ---
-        # Heun (2nd order) leaves ~0.15% x_e residual. RK4 converges as O(h^4).
         z_new = 1.0 / new_a - 1.0
         nH_new = n_H_0_cgs / new_a**3
-        H_new = new_H * _c_over_Mpc
-        TR_new = T_cmb / new_a
 
         # Sub-step environment for the recombination ROS2 steps (#48): at
         # fraction s of this grid step, ln a is linear and ln H, T_b are linear
@@ -700,18 +683,14 @@ def thermodynamics_solve(
                     tb + s * (new_tb - tb),
                     T_cmb / a_s)
 
-        k1 = _recfast_dxHII_dlna(xe, xHII, n_H_cgs, H_cgs, z_half, tbhalf, TR_half)
-        xHII_2 = jnp.clip(xHII + 0.5 * dlna_step * k1, 0.0, 1.0)
-        xe_2 = xHII_2 + 0.25 * Y_He / (1.0 - Y_He) * (xHeII + 2.0 * xHeIII)
-        k2 = _recfast_dxHII_dlna(xe_2, xHII_2, n_H_cgs, H_cgs, z_half, tbhalf, TR_half)
-        xHII_3 = jnp.clip(xHII + 0.5 * dlna_step * k2, 0.0, 1.0)
-        xe_3 = xHII_3 + 0.25 * Y_He / (1.0 - Y_He) * (xHeII + 2.0 * xHeIII)
-        k3 = _recfast_dxHII_dlna(xe_3, xHII_3, n_H_cgs, H_cgs, z_half, tbhalf, TR_half)
-        xHII_4 = jnp.clip(xHII + dlna_step * k3, 0.0, 1.0)
-        xe_4 = xHII_4 + 0.25 * Y_He / (1.0 - Y_He) * (xHeII + 2.0 * xHeIII)
-        k4 = _recfast_dxHII_dlna(xe_4, xHII_4, nH_new, H_new, z_new, new_tb, TR_new)
-        new_xHII_recfast = jnp.clip(
-            xHII + dlna_step / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4), 0.0, 1.0)
+        # Hydrogen (smsharma/clax#48): the Peebles equation (wrap_recfast.c:110-174,
+        # dx_H/dz -> d/dlna) advanced from the ODE state by the shared L-stable
+        # ROS2 step, 10 sub-steps, no clip. It replaces an explicit RK4 whose
+        # h*J = -3.2 at z = 1600 lies outside RK4's stability interval [-2.79, 0].
+        new_xHII_peebles = _ros2_advance(
+            _recfast_dxHII_dlna,
+            lambda x_: x_ + f_He_xe * (xHeII + 2.0 * xHeIII),
+            carry['xHII_ode'], sub_env, dlna_main, 10)
 
         # For z > 1600: hydrogen Saha equilibrium (CLASS thermodynamics.c:4074-4081).
         # x_H*(x_H + xHeII)/(1 - x_H) = rhs, solved via quadratic formula.
@@ -726,11 +705,14 @@ def thermodynamics_solve(
         # Helium electron contribution per H nucleus
         xHeII_contrib = 0.25 * Y_He / (1.0 - Y_He) * xHeII
         xHII_saha = _solve_hydrogen_saha(saha_rhs, xHeII_contrib)
-        # Below z~1600: use RECFAST Peebles ODE (accurate through recombination).
-        # Above z~1600: use Saha equilibrium (hydrogen fully ionized).
-        # Smooth sigmoid blend for differentiability (width=50, matching CLASS delta_z).
-        w_saha = jax.nn.sigmoid(0.1 * (z_half - 1600.0))
-        new_xHII = w_saha * xHII_saha + (1.0 - w_saha) * new_xHII_recfast
+        # CLASS staging for hydrogen: regime "H" (z > 1600) is Saha with the x_HeII
+        # correction (thermodynamics.c:4070-4087, the quadratic above). The ODE
+        # state is the Saha value while z > 1600 (initial condition of regime
+        # "frec", thermodynamics.c:2093), the Peebles step below; the output is
+        # smoothed by f2 over z in [1500, 1600] (thermodynamics.c:2973-2987).
+        new_xHII_ode = jnp.where(z_new > _Z_FULL_H_RECOMB, xHII_saha, new_xHII_peebles)
+        w_H = _smoothstep((_Z_FULL_H_RECOMB - z_new) / (2.0 * _DZ_FULL_H_RECOMB))
+        new_xHII = w_H * new_xHII_ode + (1.0 - w_H) * xHII_saha
 
         # Helium. HeIII->HeII: Saha (_ionHe). HeII->HeI: the MB95 Saha above
         # z ~ 5000, then the CLASS-style HeI Saha down to z = 2870, then the
@@ -788,7 +770,7 @@ def thermodynamics_solve(
             'a': new_a, 'adot': new_adot, 'tau': new_tau, 'tb': new_tb,
             'xHII': new_xHII, 'xe': new_xe, 'xHeII': new_xHeII,
             'xHeIII': new_xHeIII, 'cs2': new_cs2,
-            'xHeII_ode': new_xHeII_ode,
+            'xHeII_ode': new_xHeII_ode, 'xHII_ode': new_xHII_ode,
         }
         return new_carry, new_carry
 
