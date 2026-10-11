@@ -45,8 +45,22 @@ on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   0.23 / 0.26%, EE 0.52 / 0.49 / 0.75%. th_n_points 20000 vs 100000: <=0.02%
   to l=500, <=0.05% to l=1000, ~0.13% above; 13 s vs 59 s (planck_cl keeps
   100000; planck_fast uses 20000).
-- Validation: `slurm/preset-validation-v100.sbatch` (accuracy tests,
-  benchmark_speed timings, fast suite). Results recorded below once run.
+- Sparse-l spline end condition (found by the validation run): the dense
+  C_l of all three `compute_cls_all*` paths come from a cubic spline over
+  `sparse_l_grid(l_max)`, whose end condition put ~2% errors in the last ~50
+  multipoles (1.87% at l=983 for l_max=1000). `L_SPLINE_PAD = 100` extends
+  the sparse grid (and the fast path's table rows) past l_max; the returned
+  range is unchanged. Test in `tests/test_bessel_table.py`.
+- Validation (igpu V100, job 24639, full mode, `tests/test_preset_accuracy.py`
+  computing to the preset's hr_l_max): all 7 accuracy tests pass. planck_cl vs
+  CLASS massless RECFAST: TT 0.083 / 0.233 / 0.265% (l<=30 / 500 / 1000), EE
+  0.60 / 0.48 / 0.98% (2-4 / 5-500 / 5-1000), TE/sqrt(TT EE) 0.37%. planck_cl
+  (0.06 eV neutrino) vs the CLASS default (HyRec) references over l<=1000:
+  TT 0.27 / 0.24 / 0.42 / 0.26 / 0.22%, EE 0.75 / 1.03 / 0.84 / 0.78 / 0.99%,
+  TE 0.37 / 0.35 / 0.44 / 0.44 / 0.31% for fiducial / h_high / omega_b_high /
+  omega_cdm_low / ns_high. fit_cl vs CLASS massless RECFAST: TT 0.46% (l<=30),
+  0.69% (l<=500), EE 1.25% (5-500). Timings and the fast suite:
+  `slurm/preset-validation-v100.sbatch` sections 2-3, recorded below.
 
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 
