@@ -153,3 +153,13 @@ coincide at fiducial: both give -2.75564438e9 against forward -2.75572953e9 (job
 agree to about 1e-3 relative (omega_b_high 8.081e-7 vs 8.073e-7; jobs
 24227/24229/24231). So the re-association is still valid, and for this functional
 at k <= 0.15 Mpc^-1 the two reverse paths agree.
+
+The pipeline-level acceptance test of this ADR, `TestPipelineDeltaM`
+(`tests/test_thermo_reverse_composite.py`), reaches much higher k: g(h) =
+sum_k delta_m(k, tau_0)^2 at `fast_cl` with `pt_k_max_cl = 5`, production reverse
+mode against a forward-mode jvp, bar 1e-4. Run in full mode on the fixed tree, it
+passes on both platforms: on 12 CPU cores jvp = -7.96742981e10, grad(stable) =
+-7.96743037e10, relative gap 6.955e-08 (job 24528, 2 h); on a V100 jvp =
+-7.96743395e10, grad(stable) = -7.96740772e10, relative gap 3.293e-06 (job 24538,
+1 h 41 min). The two platforms' jvp values differ by 5.2e-7, of the order of the
+adaptive-step noise the test docstring quotes (~7e-7).

@@ -100,11 +100,13 @@ Jobs (cluster logs, not in the repo; more in ADR 0003): unfixed 24095-24097, 241
   lensing 11; multicosmo consistency 10; P(k) accuracy 7; forward mode 1; tau endpoint 21 of
   21; `test_pk_gradients` 5 passed, 2 skipped, 1 failed (pre-existing, below).
 - Full mode, modules not previously run on the fixed tree (CPU jobs 24528-24534, final
-  library code): `test_multipoint` 5 passed (24530); `test_ap` 23 passed (24533);
-  `test_ept_ap` 14 passed (24534); `test_tensor` + `test_shooting` 13 passed (24532);
-  `test_thermo_reverse_composite`, `test_perturbations`, `test_mpk_delta_cb` and the
-  production-reverse vs jvp delta_m test on a V100 (jobs 24528, 24529, 24531, 24538): still
-  running when this entry was committed; counts follow in the next commit.
+  library code; no failure, so no re-run on the unfixed tree was needed):
+  `test_thermo_reverse_composite` 15 passed (24528), including the production-reverse vs jvp
+  delta_m test at pt_k_max_cl = 5, relative gap 6.955e-08 on CPU (bar 1e-4; 3.293e-06 on a
+  V100, job 24538); `test_perturbations` 19 (24529); `test_multipoint` 5 (24530);
+  `test_mpk_delta_cb` 9 passed, 2 skipped for lack of a CLASS reference at two massive-nu
+  points (24531); `test_tensor` 4 + `test_shooting` 9 (24532); `test_ap` 23 (24533);
+  `test_ept_ap` 14 (24534).
 
 **Failed approaches** (probe variants, throwaway; table in ADR 0003). An L-stable step
 without staging overshoots x_e to -988. Helium staged (old Heun or the new step) with
