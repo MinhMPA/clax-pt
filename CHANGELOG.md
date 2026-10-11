@@ -8,6 +8,86 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
+
+**Defect.** `clax/rosenbrock.py` (`Rodas5`, `Rodas5Batched`) reconstructed the
+state between accepted steps with diffrax's `LocalLinearInterpolation`. The
+perturbation solve saves sources on a 5000-point conformal-time grid
+(`SaveAt(ts=tau_grid)`) and Rodas5's late-time steps are hundreds of Mpc, so
+the late-ISW source (metric derivatives at the output times) was
+piecewise-linear. Against Kvaerno5 at identical tolerances (precision sweep
+of Oct 10-11, 2026, finding 5; re-measured here at the sweep's I6/G6
+settings: planck_cl with ncdm_q_size 0, m_ncdm 0, hierarchy 12/10/17,
+rtol 1e-4 / atol 1e-6, 300 k-modes, `compute_cls_all_fast` l_max 2500,
+n_k_fine 5000): unlensed TT rodas5/kvaerno5 - 1 = -46.2% (l=2), -38.5% (5),
+-19.6% (10), -3.65% (20), -0.15% (30), +0.17% (100), -0.05% (500); 0.77%
+max at l=31-500 (l=44), 0.75% at l=2000, 1.09% at l=2500; EE 0.88% (l=13);
+TE/sqrt(TT EE) 48% (l=2). The sweep's "tolerance-driven residual above
+l=1000" (0.36% at rtol 1e-5 / atol 1e-10) was the same defect.
+
+**Fix.** `d34b501`: `interpolation_cls = ThirdOrderHermitePolynomialInterpolation`
+(the dense output diffrax's Kvaerno5 uses) with
+`dense_info = dict(y0, y1, k0=dt*f(t0,y0), k1=dt*f(t1,y1))` in both classes;
+f(t1,y1) is one extra RHS evaluation per step (stage 8 is evaluated at
+u8 != y1, so no stage value can be reused). `56b4ff9`: FSAL-style carry of
+f(t1,y1) in `solver_state` as the next step's f(t0,y0), re-evaluated only on
+the first step or after a jump (`eqxi.unvmap_any(first_step | made_jump)` +
+`lax.cond`, as diffrax's Runge-Kutta solvers do; a rejected step keeps the
+previous `solver_state`); results bit-identical to the simple version on
+CPU (148 steps incl. 40 rejected) and identical C_l on GPU. Reverse-mode AD
+needs nothing special: `dense_info` and `solver_state` are pytrees through
+the adjoint.
+
+**After** (same settings, V100): TT -0.075% (l=2), -0.032% (5), -0.006% (10),
+0.000% (20), +0.001% (30), 0.000% (100), -0.001% (500); band maxima TT
+0.003% (31-500), 0.010% (501-1000), 0.009% (1001-2000), 0.013% (2001-2500);
+EE <= 0.023% (l <= 500) and <= 0.015% above; TE/sqrt(TT EE) <= 0.048%. At
+rtol 1e-5 / atol 1e-10: TT within 0.004% over l=2-2500 (was 4.1% at l=2,
+0.36% above l=1000). Rodas5 is therefore a drop-in for Kvaerno5 at equal
+tolerances at 3.5x less perturbation time (cached 24.9 s vs 88.0 s at
+1e-4 / 1e-6; first call 217 s vs 1162 s at 1e-5 / 1e-10).
+
+**Tests** (written first; all three unit tests and the GPU test failed on
+the old solver):
+- `tests/test_rosenbrock.py::TestDenseOutput`: stiff oscillator (eigenvalues
+  +-i omega, -lambda) with exact solution, rtol 1e-4 / atol 1e-7 (148 steps
+  over 10 periods, omega*h ~ 0.4), 2001 output times: max abs error
+  5.4e-2 -> 8.0e-4 (Rodas5, bar 5e-3), 7.1e-2 -> 1.5e-3 (Rodas5Batched,
+  bar 7e-3); reverse-mode AD through `SaveAt(ts=...)` vs the analytic
+  derivative 4.5e-3 -> 4.9e-6 (bar 1e-3). File total: 17 passed (CPU, 36 s).
+- `tests/test_rodas5_dense_output.py` (slow, GPU, parametrized over
+  `COSMOLOGY_GRID_LCDM` per the multi-cosmology rule): rodas5 vs kvaerno5
+  unlensed TT <= 0.2% (l=2-30) / 0.1% (31-500), EE and TE/sqrt(TT EE)
+  <= 0.3%: 5 passed in 32 min on a V100 at both the Hermite and the FSAL
+  commit (TT at l=2 within 0.072-0.086% across the grid, l=31-500
+  <= 0.003%, EE <= 0.047%, TEn <= 0.056%).
+- Fast suite (`pytest tests/ --fast -q`, V100, the known pre-existing
+  `test_pk_rosenbrock_vs_kvaerno5` deselected): 328 passed, 72 skipped,
+  1 deselected in 1:01:10 at the Hermite commit and 328 passed, 72 skipped,
+  1 deselected in 1:04:41 at the FSAL commit (both V100).
+
+**Cost** (`diags/diag_rodas5_dense_output.py --abc`: the three solver
+versions interleaved in one process on one V100, 4 rounds, scatter
++-0.05 s; perturbation stage, 300 modes, I6 settings): linear 22.81 s,
+Hermite 25.48 s (+11.7%), Hermite + FSAL carry 24.88 s (+9.1%). The carry
+recovers only 0.6 s of the 2.7 s, so the RHS evaluation is not the main cost
+of the dense output (the remainder is the interpolant evaluation and the
+extra loop-carried arrays inside the vmapped step loop); kept because it is
+bit-identical and measurably faster -- revert `56b4ff9` for the simpler
+version if preferred. Single-job timings from different igpu nodes differed
+by 20% in the identical thermodynamics stage, which is why the interleaved
+mode exists; the earlier single-job numbers (24.8 / 26.4 / 30.6 s) are
+node noise.
+
+**Follow-ups.** fit_cl (rodas5, rtol 1e-3 / atol 1e-4) was documented at
+1.5% for l <= 500 but spot-checked at l=20-1000 only; its low-l accuracy
+should be re-validated now that the dense output is right. The planck_cl
+re-tune proposed by the sweep can now include rodas5.
+
+Tools: `slurm/rodas5-dense-v100.sbatch` (MODE=cltest|timing|abc|fast; COMMIT
+pins a `git archive` export so queued jobs are immune to later edits); logs
+under `/lustre/work/n2minh/std/clax/rodas5dense/`.
+
 ### Oct 11, 2026: Recombination follows CLASS's Saha -> ODE staging; thermodynamics gradients are smooth (#48)
 
 **Bug (smsharma/clax#48).** Gradients through the thermodynamics module carried a random
