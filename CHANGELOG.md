@@ -37,6 +37,14 @@ on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   default, fast-path default) and `tests/test_preset_accuracy.py` (slow:
   planck_cl vs CLASS massless-RECFAST with the measured bars x1.5; the LCDM
   grid vs CLASS default references with looser bars; fit_cl low-l guard).
+- Candidate measured before validation (sweep configs P1/P1m, V100 cached):
+  perturbations 105 s massless / 189 s massive, harmonic 13 s; vs CLASS
+  massless RECFAST TT 0.09 / 0.22 / 0.25% (l<30 / <=500 / <=1000), EE 0.60 /
+  0.48 / 0.98% (l=2-4 / 5-500 / 5-1000, the last a single l near 526, rms
+  0.28%), TE/sqrt(TT EE) 0.37%; vs CLASS fiducial (massive, HyRec) TT 0.20 /
+  0.23 / 0.26%, EE 0.52 / 0.49 / 0.75%. th_n_points 20000 vs 100000: <=0.02%
+  to l=500, <=0.05% to l=1000, ~0.13% above; 13 s vs 59 s (planck_cl keeps
+  100000; planck_fast uses 20000).
 - Validation: `slurm/preset-validation-v100.sbatch` (accuracy tests,
   benchmark_speed timings, fast suite). Results recorded below once run.
 
