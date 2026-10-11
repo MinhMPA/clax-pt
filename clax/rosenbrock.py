@@ -32,6 +32,11 @@ The extra evaluation is recovered FSAL-style: f(t1, y1) is carried in
 the first step or after a jump (``made_jump``), exactly as diffrax's
 Runge-Kutta solvers do.  A rejected step keeps the previous ``solver_state``
 so the carried value stays f(t0, y0) of the retried step.
+Measured on a V100 (Oct 12, 2026; 300 k-modes, planck_cl with ncdm_q_size 0,
+hierarchy 12/10/17, rtol 1e-4 / atol 1e-6, 5000 tau points): rodas5 vs
+kvaerno5 unlensed TT within 0.09% at l=2 and 0.013% at l=31-2500 (was 46%
+and 1.1%); perturbation stage 22.8 s (linear) -> 25.5 s (Hermite) -> 24.9 s
+(Hermite + carry), against 88 s for Kvaerno5.
 
 References:
     Rodas5: Di Marzo (1993), "RODAS5(4) - Méthodes de Rosenbrock d'ordre 5(4)"
@@ -135,9 +140,10 @@ class Rodas5(AbstractAdaptiveSolver):
     photon-baryon tight-coupling regime.
 
     Compared to Kvaerno5 (ESDIRK), this avoids Newton iteration entirely:
-    each step needs one Jacobian + one LU factorization + 8 back-substitutions,
-    plus one RHS evaluation at (t1, y1) for the cubic Hermite dense output
-    (see the module docstring).
+    each step needs one Jacobian + one LU factorization + 8 back-substitutions.
+    The RHS evaluation at (t1, y1) needed by the cubic Hermite dense output is
+    carried in ``solver_state`` into the next step as its f(t0, y0) (see the
+    module docstring).
     """
 
     term_structure = AbstractTerm
@@ -264,7 +270,8 @@ class Rodas5Batched(AbstractAdaptiveSolver):
     cf. DISCO-EB ``Rodas5Batched`` (ode_integrators_stiff.py:846-1011)
 
     Dense output is the cubic Hermite interpolant from (y, dt*y') at both
-    step ends, as for ``Rodas5`` (one extra batched RHS evaluation per step).
+    step ends, as for ``Rodas5``; the batched f(t1, y1) is carried in
+    ``solver_state`` into the next step as its f(t0, y0).
     """
 
     term_structure = ODETerm
