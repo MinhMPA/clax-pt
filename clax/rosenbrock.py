@@ -16,6 +16,18 @@ Mathematical formulation (transformed W-form):
                   + sum_j (C_{ij}/h)*k_j
     y_{n+1} = y_n + sum_i b_i * k_i
 
+Dense output (state between accepted steps): both solvers return
+``dense_info = dict(y0, y1, k0=dt*f(t0,y0), k1=dt*f(t1,y1))`` and use
+diffrax's ``ThirdOrderHermitePolynomialInterpolation`` (cubic Hermite, the
+same dense output as diffrax's Kvaerno5), at the cost of one extra RHS
+evaluation per step.  The perturbation solve saves sources on a 5000-point
+conformal-time grid (``SaveAt(ts=tau_grid)``) while Rodas5's late-time steps
+are hundreds of Mpc, so the interpolant sets the late-ISW source.  With the
+previous ``LocalLinearInterpolation`` unlensed TT was 46% low at l=2 relative
+to Kvaerno5 at rtol 1e-4 / atol 1e-6 and 4.1% at 1e-5 / 1e-10 (precision
+sweep of Oct 10-11, 2026, finding 5; error scaling as the square of the
+late-time step).  Cubic Hermite error scales as the fourth power.
+
 References:
     Rodas5: Di Marzo (1993), "RODAS5(4) - Méthodes de Rosenbrock d'ordre 5(4)"
     Hairer & Wanner (1996), "Solving ODEs II", Section IV.7
@@ -27,7 +39,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jla
 from diffrax import AbstractAdaptiveSolver, AbstractTerm, ODETerm, RESULTS
-from diffrax._local_interpolation import LocalLinearInterpolation
+from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolation
 
 
 # ===========================================================================
@@ -116,11 +128,13 @@ class Rodas5(AbstractAdaptiveSolver):
     photon-baryon tight-coupling regime.
 
     Compared to Kvaerno5 (ESDIRK), this avoids Newton iteration entirely:
-    each step needs one Jacobian + one LU factorization + 8 back-substitutions.
+    each step needs one Jacobian + one LU factorization + 8 back-substitutions,
+    plus one RHS evaluation at (t1, y1) for the cubic Hermite dense output
+    (see the module docstring).
     """
 
     term_structure = AbstractTerm
-    interpolation_cls = LocalLinearInterpolation
+    interpolation_cls = ThirdOrderHermitePolynomialInterpolation
 
     def order(self, terms):
         return 5
@@ -207,7 +221,10 @@ class Rodas5(AbstractAdaptiveSolver):
         y1 = u8 + k8
         y_error = k8
 
-        dense_info = dict(y0=y0, y1=y1)
+        # -- Dense output: cubic Hermite from (y, dt*y') at both step ends --
+        # f(t1, y1) is not among the stage evaluations (stage 8 is at u8 != y1).
+        f1 = f(t1, y1)
+        dense_info = dict(y0=y0, y1=y1, k0=dt * f0, k1=dt * f1)
         return y1, y_error, dense_info, solver_state, RESULTS.successful
 
 
@@ -229,10 +246,13 @@ class Rodas5Batched(AbstractAdaptiveSolver):
     for batched function evaluations.
 
     cf. DISCO-EB ``Rodas5Batched`` (ode_integrators_stiff.py:846-1011)
+
+    Dense output is the cubic Hermite interpolant from (y, dt*y') at both
+    step ends, as for ``Rodas5`` (one extra batched RHS evaluation per step).
     """
 
     term_structure = ODETerm
-    interpolation_cls = LocalLinearInterpolation
+    interpolation_cls = ThirdOrderHermitePolynomialInterpolation
 
     def order(self, terms):
         return 5
@@ -368,5 +388,7 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         y1 = u + k8
         y_error = k8  # embedded error: (batch_size, n_eq)
 
-        dense_info = dict(y0=y0, y1=y1)
+        # Dense output: cubic Hermite from (y, dt*y') at both step ends
+        f1 = terms.vf(t=t1, y=y1, args=_args)
+        dense_info = dict(y0=y0, y1=y1, k0=dt * dy1, k1=dt * f1)
         return y1, y_error, dense_info, None, RESULTS.successful

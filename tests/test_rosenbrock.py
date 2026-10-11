@@ -482,8 +482,10 @@ class TestDenseOutput:
 
         Objective: sum_i u(t_i) with u = cos(omega t_i) exactly, so
         d/d omega = -sum_i t_i sin(omega t_i).  The gradient flows through the
-        dense-output coefficients (and, after the fix, through the two extra
-        RHS evaluations per step) under RecursiveCheckpointAdjoint.
+        dense-output coefficients (and, after the fix, through the extra RHS
+        evaluation per step) under RecursiveCheckpointAdjoint.  Measured rel
+        err: 4.5e-3 with LocalLinearInterpolation (the interpolant's shape is
+        wrong), 4.9e-6 with the cubic Hermite dense output.  Bar: 1e-3.
         """
         f, exact, y_init = _stiff_oscillator()
         lam = 1000.0
