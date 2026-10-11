@@ -17,7 +17,7 @@
 #   MODE=cltest PYTEST_ARGS="-k lcdm_fiducial" sbatch --export=ALL --job-name=r5d-cl slurm/rodas5-dense-v100.sbatch
 #   MODE=timing SOLVER=rodas5 TAG=before sbatch --export=ALL --job-name=r5d-t slurm/rodas5-dense-v100.sbatch
 #   MODE=fast sbatch --export=ALL --job-name=r5d-fast slurm/rodas5-dense-v100.sbatch
-# Env: MODE (cltest | timing | abc | fast), VARIANTS/REPEAT (abc), SOLVER (timing), TAG (timing results tag),
+# Env: MODE (cltest | timing | abc | preset | fast), VARIANTS/REPEAT (abc), CONFIGS (preset), SOLVER (timing), TAG (timing results tag),
 #      DIAG_ARGS (extra args for the timing script), PYTEST_ARGS (cltest),
 #      COMMIT (run from a `git archive` export of this commit instead of the
 #      live worktree, so later edits cannot leak into a queued job),
@@ -32,7 +32,7 @@ for d in "${NVIDIA_SP}"/*/lib; do
 done
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-: "${MODE:?set MODE=cltest|timing|abc|fast}"
+: "${MODE:?set MODE=cltest|timing|abc|preset|fast}"
 WT=${WT:-/lustre/work/n2minh/clax-wt-rodas5dense}
 OUTDIR=/lustre/work/n2minh/std/clax/rodas5dense
 mkdir -p "${OUTDIR}"
@@ -71,6 +71,13 @@ case "${MODE}" in
     OUT="${OUTDIR}/abc-${TAG:-run}-${SLURM_JOB_ID}.json"
     python diags/diag_rodas5_dense_output.py --abc ${VARIANTS} --repeat "${REPEAT:-4}" --out "${OUT}"
     status=$?
+    echo "results: ${OUT}"
+    ;;
+  preset)
+    OUT="${OUTDIR}/preset-${TAG:-run}-${SLURM_JOB_ID}.json"
+    python diags/diag_preset_solver_choice.py --configs "${CONFIGS:-A,B,C,D,E,F}" --out "${OUT}"
+    status=$?
+    python diags/diag_preset_solver_choice.py --report "${OUT}" --md "${OUT%.json}.md" || true
     echo "results: ${OUT}"
     ;;
   fast)
