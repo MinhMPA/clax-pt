@@ -79,7 +79,15 @@ on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   `tests/test_solver_selection.py`, which pinned the previous fit_cl solver
   and tolerance (that run was the interim kvaerno5 fit_cl); the tests now
   assert rodas5 for planck_cl / planck_fast / fit_cl and rtol 1e-4 /
-  atol 1e-6 for fit_cl. Final validation of the stack recorded below.
+  atol 1e-6 for fit_cl.
+- Final validation of the stack (job 24668 at 9cb9bc1, igpu V100): all 11
+  accuracy tests pass (planck_cl vs CLASS massless RECFAST TT 0.086 / 0.233
+  / 0.262%, EE 0.60 / 0.46 / 0.98%, TE 0.33%; LCDM grid TT <= 0.43%, EE <=
+  1.03%, TE <= 0.42% at l<=1000; fit_cl TT 0.46% at l<=30, 0.69% at l<=500,
+  EE 1.25%). `benchmark_speed.py` cached: planck_cl thermodynamics 63.1 s,
+  perturbations 47.2 s (with the 5 neutrino q-bins at m=0), harmonic 13.4 s,
+  total 124 s (4679 s before the retune, 38x); fit_cl 2.1 / 8.4 / 7.6 s,
+  total 18.6 s. Fast suite: 333 passed, 79 skipped, 1 deselected, 0 failed.
 
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 
