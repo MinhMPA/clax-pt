@@ -23,16 +23,23 @@ NVIDIA_SP=$(python -c "import site; print(site.getsitepackages()[0])")/nvidia
 for d in "${NVIDIA_SP}"/*/lib; do export LD_LIBRARY_PATH="${d}:${LD_LIBRARY_PATH:-}"; done
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 WT=${WT:-/lustre/work/n2minh/clax-wt-presets}
+SECTIONS=${SECTIONS:-123}   # subset of 1 (tests) 2 (timings) 3 (fast suite)
 cd "${WT}" || exit 1
 echo "Node: $(hostname)  Worktree: ${WT} @ $(git rev-parse --short HEAD 2>/dev/null)  Start: $(date)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
+if [[ "$SECTIONS" == *1* ]]; then
 echo "=== 1. accuracy tests (full mode) ==="
 pytest tests/test_bessel_table.py tests/test_preset_accuracy.py -q -o addopts="" -p no:cacheprovider -rA -s 2>&1 | grep -v "^WARNING\|^I0000\|^W0000"
+fi
+if [[ "$SECTIONS" == *2* ]]; then
 echo "=== 2. timings ==="
 python scripts/benchmark_speed.py planck_cl 2>&1 | grep -v "^WARNING\|^I0000\|^W0000" | tail -25
 python scripts/benchmark_speed.py fit_cl 2>&1 | grep -v "^WARNING\|^I0000\|^W0000" | tail -25
+fi
+if [[ "$SECTIONS" == *3* ]]; then
 echo "=== 3. fast suite ==="
 pytest tests/ --fast -q -o addopts="" -p no:cacheprovider \
     --deselect tests/test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5 2>&1 | grep -v "^WARNING\|^I0000\|^W0000" | tail -15
+fi
 echo "End: $(date)"
