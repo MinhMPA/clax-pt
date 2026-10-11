@@ -56,6 +56,15 @@ def _band_max(num, ref, lo, hi):
     return float(np.max(np.abs(num[m] / ref[m] - 1.0)))
 
 
+def _band_rms(num, ref, lo, hi):
+    """rms of num/ref - 1 over lo <= l <= hi."""
+    n = len(num)
+    ref = np.asarray(ref)[:n]
+    ell = np.arange(n)
+    m = (ell >= lo) & (ell <= hi)
+    return float(np.sqrt(np.mean((num[m] / ref[m] - 1.0) ** 2)))
+
+
 def _te_norm_max(cls, ref, lo, hi):
     """max |(TE - TE_ref)| / sqrt(TT_ref EE_ref) over lo <= l <= hi."""
     n = len(cls["te"])
@@ -98,6 +107,35 @@ class TestPlanckClPreset:
         assert got["EE 5-500"] < 0.0075
         assert got["EE 5-1000"] < 0.015
         assert got["TEn 2-1000"] < 0.006
+
+    def test_fiducial_massless_recfast_high_l(self):
+        """The damping tail, l = 1000-2500 (docs/highl_residual_2026-10-12.md,
+        branch exp/highl-investigation). Before the RSA-trigger fix the preset
+        read TT rms 1.7% / 2.0% and EE 3.0% / 8.2% over l = 1000-2000 /
+        2000-2500 (the photon quadrupole source was zeroed at tau ~ 296 Mpc for
+        k > 0.15/Mpc); with CLASS's tau_free_streaming criterion, 60 k per
+        decade: TT 0.38% / 0.49%, EE 0.39% / 0.52% (bars ~1.5x). Computed to
+        the preset's hr_l_max (2500) with the sparse-l spline padded past it
+        (L_SPLINE_PAD), so the single-l maximum covers the whole band. What
+        remains is a smooth +0.3% to +0.5% from the helium-era opacity
+        (k_D +0.12%)."""
+        ref = dict(np.load(os.path.join(REFERENCE_DIR, "cls_massless_recfast.npz")))
+        params = CosmoParams(m_ncdm=0.0)
+        prec = dataclasses.replace(PrecisionParams.planck_cl(), ncdm_q_size=0)
+        cls = _cls(params, prec)
+        got = {
+            "TT rms 1000-2000": _band_rms(cls["tt"], ref["tt"], 1000, 2000),
+            "TT rms 2000-2500": _band_rms(cls["tt"], ref["tt"], 2000, 2500),
+            "EE rms 1000-2000": _band_rms(cls["ee"], ref["ee"], 1000, 2000),
+            "EE rms 2000-2500": _band_rms(cls["ee"], ref["ee"], 2000, 2500),
+            "TT max 1000-2500": _band_max(cls["tt"], ref["tt"], 1000, 2500),
+        }
+        _report("planck_cl vs CLASS massless RECFAST, high l", got)
+        assert got["TT rms 1000-2000"] < 0.006
+        assert got["TT rms 2000-2500"] < 0.008
+        assert got["EE rms 1000-2000"] < 0.007
+        assert got["EE rms 2000-2500"] < 0.010
+        assert got["TT max 1000-2500"] < 0.010
 
     def test_lcdm_grid_massive(self, lcdm_cosmology):
         """Grid points use the default massive neutrino and CLASS's default
