@@ -79,10 +79,31 @@ by 20% in the identical thermodynamics stage, which is why the interleaved
 mode exists; the earlier single-job numbers (24.8 / 26.4 / 30.6 s) are
 node noise.
 
-**Follow-ups.** fit_cl (rodas5, rtol 1e-3 / atol 1e-4) was documented at
-1.5% for l <= 500 but spot-checked at l=20-1000 only; its low-l accuracy
-should be re-validated now that the dense output is right. The planck_cl
-re-tune proposed by the sweep can now include rodas5.
+**Preset solver choice, measured** (`diags/diag_preset_solver_choice.py`,
+job 24652, V100, massless vs `reference_data/cls_massless_recfast.npz`;
+results `/lustre/work/n2minh/std/clax/rodas5dense/preset-abcdef-24652.md`).
+Planck-like settings (60 k/decade, n_tau 5000, th 100000, l_max 17/17/17,
+max_steps 8192; C_l to 2500 with n_k_fine 20000, read l <= 1000), cached
+seconds bg/th/pt/hr: A kvaerno5 1e-4/1e-6 0.6/69.1/110.6/5.5; B rodas5
+1e-4/1e-6 0.6/65.1/29.5/5.5; C rodas5 1e-3/1e-4 0.6/66.0/13.0/5.4.
+B vs A: TT 0.077% (l=2), EE 0.03% (l=16), TEn 0.05% -- rodas5 at 1e-4/1e-6
+is a drop-in at 3.7x less perturbation time. C vs A: TT 1.40% (l=3), EE
+2.34% (l=15), TEn 1.83% (l=441) -- the old fit_cl tolerances are not
+planck-grade. fit_cl-like (20 k/decade, n_tau 2000, th 3000; C_l to 1500,
+n_k_fine 5000, read l <= 500): D kvaerno5 1e-4/1e-6 0.6/2.0/54.7/3.7 (61.0
+total); E rodas5 1e-4/1e-6 0.7/2.4/9.8/3.8 (16.8); F rodas5 1e-3/1e-4
+0.6/2.0/4.2/3.7 (10.4). E vs D: TT 0.080% (l=2), EE 0.03%, TEn 0.05%.
+F vs D: TT 1.83% (l=2), 1.3% (l=3), < 0.2% for l >= 5; EE 0.19%; TEn 0.78%
+(l=2). So with the Hermite output rodas5 at 1e-3/1e-4 is acceptable at
+l < 30 at the 2% level only (l=2-3); 1e-4/1e-6 costs +5.6 s of
+perturbations per fit_cl call (10.4 -> 16.8 s end to end) and matches
+Kvaerno5 to 0.08%. All runs carry the common Bessel-table offsets of this
+branch (TT ~ -1% at l=20-50, EE +20.6% and TEn +10.4% at l=2), identical
+between A and B / D and E.
+
+**Follow-ups.** The planck_cl re-tune proposed by the sweep can now include
+rodas5 (config B above); fit_cl's tolerance choice is the 1.8%-at-l=2
+versus +5.6 s trade-off above.
 
 Tools: `slurm/rodas5-dense-v100.sbatch` (MODE=cltest|timing|abc|fast; COMMIT
 pins a `git archive` export so queued jobs are immune to later edits); logs
