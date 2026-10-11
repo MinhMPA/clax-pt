@@ -19,7 +19,8 @@
 # Sections: 1 new tests (sources vs CLASS, high-l preset, thermodynamics) in full mode;
 #           2 full tests/test_preset_accuracy.py + tests/test_bessel_table.py;
 #           3 fast suite with the known pre-existing failure deselected;
-#           4 timings (scripts/benchmark_speed.py planck_cl) and the 60/120 k-per-decade bands.
+#           4 timings (scripts/benchmark_speed.py planck_cl) and the 60/120 k-per-decade bands;
+#           5 the 60/120 bands only (BANDS=/lustre/... path visible from the compute nodes).
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate clax
 NVIDIA_SP=$(python -c "import site; print(site.getsitepackages()[0])")/nvidia
@@ -51,5 +52,9 @@ if [[ "$SECTIONS" == *4* ]]; then
 echo "=== 4. timings and 60/120 k-per-decade bands ==="
 python scripts/benchmark_speed.py planck_cl 2>&1 | grep -v "${FILTER}" | tail -25
 if [[ -n "${BANDS:-}" ]]; then python "${BANDS}" 60 120 2>&1 | grep -v "${FILTER}"; fi
+fi
+if [[ "$SECTIONS" == *5* ]]; then
+echo "=== 5. 60/120 k-per-decade bands ==="
+python "${BANDS:?set BANDS=/lustre/.../bands_60_120.py}" 60 120 2>&1 | grep -v "${FILTER}"
 fi
 echo "End: $(date)"
