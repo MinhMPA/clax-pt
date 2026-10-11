@@ -278,12 +278,17 @@ class PrecisionParams:
         offset at l < 50 and the +20% EE error at l=2. Above l ~ 1000 the
         C_l stage is percent-level (perturbation k sampling); 120 k/decade
         halves that at ~1.4x the cost. 300 k-modes.
+        th_n_points: 100000 is kept for the science preset; 20000 (as in
+        planck_fast) changes C_l by <= 0.02% to l=500, <= 0.05% to l=1000 and
+        ~0.13% above, and cuts thermodynamics from ~59 s to ~13 s on a V100.
+        Measured V100 stages (cached): perturbations 105 s (massless), 189 s
+        (one 0.06 eV neutrino, 5 q-bins); harmonic 13 s.
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # covers l~2500 with margin
             pt_k_per_decade=60,      # 0.1% to l~1200, 0.3% to l~2000
             pt_tau_n_points=5000,    # 10000 and 20000 identical; 2000 costs 0.6% low-l EE
-            th_n_points=100000,      # Heun RECFAST stepping; 20000 under measurement
+            th_n_points=100000,      # 20000: <=0.05% to l=1000, 46 s cheaper (see docstring)
             pt_l_max_g=17,
             pt_l_max_pol_g=17,
             pt_l_max_ur=17,

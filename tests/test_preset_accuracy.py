@@ -4,9 +4,12 @@ The Oct 2026 sweep (docs/precision_sweep_2026-10-10.md) retuned planck_cl from
 Kvaerno5 at l_max 50, rtol 1e-6, atol 1e-11 (4606 s per perturbation solve on
 a V100) to l_max 17, rtol 1e-4, atol 1e-6 (100 s) with spectra within 0.1% of
 the old preset, and fixed the fast C_l path (Bessel table 30 points per unit x,
-n_k_fine 20000). Measured against the CLASS massless-RECFAST reference the new
-preset reads TT within 0.08% (l < 30), 0.23% (l <= 500), 0.26% (l <= 1000) and
-EE within 0.31% (l = 5..1000). These tests pin those numbers with margin and
+n_k_fine 20000). Measured against the CLASS massless-RECFAST reference (sweep config P1,
+Oct 12, 2026) the new preset reads TT within 0.09% (l < 30), 0.22% (l <= 500),
+0.25% (l <= 1000); EE within 0.60% (l = 2-4), 0.48% (l = 5-500), 0.98% at a
+single l near 526 (rms 0.28% over 500-1000); TE/sqrt(TT EE) within 0.37%.
+With the default 0.06 eV neutrino against the CLASS default (HyRec) fiducial
+reference: TT 0.20 / 0.23 / 0.26%, EE 0.52 / 0.49 / 0.75%, TE 0.36%. These tests pin those numbers with margin and
 guard the two failure classes the sweep found: a biased Bessel table (-1% at
 l < 50, +20% in EE at l = 2) and a solver whose dense output corrupts the late
 ISW (rodas5: -4% to -46% at l = 2).
@@ -71,17 +74,19 @@ class TestPlanckClPreset:
             "TT 2-500": _band_max(cls["tt"], ref["tt"], 2, 500),
             "TT 2-1000": _band_max(cls["tt"], ref["tt"], 2, 1000),
             "EE 2-4": _band_max(cls["ee"], ref["ee"], 2, 4),
+            "EE 5-500": _band_max(cls["ee"], ref["ee"], 5, 500),
             "EE 5-1000": _band_max(cls["ee"], ref["ee"], 5, 1000),
             "TEn 2-1000": _te_norm_max(cls, ref, 2, 1000),
         }
         _report("planck_cl vs CLASS massless RECFAST", got)
-        # measured 0.08 / 0.23 / 0.26 / 0.60 / 0.31 / 0.17 percent; bars = ~1.5x
+        # measured 0.091 / 0.220 / 0.254 / 0.60 / 0.48 / 0.98 / 0.37 percent (P1); bars ~1.5x
         assert got["TT 2-30"] < 0.0015
         assert got["TT 2-500"] < 0.0035
         assert got["TT 2-1000"] < 0.004
-        assert got["EE 2-4"] < 0.015
-        assert got["EE 5-1000"] < 0.005
-        assert got["TEn 2-1000"] < 0.003
+        assert got["EE 2-4"] < 0.010
+        assert got["EE 5-500"] < 0.0075
+        assert got["EE 5-1000"] < 0.015
+        assert got["TEn 2-1000"] < 0.006
 
     def test_lcdm_grid_massive(self, lcdm_cosmology):
         """Grid points use the default massive neutrino and CLASS's default
@@ -99,9 +104,10 @@ class TestPlanckClPreset:
             "TEn 2-1000": _te_norm_max(cls, ref, 2, 1000),
         }
         _report(f"planck_cl vs CLASS ({name}, massive, HyRec)", got)
+        # fiducial measured 0.26 / 0.75 / 0.36 percent (P1m); other grid points unmeasured
         assert got["TT 2-1000"] < 0.008
-        assert got["EE 5-1000"] < 0.010
-        assert got["TEn 2-1000"] < 0.006
+        assert got["EE 5-1000"] < 0.015
+        assert got["TEn 2-1000"] < 0.008
 
 
 @pytest.mark.slow
