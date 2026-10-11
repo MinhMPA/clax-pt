@@ -234,9 +234,9 @@ class PrecisionParams:
             pt_l_max_g=50,           # reduce truncation artifacts
             pt_l_max_pol_g=50,
             pt_l_max_ur=50,
-            pt_ode_rtol=1e-5,
-            pt_ode_atol=1e-10,
-            ode_max_steps=65536,
+            pt_ode_rtol=1e-4,        # Oct 2026: converged rung (see planck_cl)
+            pt_ode_atol=1e-6,
+            ode_max_steps=8192,
         )
 
     @staticmethod
@@ -255,32 +255,42 @@ class PrecisionParams:
             pt_l_max_g=50,           # converged hierarchy
             pt_l_max_pol_g=50,
             pt_l_max_ur=50,
-            pt_ode_rtol=1e-6,
-            pt_ode_atol=1e-11,
-            ode_max_steps=131072,
+            pt_ode_rtol=1e-4,        # Oct 2026: converged rung (1e-6 / 1e-11 identical to 0.005%)
+            pt_ode_atol=1e-6,
+            ode_max_steps=8192,
         )
 
     @staticmethod
     def planck_cl():
-        """Planck-quality preset targeting <0.1% C_l at l=20-300.
+        """Science preset: TT within 0.26% and EE within 0.31% of CLASS up to
+        l=1000 (massless-RECFAST reference), ~100 s of perturbations plus
+        ~12 s of harmonic on a V100 with compute_cls_all_fast.
 
-        k_max=1.0 covers l~2500 with margin. 60 k/decade is sufficient
-        when using source-interpolated C_l (compute_cl_tt_interp).
-        l_max=50, 5000 tau points, tight ODE tolerance.
-        th_n_points=100000 for converged RECFAST stepping (Heun 2nd order).
-        ~300 k-modes total. Use with compute_cls_all_interp.
+        Retuned Oct 2026 (docs/precision_sweep_2026-10-10.md). The previous
+        values (l_max 50, rtol 1e-6, atol 1e-11, max_steps 131072) cost
+        4606 s per perturbation solve on a V100 and give the same spectra to
+        0.1%: the solve is step-count-bound and the tolerance ladder is
+        converged at rtol 1e-4 / atol 1e-6 for every hierarchy size, so the
+        retune costs nothing at l <= 2000. l_max 17 for all species keeps the
+        photon-truncation effect in the reionization EE bump below 0.05%
+        (12/10/17 gives 0.18%). hr_n_k_fine 20000 together with the fast
+        path's 30-point-per-unit-x Bessel table removes the former -1% TT
+        offset at l < 50 and the +20% EE error at l=2. Above l ~ 1000 the
+        C_l stage is percent-level (perturbation k sampling); 120 k/decade
+        halves that at ~1.4x the cost. 300 k-modes.
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # covers l~2500 with margin
-            pt_k_per_decade=60,      # sufficient with source interpolation
-            pt_tau_n_points=5000,
-            th_n_points=100000,      # converged RECFAST stepping (was 20000)
-            pt_l_max_g=50,
-            pt_l_max_pol_g=50,
-            pt_l_max_ur=50,
-            pt_ode_rtol=1e-6,
-            pt_ode_atol=1e-11,
-            ode_max_steps=131072,
+            pt_k_per_decade=60,      # 0.1% to l~1200, 0.3% to l~2000
+            pt_tau_n_points=5000,    # 10000 and 20000 identical; 2000 costs 0.6% low-l EE
+            th_n_points=100000,      # Heun RECFAST stepping; 20000 under measurement
+            pt_l_max_g=17,
+            pt_l_max_pol_g=17,
+            pt_l_max_ur=17,
+            pt_ode_rtol=1e-4,
+            pt_ode_atol=1e-6,
+            ode_max_steps=8192,      # 4096 verified sufficient at rtol 1e-4 / atol 1e-8
+            hr_n_k_fine=20000,       # 5000 is percent-level above l~500
         )
 
     @staticmethod
@@ -306,13 +316,13 @@ class PrecisionParams:
             pt_k_per_decade=60,      # same as planck_cl
             pt_tau_n_points=5000,    # same as planck_cl
             th_n_points=20000,       # 5x fewer than planck_cl (100000)
-            pt_l_max_g=50,           # same as planck_cl
-            pt_l_max_pol_g=50,
-            pt_l_max_ur=50,
-            pt_ode_rtol=1e-6,        # same as planck_cl
-            pt_ode_atol=1e-11,       # same as planck_cl
-            ode_max_steps=65536,     # halved from planck_cl (131072)
-            hr_n_k_fine=5000,        # table-based Bessel
+            pt_l_max_g=17,           # same as planck_cl (Oct 2026 retune)
+            pt_l_max_pol_g=17,
+            pt_l_max_ur=17,
+            pt_ode_rtol=1e-4,        # same as planck_cl
+            pt_ode_atol=1e-6,        # same as planck_cl
+            ode_max_steps=8192,      # same as planck_cl
+            hr_n_k_fine=20000,       # same as planck_cl
             hr_l_max=1500,           # capped for table scalability
         )
 
@@ -326,15 +336,17 @@ class PrecisionParams:
         - 2000 tau points (vs 5000)
         - 5000 thermo points (vs 100000)
         - ode_max_steps=32768 (vs 131072) → less padding in vmap
-        - rtol=1e-3: 33% faster perturbation ODE with <0.1% C_l impact
+        - rtol=1e-4 / atol=1e-6 (Oct 2026): the converged rung of the
+          tolerance ladder; 1e-3 / 1e-4 was never validated at low l
         - Fast all-l table Bessel (hr_n_k_fine=5000): precomputed j_l(x)
           and j_l'(x) tables with T0+T1+T2 transfer contributions. Avoids
           83 separate JIT compilations. ~2.5s harmonic on V100.
 
-        V100 timing (cached): BG 0.5s, TH 1.5s, PT ~30s, HR 1.7s ≈ 34s total.
-        Accuracy: <1.5% TT/EE at l≤500, ~7% at l=1000 (perturbation-limited).
-        Perturbation ODE is the floor (~30s for 100 k-modes × Kvaerno5 × 59 vars).
-        With Rosenbrock (Rodas5), perturbation ODE expected ~3-5x faster.
+        V100 timing (cached, Oct 2026 retune): PT ~100 s with Kvaerno5 at
+        rtol 1e-4 / atol 1e-6 (the solve is step-count-bound; 100 vs 300
+        modes barely matters); the earlier 30 s used rodas5, whose linear
+        dense output is wrong at l < 30 (see pt_ode_solver below).
+        Accuracy: <1.5% TT/EE at l<=500 (perturbation k-grid limited).
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # keep full k range for l coverage
@@ -345,10 +357,14 @@ class PrecisionParams:
             pt_l_max_pol_g=17,
             pt_l_max_ur=17,
             ncdm_q_size=0,           # disable ncdm hierarchy (massless approx, ~3x faster)
-            pt_ode_rtol=1e-3,        # aggressive tolerance (33% speedup, <0.1% C_l impact)
-            pt_ode_atol=1e-4,        # DISCO-EB default; filtered PID ignores small vars (was 1e-8)
-            ode_max_steps=1024,      # actual steps ~460, 2x headroom (was 32768)
+            pt_ode_rtol=1e-4,        # Oct 2026: converged rung of the tolerance ladder (was 1e-3)
+            pt_ode_atol=1e-6,        # (was 1e-4)
+            ode_max_steps=8192,      # (was 1024; 4096 verified sufficient at 1e-4 / 1e-8)
             hr_n_k_fine=5000,        # fine k-grid for accurate Bessel integrals
             hr_l_max=1500,           # reduced max multipole
-            pt_ode_solver="rodas5",
+            # Oct 2026: kvaerno5, not rodas5. rosenbrock.py's linear dense
+            # output corrupts the late ISW (TT -46% at l=2 at these tolerances,
+            # -4% at rtol 1e-5 / atol 1e-10); ~3x slower than rodas5 until the
+            # Rosenbrock solver gets Hermite dense output (fix/rodas5-dense-output).
+            pt_ode_solver="kvaerno5",
         )
