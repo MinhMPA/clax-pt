@@ -757,11 +757,21 @@ def compute_cls_all_interp(
 # _build_jl_table is now build_jl_table, imported from clax.bessel
 _build_jl_table = build_jl_table
 
+# Bessel lookup-table resolution (points per unit x). Linear interpolation of
+# j_l at spacing h biases the amplitude by ~ -h^2/12 on average; the historical
+# 3 points per unit x (h ~ 0.33 at k_max = 1/Mpc) gave a -1% TT offset at
+# l < 50 and +20% in EE at l = 2 (precision sweep, Oct 2026,
+# docs/precision_sweep_2026-10-10.md finding 6). At 30 the fast path matches
+# the exact-j_l path to 0.01% for l <= 500; the table costs ~0.7 GB at
+# l_max 2500 and the harmonic stage ~12 s instead of ~4 s on a V100.
+JL_TABLE_X_PER_UNIT = 30.0
+
 
 def compute_cls_all_fast(
     pt, params, bg, l_max=1500,
     n_k_fine=5000, tt_mode=None,
     k_interp_method="spline",
+    x_per_unit=JL_TABLE_X_PER_UNIT,
 ):
     """Fast C_l computation using precomputed j_l/j_l' tables + source interpolation.
 
@@ -793,6 +803,15 @@ def compute_cls_all_fast(
             the perturbation solve to have used pt_k_grid_type="chebyshev"
             (Lobatto nodes in log k) -- the barycentric weights assume
             Lobatto spacing.
+        x_per_unit: Bessel-table points per unit x (default
+            JL_TABLE_X_PER_UNIT = 30). Values below ~10 bias C_l low by
+            ~ -h^2/12 per unit amplitude; see the module constant.
+
+    Accuracy (Oct 2026 sweep, massless RECFAST reference, planck_cl-class
+    perturbations): with n_k_fine 20000 and the default table this path
+    matches the exact-j_l path (compute_cls_all_interp) to 0.011% for
+    l <= 500, 0.024% for l <= 1000, 0.17% for l <= 2000; n_k_fine 5000 is
+    percent-level above l ~ 500.
 
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
@@ -834,7 +853,7 @@ def compute_cls_all_fast(
 
     # 3. Build j_l and j_l' tables for all sparse l-values
     x_max = float(jnp.max(k_fine) * tau_0 * 1.05)
-    n_x = max(30000, int(x_max * 3))  # ~3 points per unit x
+    n_x = max(30000, int(x_max * x_per_unit))  # see JL_TABLE_X_PER_UNIT
     x_table, jl_table, jlp_table = _build_jl_table(l_max, n_x=n_x, x_max=x_max)
 
     # 4. Precompute interpolation indices (shared across all l and both tables)
