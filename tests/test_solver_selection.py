@@ -44,10 +44,20 @@ class TestSolverSelection:
         prec = PrecisionParams.fit_cl()
         assert prec.pt_ode_solver == "rodas5"
 
-    def test_fit_cl_loosened_atol(self):
-        """fit_cl preset uses DISCO-EB-style loosened atol=1e-4."""
+    def test_fit_cl_tolerances(self):
+        """fit_cl uses the converged rung rtol 1e-4 / atol 1e-6 (Oct 12, 2026):
+        with rodas5's Hermite dense output, 1e-3 / 1e-4 still leaves 1.8% TT
+        at l=2 and 1.3% at l=3, while 1e-4 / 1e-6 matches kvaerno5 to 0.08%."""
         prec = PrecisionParams.fit_cl()
-        assert prec.pt_ode_atol == 1e-4
+        assert prec.pt_ode_rtol == 1e-4
+        assert prec.pt_ode_atol == 1e-6
+
+    def test_cl_presets_use_rodas5(self):
+        """planck_cl / planck_fast moved to rodas5 on Oct 12, 2026: with cubic
+        Hermite dense output it matches kvaerno5 to 0.08% at l=2 and <= 0.03%
+        elsewhere at 3.7x less perturbation time."""
+        for preset in [PrecisionParams.planck_cl, PrecisionParams.planck_fast]:
+            assert preset().pt_ode_solver == "rodas5", preset.__name__
 
     def test_default_uses_kvaerno5(self):
         """Default PrecisionParams uses Kvaerno5."""
@@ -55,9 +65,9 @@ class TestSolverSelection:
         assert prec.pt_ode_solver == "kvaerno5"
 
     def test_other_presets_unchanged(self):
-        """Non-fit presets still use Kvaerno5."""
+        """The legacy presets still use Kvaerno5."""
         for preset in [PrecisionParams.fast_cl, PrecisionParams.medium_cl,
-                       PrecisionParams.planck_cl, PrecisionParams.planck_fast]:
+                       PrecisionParams.science_cl]:
             prec = preset()
             assert prec.pt_ode_solver == "kvaerno5", \
                 f"{preset.__name__} should use kvaerno5, got {prec.pt_ode_solver}"

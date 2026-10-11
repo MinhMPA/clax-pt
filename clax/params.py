@@ -281,8 +281,10 @@ class PrecisionParams:
         th_n_points: 100000 is kept for the science preset; 20000 (as in
         planck_fast) changes C_l by <= 0.02% to l=500, <= 0.05% to l=1000 and
         ~0.13% above, and cuts thermodynamics from ~59 s to ~13 s on a V100.
-        Measured V100 stages (cached): perturbations 105 s (massless), 189 s
-        (one 0.06 eV neutrino, 5 q-bins); harmonic 13 s.
+        Measured V100 stages (cached, kvaerno5): perturbations 105 s
+        (massless), 189 s (one 0.06 eV neutrino, 5 q-bins); harmonic 13 s.
+        With rodas5 (default since Oct 12, 2026) perturbations are ~30 s
+        massless; thermodynamics (~60 s at th_n_points 100000) then dominates.
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # covers l~2500 with margin
@@ -296,6 +298,10 @@ class PrecisionParams:
             pt_ode_atol=1e-6,
             ode_max_steps=8192,      # 4096 verified sufficient at rtol 1e-4 / atol 1e-8
             hr_n_k_fine=20000,       # 5000 is percent-level above l~500
+            # Oct 12, 2026: rodas5 with cubic Hermite dense output (rosenbrock.py)
+            # matches kvaerno5 to 0.08% at l=2 and <= 0.03% elsewhere at 3.7x
+            # less perturbation time (29.5 s vs 110.6 s on a V100).
+            pt_ode_solver="rodas5",
         )
 
     @staticmethod
@@ -329,6 +335,7 @@ class PrecisionParams:
             ode_max_steps=8192,      # same as planck_cl
             hr_n_k_fine=20000,       # same as planck_cl
             hr_l_max=1500,           # capped for table scalability
+            pt_ode_solver="rodas5",  # same as planck_cl (Oct 12, 2026)
         )
 
     @staticmethod
@@ -347,11 +354,11 @@ class PrecisionParams:
           and j_l'(x) tables with T0+T1+T2 transfer contributions. Avoids
           83 separate JIT compilations. ~2.5s harmonic on V100.
 
-        V100 timing (cached, Oct 2026 retune): PT ~100 s with Kvaerno5 at
-        rtol 1e-4 / atol 1e-6 (the solve is step-count-bound; 100 vs 300
-        modes barely matters); the earlier 30 s used rodas5, whose linear
-        dense output is wrong at l < 30 (see pt_ode_solver below).
-        Accuracy: <1.5% TT/EE at l<=500 (perturbation k-grid limited).
+        V100 timing (cached, Oct 12, 2026): BG 0.7 s, TH 2.4 s, PT 9.8 s,
+        HR 3.8 s, about 17 s end to end with rodas5 at rtol 1e-4 / atol 1e-6
+        (kvaerno5: 61 s). Accuracy vs CLASS (massless RECFAST): TT 0.46% at
+        l<=30, 0.69% at l<=500; EE 1.25% at l=5-500 (perturbation k-grid
+        limited above l~500).
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # keep full k range for l coverage
@@ -367,9 +374,11 @@ class PrecisionParams:
             ode_max_steps=8192,      # (was 1024; 4096 verified sufficient at 1e-4 / 1e-8)
             hr_n_k_fine=5000,        # fine k-grid for accurate Bessel integrals
             hr_l_max=1500,           # reduced max multipole
-            # Oct 2026: kvaerno5, not rodas5. rosenbrock.py's linear dense
-            # output corrupts the late ISW (TT -46% at l=2 at these tolerances,
-            # -4% at rtol 1e-5 / atol 1e-10); ~3x slower than rodas5 until the
-            # Rosenbrock solver gets Hermite dense output (fix/rodas5-dense-output).
-            pt_ode_solver="kvaerno5",
+            # rodas5 with cubic Hermite dense output (Oct 12, 2026). With the
+            # earlier linear dense output the late ISW was wrong (TT -46% at
+            # l=2 at these tolerances); now rodas5 matches kvaerno5 to 0.08%
+            # at l=2 and 0.03% elsewhere at 9.8 s vs 54.7 s of perturbations.
+            # rtol 1e-3 / atol 1e-4 would save another 5.6 s but leaves 1.8%
+            # at l=2 and 1.3% at l=3.
+            pt_ode_solver="rodas5",
         )
