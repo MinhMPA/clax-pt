@@ -35,7 +35,9 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 if [[ "$SECTIONS" == *1* ]]; then
 echo "=== 1. new tests (full mode) ==="
-pytest tests/test_thermodynamics.py -k tau_free_streaming tests/test_sources_vs_class.py \
+# -k applies to every collected file, so the thermodynamics subset runs on its own
+pytest tests/test_thermodynamics.py -k tau_free_streaming -q -o addopts="" -p no:cacheprovider -rA -s 2>&1 | grep -v "${FILTER}"
+pytest tests/test_sources_vs_class.py \
     "tests/test_preset_accuracy.py::TestPlanckClPreset::test_fiducial_massless_recfast_high_l" \
     -q -o addopts="" -p no:cacheprovider -rA -s 2>&1 | grep -v "${FILTER}"
 fi
