@@ -26,7 +26,11 @@ omega_cdm, Y_He, N_eff and T_cmb are smooth:
     - Numerics: each Peebles equation is advanced by one L-stable, second-order
       linearly implicit step (ROS2, _ros2_advance; 10 sub-steps per grid step) and
       NO clip to [0, 1]. L-stable means a stiff relaxation lands on its equilibrium
-      without overshoot or oscillation, so no clip is needed. The Jacobian comes
+      without overshoot or oscillation, which is why no clip is used; that holds for
+      an exact Jacobian. J is taken with x_e held fixed, so for a rate ~ x_e x_p the
+      stiff limit is a damped alternating approach (amplification ~ -0.66 per step),
+      not an exact no-overshoot guarantee. The bounds tests are the guard, and the
+      x_HeII <= 1 test sees an overshoot only above ~5e-3. The Jacobian comes
       from a scalar forward-mode jvp. The stage-switch redshifts are fixed numbers,
       as in CLASS, so no derivative passes through a switch location.
     - He/H number ratio: every number-ratio site uses
@@ -38,19 +42,21 @@ omega_cdm, Y_He, N_eff and T_cmb are smooth:
 Why: the earlier explicit steps (Heun for helium, RK4 for hydrogen, both clipped,
 plus a hard x_He > 0.999 switch and Saha/ODE sigmoids) ran through the ranges
 where CLASS uses Saha. x_e looked fine (0.35% wiggles), but d ln x_e / d theta
-spiked to ~1e12 at isolated grid points; those reached delta_m through
+spiked to ~5e12 at isolated grid points; those reached delta_m through
 c_s^2 k^2 delta_b depending on where the ODE solver happened to step, and on the
 fit_cl 3000-point grid x_e collapsed to 0.035 at z ~ 1559.
 
 Known limitations:
     - Heswitch = 1 helium only. CLASS's default (Heswitch = 6, Doppler and
       triplet terms) differs in x_e by 1.5% at z = 2000 and 4.2% at z ~ 1771.
-    - The T_b update has a hard Taylor switch at x_e < 1e-3 (derivative spike
-      ratio 20 at z ~ 624 on a 1500-point grid), and c_s^2 is 1.3% from CLASS's
-      c_b^2 at z ~ 632.
+    - The T_b update has a hard Taylor switch at x_e < 1e-3 (spike ratio 20, i.e.
+      a derivative 20 times the median of its +-25 neighbours, at z ~ 624 on a
+      1500-point grid), and c_s^2 is 1.3% from CLASS's c_b^2 at z ~ 632.
     - The kappa_dot, exp(-kappa) and g tables carry a stop_gradient with an
-      n_H_0 rescale (smsharma/clax#45), which biases AD with respect to omega_cdm
-      (and possibly omega_b) through them.
+      n_H_0 rescale (smsharma/clax#45). AD of P(k) with respect to omega_cdm sits
+      a steady +0.66% above converged finite differences (d ln P / d ln omega_cdm
+      bias 0.0092 at k = 0.1 Mpc^-1, fixed tree); the stop_gradient is a candidate
+      cause, untested, and probably not the only one.
     - Reverse mode through _ros2_advance needs a static Python-int sub-step count.
     - No test gates the C_l shift caused by this change; ADR 0003 records the
       measured planck_cl and fit_cl shifts against the unfixed code.
@@ -373,8 +379,10 @@ def _ros2_scalar_step(rate, xe_of, x, h, env0, env1):
     W = 1 - gamma h J,  k1 = h f(s_j, x_j)/W,  k2 = (h f(s_j+1, x_j + k1) - 2 k1)/W,
     x_j+1 = x_j + 3/2 k1 + 1/2 k2, with gamma = 1 + 1/sqrt(2). J = d rate/d x at
     the sub-step start with x_e held fixed (ROS2 stays second order for any J).
-    L-stable: a stiff relaxation lands on its equilibrium without overshoot, so
-    no clip is needed. env0/env1: environment tuples at the sub-step's two ends.
+    L-stable: a stiff relaxation lands on its equilibrium without overshoot for
+    an exact J, so no clip is used (with x_e held fixed in J the stiff limit is a
+    damped alternating approach, amplification ~ -0.66; see the module docstring).
+    env0/env1: environment tuples at the sub-step's two ends.
     """
     xe_j = xe_of(x)
     f0, J = jax.jvp(lambda y: rate(xe_j, y, *env0), (x,), (jnp.ones_like(x),))

@@ -70,8 +70,12 @@ jobs 22933-22937, 22948, 22949, 22952, 22953, 22959, 22972, 22973, 22976, 22977,
 | VD | VC + CLASS hydrogen staging at z = 1600, clipped RK4 below | 6.4e-4 | 4.4e-3 | 10.9 | 1.1e-4 | not measured | misses the x_e bar and the spike bar (10) |
 | **VE** | VD with RK4 replaced by the same L-stable step | **6.4e-4** | **3.5e-4** | **1.19** | **6.3e-5** | **2.7e-13** | **meets every criterion** |
 
-Bars used in this repository's tests (spec S1-S3): x_e <= 1e-3, spike ratio < 10,
-spread < 3e-4, CPU vs GPU < 1e-10.
+Bars used in this repository's tests (spec seams S1-S3: the thermodynamics tables
+and their tangents, the delta_m gradient through the matter solve, and the
+production gradient entry of ADR 0001): x_e <= 1e-3, spike ratio < 10, spread
+< 3e-4, CPU vs GPU < 1e-10. "Chatters" in the verdict column means the explicit
+step zigzags from one grid point to the next, which puts spikes in the
+derivative.
 
 ## Decision
 
@@ -96,7 +100,13 @@ fixed (n_H, H, T_b, T_r, z, and x_e as an input); ROS2 stays second order for an
 J. 10 sub-steps per grid step; ln a is linear within a step and ln H, T_b are
 linear in ln a. "L-stable" means a stiff relaxation (rate times step >> 1) lands
 on its equilibrium without overshoot or oscillation, which is what removes the
-need for a clip.
+need for a clip. That holds for an exact Jacobian. Here J is taken with x_e held
+fixed, so for a rate proportional to x_e x_p the true stiffness is about twice J
+and the stiff limit of the step is a damped alternating approach (amplification
+about -0.66 per step) rather than a monotone one. It is stable and the effect is
+small, but the no-overshoot guarantee is not exact: the bounds tests are the
+guard, and the x_HeII <= 1 guard sees an overshoot only above about 5e-3 (see
+Tests).
 
 **D2. Helium, HeII -> HeI.** CLASS's staging: Saha equilibrium above z = 2870
 (`thermodynamics.c:4053-4067`, HeI ionisation temperature 285,335 K,
@@ -163,7 +173,9 @@ reference to 8.4e-6 in x_e.
    the visibility peak moves by 294 in z. The probe did not isolate why; staging
    removes the stiff Saha-dominated range from the integration altogether, which
    is what CLASS does.
-3. **Fix the ODE solver instead** (the parked `fix/rodas5-division-free` branch).
+3. **Fix the ODE solver instead** (the parked `fix/rodas5-division-free` branch,
+   which hardens the Rodas5 stage matrix by writing it division-free, the "W'"
+   form I - dt gamma J instead of I/(dt gamma) - J).
    Rejected as the fix for #48: the diagnosis (jobs 22768-22820) found Kvaerno5
    shows the same corruption (one mode, k = 0.0226 Mpc^-1, kicked to
    d ln delta_m/dh = +1.32 at tau = 114-131 Mpc). The solver only decides how
@@ -182,11 +194,12 @@ in every window, worst over the 10 cosmologies (default 20000-point grid /
 1.2e-4; z 1590-1650 6.4e-5 / 4.2e-4; z 800-1550 8.3e-5 / 5.6e-4 (jobs
 24290-24292). The `fit_cl` x_e collapse at z ~ 1559 is gone. The visibility peak
 sits within 1.8e-3 (20000 points) and 2.3e-2 (3000 points) in z of CLASS (bars
-0.01 / 0.03), so the sound horizon and the acoustic scale are not affected at
-that level. After D4 two hydrogen windows rose on the 3000-point grid (1590-1650:
-2.6e-4 -> 4.2e-4; 800-1550: 4.4e-4 -> 5.6e-4), still under the bar: the old
-exactly-4 ratio had been cancelling part of that grid's discretisation error (the
-3000-minus-20000 difference is unchanged at +4.1e-4).
+0.01 / 0.03); the shifts of the sound horizon r_s and the acoustic scale theta_s
+were not computed, so they are untested. After D4 two hydrogen windows rose on
+the 3000-point grid (1590-1650: 2.6e-4 -> 4.2e-4; 800-1550: 4.4e-4 -> 5.6e-4),
+still under the bar: the old exactly-4 ratio had been cancelling part of that
+grid's discretisation error (the 3000-minus-20000 difference is unchanged at
++4.1e-4).
 
 **Derivatives.** The spike ratio falls from 9.5e14 to 1.18 (20000 points) and
 from 5.4e8 to 2.55 (3000 points); tangents match converged finite differences
@@ -201,32 +214,46 @@ ADR 0001 and forward mode agree to <= 3.1e-5 (unfixed 1.16 on the production pat
 at fiducial); and df/dh is smooth along h = 0.62-0.72 (cubic-fit residual
 <= 6.1e-5; unfixed 5.5e-2). The forward df/dh at fiducial itself moves by 3.5%
 between the unfixed (-2.659e9) and the fixed (-2.756e9) code, and the unfixed
-value also changed with step placement. Jobs 24226-24231.
+value also changed with step placement. Jobs 24226-24231. Finite differences of
+P(k) also become trustworthy: the spread of a central-difference
+dP(k = 0.1 Mpc^-1)/d omega_cdm over steps 1e-4 to 2e-3 falls from 1.06% to 0.02%
+(CPU jobs 24515 -> 24514; GPU 1.02% -> 0.02%, jobs 24517 -> 24516).
 
 **Speed.** On one V100 (igpu08, job 24327, four processes in the order
 unfixed / fixed / unfixed / fixed) the whole `fit_cl` chain takes 8.248 s and
 8.061 s unfixed against 7.567 s and 7.389 s fixed: fixed/unfixed = 0.917 on both
 repeats, so the fix is **faster**, and the ~5% stop rule is not triggered.
-Thermodynamics alone, a sequential 3000-step scan that is latency-bound on the
-GPU, runs at 0.98-0.99 (the extra Jacobian evaluations cost nothing measurable
-there). The saving is in the perturbation stage (3.14 s and 3.05 s against 3.81 s
-and 3.70 s, ratio 0.82). The cause was not tested; a plausible reading is that
-smooth tables let the shared-step Rosenbrock solver take fewer steps. The 8 s
-total is not the 34 s quoted in CLAUDE.md; that figure is stale.
+Thermodynamics alone runs at 0.98-0.99. Hypothesis, untested: a sequential
+3000-step scan is latency-bound on the GPU, so the extra Jacobian evaluations
+cost nothing measurable there. The saving is in the perturbation stage (3.14 s
+and 3.05 s against 3.81 s and 3.70 s, ratio 0.82). The cause was not tested; a
+plausible reading is that smooth tables let the shared-step Rosenbrock solver
+take fewer steps. The 8 s total is not the 34 s quoted in CLAUDE.md; that figure
+was not reproduced here.
 
 **C_l.** Lead with the direct effect of the fix. At `planck_cl` the unlensed
 spectra move by at most (TT / EE) 0.0051% / 0.0037% for l <= 500, 0.0188% /
 0.0255% for 500 < l <= 1500 and 0.0518% / 0.0627% for 1500 < l <= 2500,
 identical for the table-Bessel and the per-l harmonic path (job pairs
 24330/24331 and 24360/24361). The maximum error against CLASS in any TT or EE
-band does not move by more than 0.04 percentage points. At `fit_cl` the shifts are larger (TT up to
-10.3% at l = 4, 1.7% at l = 30, 0.46% over 100-500; jobs 24328/24329), but
-`fit_cl`'s own TT error against CLASS is already 84-94% at l = 2 and 1.55-1.85%
-over l = 100-500 on both trees. So the `fit_cl` shift is most likely numerical
-noise from the 20 k/decade grid and rtol = 1e-3, not recombination physics; that
-is an inference from the `planck_cl` result, not separately proven. It does mean
-the low-l `fit_cl` likelihood is numerically noisy at the 10% level independent
-of #48; that is pre-existing and matters for HMC.
+band does not move by more than 0.04 percentage points.
+
+At `fit_cl` the shifts are larger (TT up to 10.3% at l = 4, 1.7% at l = 30,
+0.46% over 100-500; jobs 24328/24329). The direction of the error against CLASS
+(max |C_l/C_CLASS - 1|, unfixed -> fixed) differs by band: TT l 2-30
+84% -> 94% and 30-100 4.5% -> 4.7% (worse), TT 100-500 1.85% -> 1.55% and
+500-1500 15.8% -> 14.9% (better); EE 2-30 16.8% -> 16.8% (unchanged), EE 30-100
+3.6% -> 0.8%, 100-500 1.30% -> 1.11% and 500-1500 19.5% -> 17.7% (better). So five
+bands improve, two (low-l TT) worsen and one does not move. The unfixed `fit_cl`
+grid had a real value error: x_e off CLASS by 0.46 at fiducial in z 1590-1650 and
+0.54 in z 800-1550 (worst over the 10 cosmologies 0.66 and 0.78; jobs
+24169-24171), against 4.2e-4 and 5.6e-4 fixed. **The cause of the `fit_cl` C_l
+shift is unresolved.** Two candidates, neither tested: (i) the genuine x_e
+correction at z ~ 1560-1650 on the 3000-point grid; (ii) noise at `fit_cl`'s
+20 k/decade grid and rtol = 1e-3. The `planck_cl` shift of 3e-6 at l <= 30 does
+not discriminate between them. A test would be to feed the fixed and unfixed
+tables through `fit_cl`'s perturbation solve with a finer k grid and a tighter
+tolerance.
 
 Absolute errors against CLASS are a **pre-existing baseline at the preset
 defaults, not an effect of this change**. `planck_cl` with its default
@@ -248,9 +275,12 @@ forward tangents at 10 cosmologies on both grids; a `--fast` subset runs the
 delta_m functional and the production gradient entry),
 `tests/test_recomb_gpu.py` (CPU vs GPU, skipped without a GPU) and
 `tests/test_recomb_reference.py` (the reference data). Each new test family was
-shown failing on the unfixed code before the fix and passing after, except the
-two bounds tests (x_e in [0, 1 + 2 f_He], and x_HeII <= 1 for z in [2400, 2870]):
-the old clipped code satisfied those by construction, so they cannot be red. The
+shown failing on the unfixed code before the fix and passing after, with two
+kinds of exception. The red failures of S0 and of the reference-data tests were
+an ImportError (the step function does not exist on 4d084b5) and a missing file,
+not an assertion. The two bounds tests (x_e in [0, 1 + 2 f_He], and x_HeII <= 1
+for z in [2400, 2870]) cannot be red: the old clipped code satisfied them by
+construction. The
 x_HeII <= 1 guard has a 3.6e-4 to 5.2e-4 margin, so it catches an overshoot in
 x_HeII only above about 5e-3.
 
@@ -278,12 +308,24 @@ literal 10 at both call sites. The ADR 0001 caveat (forward mode needs
 - **#45** (does the kappa_dot `stop_gradient` still need to stay?) is a separate
   follow-on: with recombination smooth, test removing it and keep the removal
   only if gradients stay finite and AD matches FD for omega_b and omega_cdm at
-  3-5 cosmologies. Related, pre-existing:
-  `tests/test_pk_gradients.py::TestPkPublicTableGradients::test_public_table_partials_match_fd_full`
-  fails on both trees (AD against FD for dP(k = 0.05 Mpc^-1)/d omega_b is off by
-  4.02% fixed, 4.08% unfixed; jobs 24324, 24429), probably through the same
-  `stop_gradient`. #45 as filed is about omega_cdm, so this awaits a decision
-  whether to extend #45 or file a new issue.
+  3-5 cosmologies. Related, pre-existing, both newly measured:
+  - AD sits a steady +0.66% above converged FD for dP(k = 0.1 Mpc^-1)/d omega_cdm
+    on the fixed tree (`tests/test_pk_forward_mode.py`; jobs 24514 CPU and 24516
+    GPU, FD std 0.007%, platforms agreeing to 2e-8). On the unfixed tree the same
+    offset (+0.64% CPU, +0.56% GPU against the mean FD slope, which equals the
+    fixed slope to 1.6e-5) was hidden because FD itself scattered by 1.06% across
+    steps (std 0.44%; jobs 24515, 24517). The fix exposed the bias by smoothing
+    the primal; it did not create it. In units of d ln P/d ln omega_cdm the bias
+    is 0.0092, about 2.3 times the ~0.004 quoted in #45, whose measurement
+    conditions were not recorded. The kappa_dot `stop_gradient` is a candidate
+    cause, untested, and probably not the sole one; one cosmology, one k, one
+    parameter, one precision block. The test's 1% bar passes with a 0.34-point
+    margin.
+  - `tests/test_pk_gradients.py::TestPkPublicTableGradients::test_public_table_partials_match_fd_full`
+    fails on both trees (AD against FD for dP(k = 0.05 Mpc^-1)/d omega_b is off by
+    4.02% fixed, 4.08% unfixed; jobs 24324, 24429); the `stop_gradient` is a
+    candidate, untested. #45 as filed is about omega_cdm, so this awaits a
+    decision whether to extend #45 or file a new issue.
 - The out-of-scope items: `Heswitch = 6` helium physics; the hard Taylor switch in
   the T_b update at x_e < 1e-3 (spike ratio 20 at z ~ 624, on a 1500-point grid
   only); c_s^2 against CLASS's c_b^2 (1.3% apart at z ~ 632), together with the
