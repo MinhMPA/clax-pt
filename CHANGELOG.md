@@ -8,6 +8,38 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 12, 2026: Preset retune (planck_cl ~40x faster at equal accuracy), fast-path Bessel table fix, fit_cl off rodas5
+
+Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`
+on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
+
+- `PrecisionParams.planck_cl()`: l_max 17/17/17, rtol 1e-4, atol 1e-6,
+  max_steps 8192, hr_n_k_fine 20000 (was l_max 50, 1e-6, 1e-11, 131072,
+  5000). The sweep measured the same spectra to 0.1% (0.09% at l=2, 0.05%
+  elsewhere) at 100 s instead of 4606 s per perturbation solve on a V100
+  (massless); 169 s instead of 7006 s with a 0.06 eV neutrino (5 q-bins,
+  l_max_ncdm 17; l_max_ncdm 50 is identical). `planck_fast` follows;
+  `science_cl` / `medium_cl` move to the same tolerance rung.
+- `compute_cls_all_fast`: Bessel table at `JL_TABLE_X_PER_UNIT = 30` points
+  per unit x (was 3; new kwarg `x_per_unit`). Linear interpolation of the
+  table biased every C_l by ~ -h^2/12 in amplitude: -1% TT at l < 50, +20%
+  EE at l=2, and a k_max dependence. With the finer table and n_k_fine
+  20000 the fast path matches the exact-j_l path to 0.011% (l <= 500),
+  0.024% (l <= 1000), 0.17% (l <= 2000); against CLASS (massless RECFAST):
+  TT within 0.08% (l < 30), 0.23% (l <= 500), 0.26% (l <= 1000), EE within
+  0.31%. Cost: harmonic ~12 s instead of ~4 s, table ~0.7 GB at l_max 2500.
+- `fit_cl`: kvaerno5 at rtol 1e-4 / atol 1e-6 instead of rodas5 at
+  1e-3 / 1e-4. rodas5's `LocalLinearInterpolation` dense output corrupts the
+  late ISW (TT -46% at l=2 at 1e-4 / 1e-6; -4% at 1e-5 / 1e-10), which the
+  preset's spot checks at l=20,100,500,1000 never saw. ~3x slower until
+  `fix/rodas5-dense-output` lands.
+- Tests: `tests/test_bessel_table.py` (table bias law -h^2/12, module
+  default, fast-path default) and `tests/test_preset_accuracy.py` (slow:
+  planck_cl vs CLASS massless-RECFAST with the measured bars x1.5; the LCDM
+  grid vs CLASS default references with looser bars; fit_cl low-l guard).
+- Validation: `slurm/preset-validation-v100.sbatch` (accuracy tests,
+  benchmark_speed timings, fast suite). Results recorded below once run.
+
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 
 **Defect.** `clax/rosenbrock.py` (`Rodas5`, `Rodas5Batched`) reconstructed the
