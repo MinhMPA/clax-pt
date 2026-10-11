@@ -8,7 +8,7 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
-### Oct 12, 2026: Preset retune (planck_cl ~40x faster at equal accuracy), fast-path Bessel table fix, fit_cl off rodas5
+### Oct 12, 2026: Preset retune (planck_cl ~45x faster at equal accuracy), fast-path Bessel table fix, presets on the Hermite rodas5
 
 Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`
 on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
@@ -28,11 +28,17 @@ on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   0.024% (l <= 1000), 0.17% (l <= 2000); against CLASS (massless RECFAST):
   TT within 0.08% (l < 30), 0.23% (l <= 500), 0.26% (l <= 1000), EE within
   0.31%. Cost: harmonic ~12 s instead of ~4 s, table ~0.7 GB at l_max 2500.
-- `fit_cl`: kvaerno5 at rtol 1e-4 / atol 1e-6 instead of rodas5 at
-  1e-3 / 1e-4. rodas5's `LocalLinearInterpolation` dense output corrupts the
-  late ISW (TT -46% at l=2 at 1e-4 / 1e-6; -4% at 1e-5 / 1e-10), which the
-  preset's spot checks at l=20,100,500,1000 never saw. ~3x slower until
-  `fix/rodas5-dense-output` lands.
+- Solver: `planck_cl`, `planck_fast` and `fit_cl` use rodas5 with the cubic
+  Hermite dense output of the entry below (this branch stacks on
+  `fix/rodas5-dense-output`). Solver-choice measurement (V100, job 24652,
+  massless, l<=1000 vs CLASS, differentials rodas5 - kvaerno5 at identical
+  settings): planck-like at rtol 1e-4 / atol 1e-6: TT 0.077% (l=2), EE 0.03%,
+  TE 0.05%, perturbations 29.5 s vs 110.6 s; fit_cl-like: TT 0.080% (l=2),
+  EE 0.03%, TE 0.05%, 9.8 s vs 54.7 s (16.8 s vs 61.0 s end to end). The old
+  fit_cl tolerances rtol 1e-3 / atol 1e-4 with the Hermite output: TT 1.8% at
+  l=2, 1.3% at l=3, < 0.2% from l=5, for 4.2 s; kept at 1e-4 / 1e-6. With
+  the earlier linear dense output rodas5 was off by -46% at l=2 at these
+  tolerances, which the preset's spot checks at l=20,100,500,1000 never saw.
 - Tests: `tests/test_bessel_table.py` (table bias law -h^2/12, module
   default, fast-path default) and `tests/test_preset_accuracy.py` (slow:
   planck_cl vs CLASS massless-RECFAST with the measured bars x1.5; the LCDM
@@ -70,9 +76,10 @@ on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   -0.10/+0.27%; fit_cl TT -0.37/+0.05/-0.32/-6.4% (20 k/decade limits l>500).
 - Fast suite (job 24621, `--fast`, known `test_pk_rosenbrock_vs_kvaerno5`
   deselected): 326 passed, 74 skipped, 2 failed, both in
-  `tests/test_solver_selection.py` (`test_fit_cl_uses_rodas5`,
-  `test_fit_cl_loosened_atol`), which pin the previous fit_cl solver and
-  tolerance; updated with the final fit_cl choice (see below).
+  `tests/test_solver_selection.py`, which pinned the previous fit_cl solver
+  and tolerance (that run was the interim kvaerno5 fit_cl); the tests now
+  assert rodas5 for planck_cl / planck_fast / fit_cl and rtol 1e-4 /
+  atol 1e-6 for fit_cl. Final validation of the stack recorded below.
 
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 
