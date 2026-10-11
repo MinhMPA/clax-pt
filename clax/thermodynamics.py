@@ -210,7 +210,15 @@ _LYA_FACT = 4.662899067555897e15   # Lyman-alpha escape factor [cm^{-3}]
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class ThermoResult:
-    """Output of the thermodynamics module."""
+    """Output of the thermodynamics module.
+
+    ``tau_free_streaming`` [Mpc] is CLASS's ``pth->tau_free_streaming``
+    (thermodynamics.c): the first conformal time after recombination at which
+    the Thomson mean free path tau_c = 1/kappa' exceeds
+    ``PrecisionParams.pt_rsa_trigger_tau_c_over_tau`` (= 5) conformal times.
+    Together with k*tau > ``pt_rsa_trigger_tau_over_tau_k`` it switches the
+    photon radiation streaming approximation on in perturbations.py.
+    """
     xe_of_loga: CubicSpline
     Tb_of_loga: CubicSpline
     kappa_dot_of_loga: CubicSpline
@@ -224,6 +232,7 @@ class ThermoResult:
     tau_star: float
     rs_star: float
     z_reio: float
+    tau_free_streaming: float
 
     def tree_flatten(self):
         return [
@@ -232,6 +241,7 @@ class ThermoResult:
             self.exp_m_kappa_of_loga,
             self.g_of_loga, self.g_prime_of_loga, self.cs2_of_loga,
             self.z_star, self.z_rec, self.tau_star, self.rs_star, self.z_reio,
+            self.tau_free_streaming,
         ], None
 
     @classmethod
@@ -1036,6 +1046,33 @@ def thermodynamics_solve(
     g_prime_grid = (dkd_dloga_grid * _aH_grid + _kd_safe**2) * _exp_m_kappa_safe
     g_prime_of_loga = CubicSpline(loga_grid_sg, g_prime_grid)
 
+    # --- tau_free_streaming: second trigger of the radiation streaming
+    # approximation. CLASS thermodynamics.c ("find time (always after
+    # recombination) at which tau_c/tau falls below some threshold, defining
+    # tau_free_streaming"): the first table time after the visibility peak at
+    # which the Thomson mean free path tau_c = 1/kappa' exceeds
+    # radiation_streaming_trigger_tau_c_over_tau (= 5) conformal times. CLASS
+    # takes the table point itself; here the crossing is interpolated linearly
+    # in log a between the two bracketing points (364.8 Mpc, z = 760 at the
+    # fiducial cosmology, visibility at 2.4% of its peak; CLASS's table point
+    # is 0.03 Mpc later). Same AD convention as kappa_dot_of_loga (_kd_safe);
+    # tau from the background spline, as for tau_star. If no crossing exists
+    # (never for a recombining universe) the switch is pushed past the table.
+    _tau_grid_bg = jax.vmap(bg.tau_of_loga.evaluate)(loga_grid_sg)
+    _tau_c_over_tau = 1.0 / jnp.maximum(_kd_safe * _tau_grid_bg, 1e-300)
+    _after_peak = jnp.arange(loga_grid_sg.shape[0]) > idx_star
+    _crossed = _after_peak & (_tau_c_over_tau >= prec.pt_rsa_trigger_tau_c_over_tau)
+    _i1 = jnp.argmax(_crossed)
+    _i0 = jnp.maximum(_i1 - 1, 0)
+    _f0 = _tau_c_over_tau[_i0]
+    _f1 = _tau_c_over_tau[_i1]
+    _w = jnp.clip((prec.pt_rsa_trigger_tau_c_over_tau - _f0)
+                  / jnp.where(_f1 == _f0, 1.0, _f1 - _f0), 0.0, 1.0)
+    _loga_fs = loga_grid_sg[_i0] + _w * (loga_grid_sg[_i1] - loga_grid_sg[_i0])
+    tau_free_streaming = jnp.where(jnp.any(_crossed),
+                                   bg.tau_of_loga.evaluate(_loga_fs),
+                                   _tau_grid_bg[-1])
+
     return ThermoResult(
         xe_of_loga=xe_of_loga,
         Tb_of_loga=Tb_of_loga,
@@ -1050,6 +1087,7 @@ def thermodynamics_solve(
         tau_star=tau_star,
         rs_star=rs_star,
         z_reio=z_reio,
+        tau_free_streaming=tau_free_streaming,
     )
 
 

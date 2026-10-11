@@ -172,6 +172,17 @@ class PrecisionParams:
     pt_tau_n_points: int = 5000
     pt_ode_rtol: float = 1e-5
     pt_ode_atol: float = 1e-10
+    # Radiation streaming approximation (RSA) triggers, as CLASS precisions.h:
+    # rsa_on once tau/tau_k > radiation_streaming_trigger_tau_over_tau_k (45) and
+    # tau > tau_free_streaming, the first time after recombination at which the
+    # Thomson mean free path exceeds radiation_streaming_trigger_tau_c_over_tau
+    # (5) conformal times, tau_c/tau = 1/(kappa' tau) > 5 (thermodynamics.c;
+    # ThermoResult.tau_free_streaming). Until Oct 12, 2026 the second condition
+    # was kappa'/(aH) < 5, which fires ~70 Mpc too early, with the visibility
+    # function still at 69% of its peak (docs/highl_residual_2026-10-12.md,
+    # branch exp/highl-investigation).
+    pt_rsa_trigger_tau_over_tau_k: float = 45.0
+    pt_rsa_trigger_tau_c_over_tau: float = 5.0
 
     # Transfer
     tr_l_max_scalars: int = 2500
