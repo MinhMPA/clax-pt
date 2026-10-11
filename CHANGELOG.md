@@ -8,6 +8,86 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 12, 2026: RSA second trigger follows CLASS's tau_free_streaming (l > 1500 residual fixed)
+
+Diagnosis in `docs/highl_residual_2026-10-12.md` (branch `exp/highl-investigation`);
+fix on branch `fix/rsa-trigger` (based on `fix/preset-retune`).
+
+- **Bug.** The radiation streaming approximation (RSA) switched on when
+  kappa'/(aH) < 5. In matter domination aH = 2/tau, so this is kappa' tau < ~10:
+  tau = 296 Mpc (z = 1013) at the fiducial cosmology, where the visibility function
+  is still 69% of its peak (36% of its integral to come). CLASS (thermodynamics.c,
+  `tau_free_streaming`; precision parameter
+  `radiation_streaming_trigger_tau_c_over_tau = 5`) switches at the first time after
+  recombination where the Thomson mean free path exceeds 5 conformal times,
+  tau_c/tau = 1/(kappa' tau) > 5: 364.8 Mpc (z = 760), visibility at 2.4% of its
+  peak, together with k tau > 45. For k > 0.152/Mpc clax therefore zeroed the photon
+  quadrupole/polarization source g*Pi and replaced delta_g by its streaming value in
+  the middle of recombination (g*Pi 10% rms / 62% max of peak off CLASS at k = 0.15,
+  measured against CLASS `get_sources()` at matched (k, tau)); the C_l residual set in
+  at l ~ k chi_* ~ 1700. Every sweep knob (hierarchy size, tolerances, tau and k grids,
+  Bessel path) acted before or after the switch, which is why none of them moved it.
+- **Fix.** `ThermoResult.tau_free_streaming` (traced leaf; the tau_c/tau crossing
+  interpolated linearly in log a on the thermodynamics table, tau from the background
+  spline; -0.003% vs CLASS 3.3.4 on the LCDM grid) and
+  `PrecisionParams.pt_rsa_trigger_tau_over_tau_k = 45`,
+  `pt_rsa_trigger_tau_c_over_tau = 5`. The Einstein substitution, the hierarchy
+  relaxation and the source assembly in `clax/perturbations.py` now use
+  (k tau > 45) & (tau > tau_free_streaming); the relaxation keeps a sigmoid blend, in
+  tau with width `_RSA_TAU_BLEND_WIDTH = 2.5` Mpc (the local width the old sigmoid had
+  at the fiducial cosmology). `thermodynamics_solve` output gains one leaf; no public
+  signature changes.
+- **Result (planck_cl, massless RECFAST vs CLASS, V100 jobs 24640 before / 24641
+  after; rms over l = 1000-2000 / 2000-2500):** TT 1.73% / 2.04% -> 0.38% / 0.49%, EE
+  2.96% / 8.19% -> 0.39% / 0.56% at 60 k per decade (single-l maxima TT 4.1% -> 0.63%,
+  EE 15.6% -> 0.78%); at 120 per decade TT 1.61% / 1.74% -> 0.50% / 0.90%, EE 2.88% /
+  8.09% -> 0.46% / 0.87% (the sparse grid biases C_l low by 0.2-0.6% at l = 2000-2500, which under
+  the old trigger partly masked the remaining smooth excess). What remains is a smooth
+  +0.3% (l = 1000) to +0.5% (2500) in both TT and EE at 60/decade: the helium-era
+  opacity (clax x_e 1.3-3.5% above CLASS RECFAST at z = 1300-3500, k_D +0.12%,
+  `_recfast_dxHe_dlna` is the Heflag = 0 form while CLASS runs Heswitch = 6), a
+  separate item. Perturbation stage unchanged: cached 106 -> 109 s at 60/decade and 165 -> 166 s at
+  120/decade on the V100 (first call 177 -> 182 s, 243 -> 241 s; thermodynamics 61-70 s,
+  harmonic 20 s).
+- **Tests (written first, red on the old code):** `tests/test_thermodynamics.py`
+  `tau_free_streaming` vs CLASS at the fiducial and on the LCDM grid (0.5% bar,
+  measured -0.003%); `tests/test_sources_vs_class.py` (slow) S_T0 and g*Pi vs CLASS
+  `get_sources()` at k = 0.15, 0.212, 0.30 /Mpc on a 3-mode grid with exactly those
+  nodes, rms <= 0.5% of peak at k <= 0.25 and 0.75% at 0.30 (measured 0.05-0.08%,
+  0.11-0.21%, 0.22-0.51%; before the fix 4.6-7.9%, 2.4-3.5%, 0.6-1.0% in g*Pi),
+  massless fiducial + LCDM grid;
+  `tests/test_preset_accuracy.py` high-l bands (TT rms <= 0.6% / 0.8%, EE <= 0.7% /
+  1.0%, TT max <= 1.0% over 1000-2500). References from
+  `scripts/generate_class_sources_reference.py` (classy 3.3.4, env `carpile`; RECFAST,
+  Y_He 0.2454006, `k_output_values`) in `reference_data/<name>/sources_k*.npz`, with
+  CLASS's `tau_free_streaming` stored alongside. Validation job
+  `slurm/rsa-trigger-v100.sbatch` (V100 jobs 24641, 24657): the 13 new tests pass (6
+  thermodynamics, 6 source cosmologies, high-l bands); `tests/test_preset_accuracy.py`
+  + `tests/test_bessel_table.py` 12 passed in full mode (the l <= 1000 bars hold: TT
+  2-1000 max 0.36% against 0.4%, up from 0.25% because modes with k = 0.12-0.15/Mpc
+  also feed l ~ 1000 through the Bessel tail); fast suite 329 passed, 85 skipped, 1
+  deselected (`test_pk_rosenbrock_vs_kvaerno5`), 2 failed in `test_solver_selection`
+  (fit_cl expected on rodas5 at atol 1e-4: pre-existing on the kvaerno5 preset base,
+  resolved on the rodas5 preset base 9cb9bc1). Final validation after rebasing onto
+  9cb9bc1 (rodas5 planck_cl with Hermite dense output; V100 job 24677): the 13 new
+  tests pass (high l: TT rms 0.384% / 0.505%, EE 0.386% / 0.567%, TT max 0.643% over
+  l = 1000-2500; sources 0.05-0.08% / 0.09-0.21% / 0.23-0.52% at k = 0.15 / 0.212 /
+  0.30), fast suite 335 passed, 90 skipped, 1 deselected, 0 failed; planck_cl
+  perturbation stage 201 s first call / 41 s cached on the V100.
+- **Decisions to review.** (1) The reference k triple is geometric (0.15, 0.15 sqrt 2,
+  0.30) rather than (0.15, 0.20, 0.30) so that all three are exact log-grid nodes and
+  no interpolation in k enters the test. (2) `tau_free_streaming` follows the opacity
+  splines' AD convention (`_kd_safe`: only the n_H_0 path of kappa' carries gradient),
+  so d tau_free_streaming / d omega_b is +698 Mpc per unit omega_b by AD against -545
+  from CLASS finite differences; the switch time has ~1e-4 relative leverage on C_l
+  gradients per Planck sigma, so this was left as is (alternative: stop_gradient).
+  (3) The blend width 2.5 Mpc is fixed, not scaled with the cosmology.
+- **Documentation discrepancy (not edited):** CLAUDE.md "Approximation-free
+  perturbations: full Boltzmann hierarchy at all times, no TCA/RSA/UFA switching" and
+  DESIGN.md's "approximation-free" sections describe neither the tight-coupling blend
+  nor the RSA that `clax/perturbations.py` has carried; the module docstring now says
+  what the code does.
+
 ### Oct 12, 2026: Preset retune (planck_cl ~45x faster at equal accuracy), fast-path Bessel table fix, presets on the Hermite rodas5
 
 Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`;
