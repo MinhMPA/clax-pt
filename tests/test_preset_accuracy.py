@@ -43,15 +43,21 @@ def _cls(params, prec, l_max):
 
 
 def _band_max(num, ref, lo, hi):
-    ell = np.arange(len(num))
+    """max |num/ref - 1| over lo <= l <= hi; ref may extend beyond len(num)."""
+    n = len(num)
+    ref = np.asarray(ref)[:n]
+    ell = np.arange(n)
     m = (ell >= lo) & (ell <= hi)
     return float(np.max(np.abs(num[m] / ref[m] - 1.0)))
 
 
 def _te_norm_max(cls, ref, lo, hi):
-    ell = np.arange(len(cls["te"]))
+    """max |(TE - TE_ref)| / sqrt(TT_ref EE_ref) over lo <= l <= hi."""
+    n = len(cls["te"])
+    ell = np.arange(n)
     m = (ell >= lo) & (ell <= hi)
-    d = (cls["te"][m] - ref["te"][m]) / np.sqrt(ref["tt"][m] * ref["ee"][m])
+    tt, ee, te = (np.asarray(ref[k])[:n] for k in ("tt", "ee", "te"))
+    d = (cls["te"][m] - te[m]) / np.sqrt(tt[m] * ee[m])
     return float(np.max(np.abs(d)))
 
 
