@@ -14,6 +14,15 @@ Usage (igpu compute node via slurm/rodas5-dense-v100.sbatch):
     python diags/diag_rodas5_dense_output.py --report r5.json k5.json
 --report prints rodas5/kvaerno5 - 1 at selected l, band maxima, and the
 timings of both runs (first JSON = candidate, second = reference).
+
+--abc name=path/to/rosenbrock.py ...: controlled timing of several Rodas5
+variants in ONE process on ONE GPU.  Each file is loaded as its own module
+and registered under its name as a pt_ode_solver (a distinct static jit key,
+so all variants stay compiled side by side); background/thermodynamics are
+computed once; after one warm-up (compile) call per variant the cached
+perturbation stage is timed ``--repeat`` times, interleaved by round, so
+node-to-node and drift noise cancel.  Single-job numbers from different
+nodes differed by 20% in the identical thermodynamics stage (Oct 12, 2026).
 """
 import argparse
 import dataclasses
@@ -101,6 +110,64 @@ def run(solver, out, l_max, n_k_fine, rtol, atol, max_steps, skip_cached):
     print(f"saved {out} (finite={rec['finite']})", flush=True)
 
 
+def abc(variants, repeat, out):
+    import importlib.util
+    import jax
+    from clax.params import CosmoParams, PrecisionParams
+    from clax.background import background_solve
+    from clax.thermodynamics import thermodynamics_solve
+    import clax.perturbations as P
+
+    classes = {}
+    for spec in variants:
+        name, path = spec.split("=", 1)
+        s = importlib.util.spec_from_file_location(f"rosenbrock_variant_{name}", path)
+        m = importlib.util.module_from_spec(s)
+        s.loader.exec_module(m)
+        classes[name] = m.Rodas5
+    orig = P._get_stiff_solver
+    P._get_stiff_solver = lambda n: classes[n]() if n in classes else orig(n)
+
+    prec0 = dataclasses.replace(PrecisionParams.planck_cl(), **PREC_OVERRIDES)
+    params = CosmoParams(m_ncdm=0.0)
+    rec = dict(mode="abc", variants=dict(v.split("=", 1) for v in variants), repeat=repeat,
+               overrides=PREC_OVERRIDES, host=socket.gethostname(), git=_git_head(),
+               device=str(jax.devices()[0].device_kind), jax=jax.__version__,
+               started=time.strftime("%Y-%m-%d %H:%M:%S"))
+    print(f"=== abc {list(classes)} x{repeat} on {rec['device']} ({rec['host']}) ===", flush=True)
+    bg = background_solve(params, prec0)
+    th = thermodynamics_solve(params, prec0, bg)
+    jax.block_until_ready(th.tau_star)
+
+    def solve(name):
+        prec = dataclasses.replace(prec0, pt_ode_solver=name)
+        t0 = time.perf_counter()
+        pt = P.perturbations_solve(params, prec, bg, th)
+        jax.block_until_ready(pt.source_T0)
+        dt = time.perf_counter() - t0
+        n_k = int(len(pt.k_grid))
+        del pt
+        return dt, n_k
+
+    first, times = {}, {n: [] for n in classes}
+    for n in classes:
+        first[n], n_k = solve(n)
+        print(f"  {n}: first (compile+run) {first[n]:.1f}s (n_k={n_k})", flush=True)
+    for r in range(repeat):
+        for n in classes:
+            times[n].append(solve(n)[0])
+        print(f"  round {r + 1}: " + "  ".join(f"{n} {times[n][-1]:.2f}s" for n in classes), flush=True)
+    rec["first"], rec["cached"] = first, times
+    for n in classes:
+        a = np.array(times[n])
+        print(f"  {n}: cached pt min {a.min():.2f}s  median {np.median(a):.2f}s  (n={len(a)})", flush=True)
+    rec["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if out:
+        with open(out, "w") as f:
+            json.dump(rec, f)
+        print(f"saved {out}", flush=True)
+
+
 def report(paths):
     recs = []
     for p in paths:
@@ -150,9 +217,15 @@ def main():
     ap.add_argument("--max-steps", type=int, default=None)
     ap.add_argument("--skip-cached", action="store_true", help="no second (cached-timing) call")
     ap.add_argument("--report", nargs="*", default=None, help="JSONs: candidate then reference")
+    ap.add_argument("--abc", nargs="*", default=None,
+                    help="name=path/to/rosenbrock.py variants to time interleaved in one process")
+    ap.add_argument("--repeat", type=int, default=4, help="timed cached calls per variant (--abc)")
     args = ap.parse_args()
     if args.report is not None:
         report(args.report)
+        return
+    if args.abc is not None:
+        abc(args.abc, args.repeat, args.out)
         return
     if not args.out:
         ap.error("--out is required for a run")
