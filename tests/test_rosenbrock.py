@@ -360,3 +360,151 @@ class TestRodas5Batched:
             assert rel_err < 1e-5, (
                 f"Rodas5Batched saveat mode {i}: rel err {rel_err:.3e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Dense output (state between steps) tests
+# ---------------------------------------------------------------------------
+
+def _stiff_oscillator():
+    """Stiff system: an undamped oscillation driving a fast relaxing mode.
+
+        u' = omega v,   v' = -omega u,   w' = -lam (w - u)
+
+    Eigenvalues +-i*omega and -lam.  Exact solution for u(0)=1, v(0)=0:
+        u = cos(omega t),  v = -sin(omega t),
+        w = w_p(t) + (w(0) - w_p(0)) exp(-lam t),
+        w_p = lam (lam cos(omega t) + omega sin(omega t)) / (lam^2 + omega^2).
+    All three components have O(1) amplitude, so absolute errors are
+    directly comparable.
+    """
+    def f(t, y, p):
+        omega, lam = p[0], p[1]
+        return jnp.array([omega * y[1], -omega * y[0], -lam * (y[2] - y[0])])
+
+    def exact(t, omega, lam, w0):
+        u = jnp.cos(omega * t)
+        v = -jnp.sin(omega * t)
+        wp = lam * (lam * jnp.cos(omega * t) + omega * jnp.sin(omega * t)) \
+            / (lam**2 + omega**2)
+        wp0 = lam * lam / (lam**2 + omega**2)
+        w = wp + (w0 - wp0) * jnp.exp(-lam * t)
+        return jnp.stack([u, v, w], axis=-1)
+
+    def y_init(omega, lam):
+        # w starts one unit off its slow manifold: a genuine stiff transient
+        return jnp.array([1.0, 0.0, lam * lam / (lam**2 + omega**2) + 1.0])
+
+    return f, exact, y_init
+
+
+class TestDenseOutput:
+    """The solver's local interpolation between accepted steps.
+
+    The perturbation solve saves sources on a dense conformal-time grid
+    (``SaveAt(ts=tau_grid)``), so the state at most output times comes from
+    the solver's ``interpolation_cls``, not from a step endpoint.  Until
+    Oct 12, 2026 Rodas5/Rodas5Batched used ``LocalLinearInterpolation``,
+    which with late-time steps of hundreds of Mpc put the late-ISW source
+    (hence TT at l<30) off by up to 46% relative to Kvaerno5 at rtol 1e-4 /
+    atol 1e-6 (precision sweep of Oct 10-11, 2026, finding 5).  The fix is
+    diffrax's ``ThirdOrderHermitePolynomialInterpolation`` from (y, dt*f) at
+    both step ends, the same dense output Kvaerno5 uses.
+    """
+
+    T1 = 10.0           # ten oscillation periods at omega = 2*pi
+    N_TS = 2001         # output times, ~13 per solver step
+    RTOL, ATOL = 1e-4, 1e-7   # loose: 148 steps over T1, omega*h ~ 0.4
+
+    def test_rodas5_dense_output_stiff_oscillator(self):
+        """Interpolated state between large Rodas5 steps vs the exact solution.
+
+        Measured max |y - exact| over 2001 output times (148 steps):
+        5.4e-2 with LocalLinearInterpolation (before the fix),
+        8.0e-4 with the cubic Hermite dense output.  Bar: 5e-3, an order of
+        magnitude below the linear number.
+        """
+        f, exact, y_init = _stiff_oscillator()
+        omega, lam = 2.0 * jnp.pi, 1000.0
+        p = jnp.array([omega, lam])
+        y0 = y_init(omega, lam)
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        sol = diffrax.diffeqsolve(
+            diffrax.ODETerm(f), Rodas5(), t0=0.0, t1=self.T1, dt0=1e-3,
+            y0=y0, args=p,
+            stepsize_controller=diffrax.PIDController(rtol=self.RTOL, atol=self.ATOL),
+            max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+        )
+        err = float(jnp.max(jnp.abs(sol.ys - exact(ts, omega, lam, y0[2]))))
+        n_steps = int(sol.stats["num_steps"])
+        assert err < 5e-3, (
+            f"Rodas5 dense output: max abs err {err:.3e} over {self.N_TS} "
+            f"output times, {n_steps} steps (linear interpolation gives 5.4e-2)"
+        )
+
+    def test_rodas5_batched_dense_output_stiff_oscillator(self):
+        """Same check for Rodas5Batched (two modes sharing one step size).
+
+        Modes omega = (2pi, 3pi), lam = (1000, 300).  Measured max |y - exact|
+        over 2001 output times (186 shared steps): 7.1e-2 with
+        LocalLinearInterpolation (before the fix), 1.5e-3 with the cubic
+        Hermite dense output.  Bar: 7e-3.
+        """
+        f, exact, y_init = _stiff_oscillator()
+        omegas = jnp.array([2.0 * jnp.pi, 3.0 * jnp.pi])
+        lams = jnp.array([1000.0, 300.0])
+        params = jnp.stack([omegas, lams], axis=-1)       # (batch, 2)
+        y0 = jnp.stack([y_init(omegas[i], lams[i]) for i in range(2)])
+
+        def vf_batched(t, y_batch, args):
+            if isinstance(args, tuple) and len(args) == 2:
+                return jax.tree_util.tree_map(jnp.zeros_like, y_batch)
+            return jax.vmap(f, in_axes=(None, 0, 0))(t, y_batch, args)
+
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        sol = diffrax.diffeqsolve(
+            diffrax.ODETerm(vf_batched), Rodas5Batched(),
+            t0=0.0, t1=self.T1, dt0=1e-3, y0=y0, args=(f, params),
+            stepsize_controller=diffrax.PIDController(rtol=self.RTOL, atol=self.ATOL),
+            max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+        )
+        ex = jnp.stack([exact(ts, omegas[i], lams[i], y0[i, 2]) for i in range(2)],
+                       axis=1)                                # (n_ts, batch, 3)
+        err = float(jnp.max(jnp.abs(sol.ys - ex)))
+        n_steps = int(sol.stats["num_steps"])
+        assert err < 7e-3, (
+            f"Rodas5Batched dense output: max abs err {err:.3e} over {self.N_TS} "
+            f"output times, {n_steps} steps (linear interpolation gives 7.1e-2)"
+        )
+
+    def test_rodas5_ad_through_dense_output(self):
+        """Reverse-mode AD through SaveAt(ts=...) vs the analytic derivative.
+
+        Objective: sum_i u(t_i) with u = cos(omega t_i) exactly, so
+        d/d omega = -sum_i t_i sin(omega t_i).  The gradient flows through the
+        dense-output coefficients (and, after the fix, through the two extra
+        RHS evaluations per step) under RecursiveCheckpointAdjoint.
+        """
+        f, exact, y_init = _stiff_oscillator()
+        lam = 1000.0
+        ts = jnp.linspace(0.0, 3.0, 301)
+
+        def objective(omega):
+            p = jnp.array([omega, lam])
+            sol = diffrax.diffeqsolve(
+                diffrax.ODETerm(f), Rodas5(), t0=0.0, t1=3.0, dt0=1e-3,
+                y0=y_init(omega, lam), args=p,
+                stepsize_controller=diffrax.PIDController(rtol=1e-6, atol=1e-9),
+                max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+                adjoint=diffrax.RecursiveCheckpointAdjoint(),
+            )
+            return jnp.sum(sol.ys[:, 0])
+
+        omega = 2.0 * jnp.pi
+        grad_ad = float(jax.grad(objective)(omega))
+        grad_exact = float(-jnp.sum(ts * jnp.sin(omega * ts)))
+        rel_err = abs(grad_ad / grad_exact - 1)
+        assert rel_err < 1e-3, (
+            f"Rodas5 AD through dense output: d/domega AD {grad_ad:.6f} vs "
+            f"exact {grad_exact:.6f}, rel err {rel_err:.3e}"
+        )
