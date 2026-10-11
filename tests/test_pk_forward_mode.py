@@ -43,6 +43,19 @@ block or software/driver stack; it is not reproduced exactly here and this
 file does not force it to match, per the task's own instruction to report
 such a discrepancy rather than adjust the expected numbers to fit.
 
+UPDATE (Oct 11, 2026, smsharma/clax#48): the two GPU runs above used the
+unfixed recombination (clipped explicit helium/hydrogen steps whose chatter made
+derivatives depend on step placement). On the fixed code (Saha -> ODE staging,
+ADR 0003; CPU, job 24323) the three AD numbers are grad(recursive)=1.22116400e5,
+grad(direct)=1.22116401e5, jvp(direct)=1.22116400e5, i.e. equal to 1e-8: the
+~1e-3 spread seen above is not reproduced. The chatter is a candidate cause, but
+CPU against GPU is a second difference, and the GPU run was not repeated, so
+the non-determinism argument above is neither confirmed nor refuted; the 5e-3
+mutual bar is unchanged. FD=1.21310978e5, so AD now
+sits 0.66% above FD (0.008%-0.094% in the GPU runs above), still under the 1% FD
+bar. Not investigated; one candidate is the kappa_dot stop_gradient (#45), no
+longer masked by chatter (a hypothesis, untested).
+
 Why ``ode_adjoint="direct"`` is required (not optional):
     The production-default ``RecursiveCheckpointAdjoint`` implements its
     checkpointed ``while_loop`` as an ``eqx.filter_custom_vjp``

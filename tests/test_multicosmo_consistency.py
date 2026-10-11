@@ -52,6 +52,16 @@ _PREC_FWD = dc_replace(_PREC, th_grad_mode="native", ode_adjoint="direct")
 # table sums weight 20k grid points elementwise). The PHYSICAL pipeline
 # agreement is 2.7e-6 (PR #33 delta_m validation) -- do not read this
 # ceiling as pipeline gradient accuracy.
+# UPDATE (Oct 11, 2026, smsharma/clax#48): the numbers above were measured on the
+# unfixed recombination (explicit clipped helium/hydrogen steps whose chatter put
+# step-placement-dependent spikes into these tables). After the Saha -> ODE
+# staging fix (ADR 0003) the same five cosmologies read, on CPU (job 24321),
+#   lcdm_fiducial 1.857e-15 | h_high 5.226e-16 | omega_b_high 4.600e-15
+#   omega_cdm_low 2.421e-16 | ns_high 1.857e-15,
+# i.e. round-off. The chatter is a candidate cause of the "OPEN QUESTION" spread
+# above, but CPU against GPU is a second difference and the GPU run was not
+# repeated, so the cause is not settled. The bar below is NOT tightened here
+# (a bar change is the user's call).
 _AD_CONSISTENCY_RTOL = 6e-3
 
 

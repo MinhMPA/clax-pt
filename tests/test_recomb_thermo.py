@@ -224,10 +224,13 @@ def test_fractions_stay_physical_without_clips(recomb_cosmology, n):
     upper = 1.0 + 2.0 * y / (3.9715 * (1.0 - y))     # >= the exactly-4 value too
     print(f"{name} n={n}: x_e in [{xe.min():.3e}, {xe.max():.6f}], upper {upper:.6f}")
     assert xe.min() >= 0.0 and xe.max() <= upper + 1e-12, f"ERROR x_e out of bounds ({name}, n={n})"
-    # R15: for 2400 <= z <= 2870 hydrogen is fully ionised (Saha: 1 - x_HII ~ 3e-9)
+    # R15: for 2400 <= z <= 2870 hydrogen is fully ionised (hydrogen Saha at the
+    # fiducial cosmology: 1 - x_HII ~ 2e-9 at z = 2870, ~ 7e-8 at z = 2400)
     # and HeIII is negligible, so x_e <= 1 + f_He bounds the helium fraction
     # x_HeII <= 1. ThermoResult does not expose x_HeII; the clips are gone, so
-    # this is the guard against the ROS2 step overshooting.
+    # this is the guard against the ROS2 step overshooting. Its margin is
+    # 3.6e-4 to 5.2e-4 (x_HeII ~ 0.995 at its maximum in this window, not 1), so
+    # it catches an x_HeII overshoot only above about 5e-3.
     he = (z >= 2400.0) & (z <= 2870.0)
     he_upper = 1.0 + y / (3.9715 * (1.0 - y)) + 1e-10
     j = int(np.argmax(np.where(he, xe, -np.inf)))

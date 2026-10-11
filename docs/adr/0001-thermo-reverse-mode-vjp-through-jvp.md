@@ -128,3 +128,18 @@ Wiring:
 - `clax` now contains exactly one `jax.custom_vjp`; the "zero custom_vjp
   rules" invariant documented in `tests/test_pk_forward_mode.py` is retired
   (note updated in place).
+
+## Note (Oct 11, 2026, smsharma/clax#48)
+
+The premise "forward mode is exact" holds only when ODE solver stages miss the
+recombination chatter that clipped explicit helium/hydrogen steps produced; with
+them, both modes carried step-placement-dependent spikes (#48). ADR 0003 removes
+the chatter; this rule's re-association remains valid and is unchanged.
+
+After ADR 0003, on CPU: reverse (this rule's stable path) and forward mode through
+background + thermodynamics agree to 2.4e-16-4.6e-15 at the five LCDM grid points
+of `tests/test_multicosmo_consistency.py` (job 24321), and through the full matter
+solve (f = sum_k delta_m(k, tau_0)^2, `fast_cl`) to <= 3.1e-5 at three
+cosmologies (production path, S3, jobs 24227/24229/24231). On unmodified
+upstream the same production-path disagreement was 1.16 at fiducial (job 24226)
+and 1.13 in the diagnosis run.

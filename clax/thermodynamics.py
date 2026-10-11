@@ -3,17 +3,69 @@
 Computes the ionization history x_e(z), matter temperature T_m(z),
 visibility function g(τ), optical depth κ(τ), and baryon sound speed c_s²(τ).
 
-Uses the Ma & Bertschinger (1995) semi-implicit approach (as in DISCO-EB's
-thermodynamics_mb95.py) rather than a full RECFAST ODE solve. This is
-numerically stable and JAX-compatible via jax.lax.scan.
+The baryon temperature uses the Ma & Bertschinger (1995) semi-implicit update
+(as in DISCO-EB's thermodynamics_mb95.py). Everything is advanced by one
+jax.lax.scan over a grid uniform in ln tau, which is JAX-compatible and
+differentiable in both modes.
+
+Recombination (smsharma/clax#48; docs/adr/0003-recombination-staging.md).
+Helium and hydrogen follow CLASS's RECFAST with recfast_Heswitch = 1 (singlet-only
+helium) and CLASS's approximation staging, so x_e agrees with that CLASS run to
+< 1e-3 and, the reason for the design, its derivatives with respect to h, omega_b,
+omega_cdm, Y_He, N_eff and T_cmb are smooth:
+    - HeIII -> HeII: the MB95 Saha solve (_ionHe), unchanged. Above z ~ 5000 the
+      same Saha solve also supplies x_HeII, sigmoid-blended into the staged
+      HeII -> HeI value below.
+    - HeII -> HeI: Saha equilibrium above z = 2870 (CLASS thermodynamics.c:4053-4067),
+      the RECFAST helium Peebles equation below it (wrap_recfast.c:346-349); the
+      output is blended from Saha to the ODE by CLASS's smoothstep f2 over
+      z in [2770, 2870] (thermodynamics.h:49, thermodynamics.c:2973-2987).
+    - Hydrogen: Saha with the x_HeII correction above z = 1600
+      (thermodynamics.c:4070-4087), the RECFAST Peebles equation below it
+      (wrap_recfast.c:110-174), f2 blend over z in [1500, 1600].
+    - Numerics: each Peebles equation is advanced by one L-stable, second-order
+      linearly implicit step (ROS2, _ros2_advance; 10 sub-steps per grid step) and
+      NO clip to [0, 1]. L-stable means a stiff relaxation lands on its equilibrium
+      without overshoot or oscillation, so no clip is needed. The Jacobian comes
+      from a scalar forward-mode jvp. The stage-switch redshifts are fixed numbers,
+      as in CLASS, so no derivative passes through a switch location.
+    - He/H number ratio: every number-ratio site uses
+      f_He = Y_He / (3.9715 (1 - Y_He)), CLASS's _not4_ (thermodynamics.h:707), via
+      _f_He. The four "1 - 0.75 Y_He" mean-molecular-weight sites (c_s^2 prefactor
+      x3, T_b Compton-coupling fraction x1) still use exactly 4; they belong to the
+      c_s^2-versus-CLASS-c_b^2 follow-up and leave c_s^2 2.6e-4 to 5.4e-4 (relative)
+      from CLASS's form.
+Why: the earlier explicit steps (Heun for helium, RK4 for hydrogen, both clipped,
+plus a hard x_He > 0.999 switch and Saha/ODE sigmoids) ran through the ranges
+where CLASS uses Saha. x_e looked fine (0.35% wiggles), but d ln x_e / d theta
+spiked to ~1e12 at isolated grid points; those reached delta_m through
+c_s^2 k^2 delta_b depending on where the ODE solver happened to step, and on the
+fit_cl 3000-point grid x_e collapsed to 0.035 at z ~ 1559.
+
+Known limitations:
+    - Heswitch = 1 helium only. CLASS's default (Heswitch = 6, Doppler and
+      triplet terms) differs in x_e by 1.5% at z = 2000 and 4.2% at z ~ 1771.
+    - The T_b update has a hard Taylor switch at x_e < 1e-3 (derivative spike
+      ratio 20 at z ~ 624 on a 1500-point grid), and c_s^2 is 1.3% from CLASS's
+      c_b^2 at z ~ 632.
+    - The kappa_dot, exp(-kappa) and g tables carry a stop_gradient with an
+      n_H_0 rescale (smsharma/clax#45), which biases AD with respect to omega_cdm
+      (and possibly omega_b) through them.
+    - Reverse mode through _ros2_advance needs a static Python-int sub-step count.
+    - No test gates the C_l shift caused by this change; ADR 0003 records the
+      measured planck_cl and fit_cl shifts against the unfixed code.
+
+Inputs/outputs: CosmoParams, PrecisionParams and a BackgroundResult in; a
+ThermoResult out, whose tables are CubicSplines in ln a.
 
 Key function:
     thermodynamics_solve(params, prec, bg) -> ThermoResult
 
 References:
-    - Ma & Bertschinger (1995) ApJ 455, 7 for the simplified recombination
+    - Ma & Bertschinger (1995) ApJ 455, 7 for the baryon temperature update
+    - Verwer et al. (1999) for the ROS2 step
     - DISCO-EB: src/discoeb/thermodynamics_mb95.py
-    - CLASS: source/thermodynamics.c
+    - CLASS: source/thermodynamics.c, external/RecfastCLASS/wrap_recfast.c
 """
 
 from __future__ import annotations
@@ -558,7 +610,9 @@ def thermodynamics_solve(
     prec: PrecisionParams,
     bg: BackgroundResult,
 ) -> ThermoResult:
-    """Solve the thermodynamics using the MB95 semi-implicit method.
+    """Solve the thermodynamics: MB95 semi-implicit baryon temperature and
+    CLASS-staged recombination (Saha -> ROS2 ODE; see the module docstring and
+    docs/adr/0003-recombination-staging.md).
 
     Args:
         params: cosmological parameters
