@@ -34,7 +34,12 @@ from clax.harmonic import compute_cls_all_fast
 REFERENCE_DIR = os.path.join(os.path.dirname(__file__), "..", "reference_data")
 
 
-def _cls(params, prec, l_max):
+def _cls(params, prec, l_max=None):
+    """C_l from the preset. Always computed to the preset's hr_l_max: the
+    sparse-l cubic spline's end condition contaminates the last ~50 l below
+    whatever l_max is passed (2% at l~1000 when l_max=1000), so the bands
+    are judged well inside the computed range."""
+    l_max = prec.hr_l_max if l_max is None else l_max
     bg = background_solve(params, prec)
     th = thermodynamics_solve(params, prec, bg)
     pt = perturbations_solve(params, prec, bg, th)
@@ -74,7 +79,7 @@ class TestPlanckClPreset:
         ref = dict(np.load(os.path.join(REFERENCE_DIR, "cls_massless_recfast.npz")))
         params = CosmoParams(m_ncdm=0.0)
         prec = dataclasses.replace(PrecisionParams.planck_cl(), ncdm_q_size=0)
-        cls = _cls(params, prec, 1000)
+        cls = _cls(params, prec)
         got = {
             "TT 2-30": _band_max(cls["tt"], ref["tt"], 2, 30),
             "TT 2-500": _band_max(cls["tt"], ref["tt"], 2, 500),
@@ -103,7 +108,7 @@ class TestPlanckClPreset:
         if not os.path.isdir(ref_dir):
             pytest.skip(f"no CLASS reference for {name}")
         ref = dict(np.load(os.path.join(ref_dir, "cls.npz")))
-        cls = _cls(params, PrecisionParams.planck_cl(), 1000)
+        cls = _cls(params, PrecisionParams.planck_cl())
         got = {
             "TT 2-1000": _band_max(cls["tt"], ref["tt"], 2, 1000),
             "EE 5-1000": _band_max(cls["ee"], ref["ee"], 5, 1000),
@@ -125,7 +130,7 @@ class TestFitClPreset:
         ref = dict(np.load(os.path.join(REFERENCE_DIR, "cls_massless_recfast.npz")))
         params = CosmoParams(m_ncdm=0.0)
         prec = PrecisionParams.fit_cl()
-        cls = _cls(params, prec, 500)
+        cls = _cls(params, prec)
         got = {
             "TT 2-30": _band_max(cls["tt"], ref["tt"], 2, 30),
             "TT 2-500": _band_max(cls["tt"], ref["tt"], 2, 500),

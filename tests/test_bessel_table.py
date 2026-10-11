@@ -69,3 +69,28 @@ def test_fast_path_default_uses_fine_table():
     import inspect
     sig = inspect.signature(harmonic.compute_cls_all_fast)
     assert sig.parameters["x_per_unit"].default == harmonic.JL_TABLE_X_PER_UNIT
+
+
+def test_sparse_l_spline_pad_removes_end_error():
+    """The dense C_l come from a cubic spline over the sparse l grid; its end
+    condition corrupts the last interval unless the sparse grid extends past
+    the requested l_max. Synthetic damped-acoustic C_l: unpadded error at
+    l_max-60..l_max is ~1-2%, padded < 0.01%."""
+    import jax.numpy as jnp
+    from clax.interpolation import CubicSpline
+
+    def cl_model(l):
+        l = np.asarray(l, dtype=float)
+        return np.exp(-(l / 1400.0) ** 2) * (1.0 + 0.3 * np.cos(2 * np.pi * l / 300.0)) / l**2
+
+    l_max = 1000
+    dense = np.arange(2, l_max + 1)
+    errs = {}
+    for pad in (0, harmonic.L_SPLINE_PAD):
+        ls = sparse_l_grid(l_max + pad)
+        sp = np.asarray(CubicSpline(jnp.array(ls.astype(float)), jnp.array(cl_model(ls))).evaluate(jnp.array(dense.astype(float))))
+        err = np.abs(sp / cl_model(dense) - 1.0)
+        errs[pad] = err[dense >= l_max - 60].max()
+    assert harmonic.L_SPLINE_PAD >= 100
+    assert errs[0] > 5e-3, f"unpadded end error unexpectedly small: {errs[0]}"
+    assert errs[harmonic.L_SPLINE_PAD] < 1e-4, f"padded end error: {errs[harmonic.L_SPLINE_PAD]}"

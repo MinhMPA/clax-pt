@@ -671,7 +671,7 @@ def compute_cls_all(
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
     """
-    l_sparse = sparse_l_grid(l_max)
+    l_sparse = _sparse_l_padded(l_max)
 
     cl_tt_sparse = compute_cl_tt(pt, params, bg, tuple(l_sparse.tolist()),
                                  k_interp_factor, l_switch, delta_l,
@@ -720,7 +720,7 @@ def compute_cls_all_interp(
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
     """
-    l_sparse = sparse_l_grid(l_max)
+    l_sparse = _sparse_l_padded(l_max)
 
     cl_tt_sparse = compute_cl_tt_interp(pt, params, bg, tuple(l_sparse.tolist()),
                                          n_k_fine=n_k_fine, tt_mode=tt_mode,
@@ -756,6 +756,17 @@ def compute_cls_all_interp(
 
 # _build_jl_table is now build_jl_table, imported from clax.bessel
 _build_jl_table = build_jl_table
+
+# The sparse-l grid is extended this far beyond the requested l_max so that
+# the cubic spline's end condition sits outside the returned range. Without
+# the pad the last ~50 multipoles are off by up to 2% (1.87% at l=983 for
+# l_max=1000; precision sweep follow-up, Oct 12, 2026); with it the spline
+# error is below 0.01% everywhere. Costs two extra l rows.
+L_SPLINE_PAD = 100
+
+
+def _sparse_l_padded(l_max):
+    return sparse_l_grid(l_max + L_SPLINE_PAD)
 
 # Bessel lookup-table resolution (points per unit x). Linear interpolation of
 # j_l at spacing h biases the amplitude by ~ -h^2/12 on average; the historical
@@ -854,7 +865,7 @@ def compute_cls_all_fast(
     # 3. Build j_l and j_l' tables for all sparse l-values
     x_max = float(jnp.max(k_fine) * tau_0 * 1.05)
     n_x = max(30000, int(x_max * x_per_unit))  # see JL_TABLE_X_PER_UNIT
-    x_table, jl_table, jlp_table = _build_jl_table(l_max, n_x=n_x, x_max=x_max)
+    x_table, jl_table, jlp_table = _build_jl_table(l_max + L_SPLINE_PAD, n_x=n_x, x_max=x_max)  # rows match _sparse_l_padded
 
     # 4. Precompute interpolation indices (shared across all l and both tables)
     idx_right = jnp.searchsorted(x_table, x_flat_query)
@@ -866,7 +877,7 @@ def compute_cls_all_fast(
     frac = jnp.clip(frac, 0.0, 1.0)
 
     # 5. Compute transfer functions via table lookup (scan over l)
-    l_sparse = sparse_l_grid(l_max)
+    l_sparse = _sparse_l_padded(l_max)
     n_l = len(l_sparse)
     l_sparse_jnp = jnp.array(l_sparse, dtype=jnp.float64)
 
