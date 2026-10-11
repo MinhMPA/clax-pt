@@ -148,9 +148,8 @@ cosmologies on the production gradient entry, i.e. the path of this rule (jobs
 was 1.16 at fiducial (job 24226) and 1.13 in the diagnosis run.
 
 On the smooth tables, native reverse mode and the production `custom_vjp` path
-coincide: both give -2.75564438e9 at fiducial against forward -2.75572953e9
-(job 24227; at all three cosmologies the two paths' relative disagreements with
-forward mode are equal to three digits, jobs 24227/24229/24231). So the
-re-association is still valid, but for this functional the two reverse paths no
-longer differ, and the damage once attributed to the 1e13-scale cancellation is
-gone with the spikes; there is nothing left for the rule to cure here.
+coincide at fiducial: both give -2.75564438e9 against forward -2.75572953e9 (job
+24227). At all three cosmologies their relative disagreements with forward mode
+agree to about 1e-3 relative (omega_b_high 8.081e-7 vs 8.073e-7; jobs
+24227/24229/24231). So the re-association is still valid, and for this functional
+at k <= 0.15 Mpc^-1 the two reverse paths agree.

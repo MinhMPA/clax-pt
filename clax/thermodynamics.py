@@ -11,8 +11,8 @@ differentiable in both modes.
 Recombination (smsharma/clax#48; docs/adr/0003-recombination-staging.md).
 Helium and hydrogen follow CLASS's RECFAST with recfast_Heswitch = 1 (singlet-only
 helium) and CLASS's approximation staging, so x_e agrees with that CLASS run to
-< 1e-3 and, the reason for the design, its derivatives with respect to h, omega_b,
-omega_cdm, Y_He, N_eff and T_cmb are smooth:
+< 1e-3 for z in [800, 5000], the tested range, and, the reason for the design, its
+derivatives with respect to h, omega_b, omega_cdm, Y_He, N_eff and T_cmb are smooth:
     - HeIII -> HeII: the MB95 Saha solve (_ionHe), unchanged. Above z ~ 5000 the
       same Saha solve also supplies x_HeII, sigmoid-blended into the staged
       HeII -> HeI value below.
@@ -28,8 +28,11 @@ omega_cdm, Y_He, N_eff and T_cmb are smooth:
       NO clip to [0, 1]. L-stable means a stiff relaxation lands on its equilibrium
       without overshoot or oscillation, which is why no clip is used; that holds for
       an exact Jacobian. J is taken with x_e held fixed, so for a rate ~ x_e x_p the
-      stiff limit is a damped alternating approach (amplification ~ -0.66 per step),
-      not an exact no-overshoot guarantee. The bounds tests are the guard, and the
+      stiff limit is a damped alternating approach (amplification ~ -0.66 per ROS2
+      sub-step), not an exact no-overshoot guarantee. An estimate, not a measurement,
+      is that this regime is not reached: at the one stiff place, hydrogen near
+      z = 1600, photoionisation dominates J, so holding x_e fixed changes J by
+      about 1%. The bounds tests are the guard, and the
       x_HeII <= 1 test sees an overshoot only above ~5e-3. The Jacobian comes
       from a scalar forward-mode jvp. The stage-switch redshifts are fixed numbers,
       as in CLASS, so no derivative passes through a switch location.
@@ -347,7 +350,8 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     # CLASS has no C_He switch near x_He = 1: its x_He switches are the K_He form
     # (Heflag, wrap_recfast.c:243-244), and C_He is always wrap_recfast.c:346.
     # For x_He < 1e-15 CLASS sets dx_He/dz = 0 (wrap_recfast.c:328-329); clax
-    # instead keeps the probe's C_He = 1 guard here and still evaluates the rate.
+    # instead keeps the C_He = 1 guard inherited from the design prototype here and still
+    # evaluates the rate.
     # The effect on x_e is at most fHe * 1e-15 (x_He itself is below 1e-15).
     C_He = jnp.where(xHe < 1e-15, 1.0, C_He)
 
@@ -381,7 +385,8 @@ def _ros2_scalar_step(rate, xe_of, x, h, env0, env1):
     the sub-step start with x_e held fixed (ROS2 stays second order for any J).
     L-stable: a stiff relaxation lands on its equilibrium without overshoot for
     an exact J, so no clip is used (with x_e held fixed in J the stiff limit is a
-    damped alternating approach, amplification ~ -0.66; see the module docstring).
+    damped alternating approach, amplification ~ -0.66 per ROS2 sub-step; see the
+    module docstring).
     env0/env1: environment tuples at the sub-step's two ends.
     """
     xe_j = xe_of(x)

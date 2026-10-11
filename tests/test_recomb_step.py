@@ -38,14 +38,16 @@ def test_second_order_convergence():
     errs = [abs(_integrate(2.0, 1.0, n) - _exact(2.0, 1.0, 1.0)) for n in (20, 40, 80)]
     r1, r2 = errs[0] / errs[1], errs[1] / errs[2]
     print(f"errors {errs}, ratios {r1:.3f} {r2:.3f}")
-    assert 3.5 < r1 < 4.5 and 3.5 < r2 < 4.5
+    assert 3.5 < r1 < 4.5 and 3.5 < r2 < 4.5, \
+        f"ERROR error ratios {r1:.3f}, {r2:.3f} outside the second-order window (3.5, 4.5)"
 
 
 def test_l_stable_lands_on_equilibrium():
     # lam h = 1e6: one step from far away lands on q = ALPHA without overshoot
     x1 = float(_ros2_scalar_step(_rate(1e6), lambda y: y, jnp.asarray(1.0), 1.0, (0.0,), (0.0,)))
     print(f"x1 = {x1:.12f}, q = {ALPHA}")
-    assert abs(x1 - ALPHA) < 1e-5 and x1 >= ALPHA
+    assert abs(x1 - ALPHA) < 1e-5 and x1 >= ALPHA, \
+        f"ERROR stiff step landed at {x1:.12f}, not on or above the equilibrium {ALPHA} within 1e-5"
 
 
 def test_no_excursion_past_one_near_equilibrium():
@@ -57,7 +59,8 @@ def test_no_excursion_past_one_near_equilibrium():
         xs.append(_ros2_scalar_step(rate, lambda y: y, xs[-1], 0.1, (0.0,), (0.0,)))
     xs = np.array([float(v) for v in xs])
     print(f"max x = {xs.max():.12f}")
-    assert xs.max() <= qeq + 1e-15 and np.all(np.diff(xs) >= -1e-15)
+    assert xs.max() <= qeq + 1e-15 and np.all(np.diff(xs) >= -1e-15), \
+        f"ERROR relaxation passed its equilibrium or turned back: max x {xs.max():.15f} vs {qeq}"
 
 
 @pytest.mark.parametrize("which", ["lam", "alpha"])
@@ -72,9 +75,11 @@ def test_step_jvp_matches_fd(which):
     eps = 1e-6 * abs(x0)
     fd = (float(advance(x0 + eps)) - float(advance(x0 - eps))) / (2 * eps)
     print(f"{which}: jvp {float(tan):.10e} fd {fd:.10e}")
-    assert np.isfinite(float(tan)) and abs(float(tan) - fd) < 1e-6 * max(abs(fd), 1e-12)
+    assert np.isfinite(float(tan)) and abs(float(tan) - fd) < 1e-6 * max(abs(fd), 1e-12), \
+        f"ERROR jvp {float(tan):.10e} vs finite difference {fd:.10e} ({which})"
 
 
 def test_smoothstep():
     w = np.asarray(_smoothstep(jnp.linspace(-0.5, 1.5, 9)))
-    assert w[0] == 0.0 and w[-1] == 1.0 and abs(float(_smoothstep(0.5)) - 0.5) < 1e-15
+    assert w[0] == 0.0 and w[-1] == 1.0 and abs(float(_smoothstep(0.5)) - 0.5) < 1e-15, \
+        f"ERROR smoothstep end values {w[0]}, {w[-1]} or midpoint {float(_smoothstep(0.5))}"

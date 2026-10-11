@@ -267,7 +267,7 @@ class PrecisionParams:
         k_max=1.0 covers l~2500 with margin. 60 k/decade is sufficient
         when using source-interpolated C_l (compute_cl_tt_interp).
         l_max=50, 5000 tau points, tight ODE tolerance.
-        th_n_points=100000 for converged RECFAST stepping (Heun 2nd order).
+        th_n_points=100000 for converged RECFAST stepping (CLASS Saha -> ODE staging, ROS2 2nd order).
         ~300 k-modes total. Use with compute_cls_all_interp.
         """
         return PrecisionParams(

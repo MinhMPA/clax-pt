@@ -20,14 +20,17 @@ def test_recfast_hesw1_reference_is_sane(name):
     assert os.path.isfile(path), f"ERROR missing {path}"
     d = np.load(path)
     z, xe, g = d["z"], d["x_e"], d["g"]
-    assert z.size == 4000 and np.all(np.diff(z) > 0)
-    assert np.all(np.isfinite(xe)) and np.all(xe > 0)
+    assert z.size == 4000 and np.all(np.diff(z) > 0), \
+        f"ERROR {name}: z grid has {z.size} points (want 4000) or is not increasing"
+    assert np.all(np.isfinite(xe)) and np.all(xe > 0), f"ERROR {name}: x_e not finite and positive"
     with open(path.replace(".npz", ".json")) as fh:
         prov = json.load(fh)
     yhe = prov["class_params"]["YHe"]
     f_he = yhe / (NOT4 * (1.0 - yhe))
-    assert abs(xe[-1] - (1.0 + 2.0 * f_he)) < 1e-2, (name, xe[-1], 1 + 2 * f_he)   # z = 8000: H, He fully ionised
-    assert xe[np.argmin(np.abs(z - 500.0))] < 0.05, name                           # recombined by z = 500
+    assert abs(xe[-1] - (1.0 + 2.0 * f_he)) < 1e-2, \
+        f"ERROR {name}: x_e(z=8000) = {xe[-1]:.5f}, fully ionised value {1 + 2 * f_he:.5f}"   # H, He fully ionised
+    assert xe[np.argmin(np.abs(z - 500.0))] < 0.05, \
+        f"ERROR {name}: x_e(z=500) = {xe[np.argmin(np.abs(z - 500.0))]:.4f}, not recombined"   # recombined by z = 500
     zp = z[np.argmax(g)]
-    assert 1040.0 < zp < 1120.0, (name, zp)                                         # visibility peak
+    assert 1040.0 < zp < 1120.0, f"ERROR {name}: visibility peak at z = {zp:.1f}, outside 1040-1120"   # visibility peak
     print(f"{name}: x_e(8000)={xe[-1]:.5f} peak z={zp:.1f} YHe={yhe}")

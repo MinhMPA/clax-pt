@@ -17,8 +17,8 @@ from tests.recomb_test_utils import (QS, THETAS, THERMO_GRIDS, as_traced, load_r
                                      xe_on_ref_grid, z_of)
 
 _CACHE = {}
-# R12: under --fast the 3000-point (fit_cl) grid runs at fiducial; the default
-# 20000-point grid and the FD tests (a jvp compile per cosmology and theta) are slow.
+# Under --fast the 3000-point (fit_cl) grid runs at fiducial; the default 20000-point
+# grid and the FD tests (a jvp compile per cosmology and theta) are marked slow.
 GRIDS = [pytest.param(n, marks=pytest.mark.slow, id=str(n)) if n > 3000 else n
          for n in THERMO_GRIDS]
 
@@ -32,7 +32,7 @@ def _prim_tan(name, p, n, theta="h"):
 
 def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
     """Forward tangent vs central finite differences of the tables, at the FIXED
-    sample redshifts zs (smsharma/clax#48, ruling R10).
+    sample redshifts zs (smsharma/clax#48).
 
     The jvp is the tangent of the spline-evaluated values at ln a = log(1/(1+z)):
     the thermodynamics ln a knots move with theta, so the per-knot tangent table
@@ -69,7 +69,7 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
     for q in QS:
         Q, jv = np.asarray(prim[q]), np.asarray(tan[q])
         f1, f3 = fds[0][q], fds[1][q]
-        # R13: a NaN tangent would fall out of every max() below, so reject it first.
+        # Reject non-finite values first: Python max() drops NaN, so a NaN tangent would pass.
         assert np.all(np.isfinite(jv)) and np.all(np.isfinite(Q)), \
             f"ERROR non-finite {q} tangent or value at the sample z ({name}, {theta})"
         small1, small3 = np.abs(f1 / Q) <= floor, np.abs(f3 / Q) <= floor
@@ -118,7 +118,7 @@ def test_xe_helium_window_matches_class(recomb_cosmology, n):
 def test_no_derivative_spikes_helium_window(recomb_cosmology, n, theta):
     name, p = recomb_cosmology
     prim, tan = _prim_tan(name, p, n, theta)
-    for q in QS:      # R13: max() below would silently drop a NaN ratio
+    for q in QS:      # non-finite values must fail: max() below would silently drop a NaN ratio
         assert np.all(np.isfinite(tan[q])) and np.all(np.isfinite(prim[q])), \
             f"ERROR non-finite {q} table or tangent ({name}, {theta}, n={n})"
     z = z_of(prim["loga"])
@@ -148,13 +148,13 @@ def test_tangents_match_converged_fd_helium(recomb_cosmology, theta):
     _fd_check(recomb_cosmology, theta, ZS_HE)
 
 
-# ---- Hydrogen (Task 4): CLASS staging Saha -> Peebles ODE at z = 1600 ----
+# ---- Hydrogen: CLASS staging, Saha -> Peebles ODE at z = 1600 ----
 
 @pytest.mark.parametrize("n", GRIDS)
 @pytest.mark.parametrize("window", [(1590.0, 1650.0), (800.0, 1550.0), (1650.0, 2870.0)])
 def test_xe_hydrogen_windows_match_class(recomb_cosmology, n, window):
-    # (1650, 2870) is the helium ODE's x_e (Task 3 could not test it: its error
-    # sits at the z ~ 1650 hydrogen edge, which only the hydrogen staging fixes).
+    # (1650, 2870) is the helium ODE's x_e; helium staging alone could not pass it,
+    # because its error sits at the z ~ 1650 hydrogen edge, which only hydrogen staging fixes.
     name, p = recomb_cosmology
     prim, _ = _prim_tan(name, p, n)
     ref = load_ref(name)
@@ -182,7 +182,7 @@ def test_visibility_peak_matches_class(recomb_cosmology, n):
 def test_no_derivative_spikes_full_range(recomb_cosmology, n, theta):
     name, p = recomb_cosmology
     prim, tan = _prim_tan(name, p, n, theta)
-    for q in QS:      # R13: max() below would silently drop a NaN ratio
+    for q in QS:      # non-finite values must fail: max() below would silently drop a NaN ratio
         assert np.all(np.isfinite(tan[q])) and np.all(np.isfinite(prim[q])), \
             f"ERROR non-finite {q} table or tangent ({name}, {theta}, n={n})"
     z = z_of(prim["loga"])
@@ -224,7 +224,7 @@ def test_fractions_stay_physical_without_clips(recomb_cosmology, n):
     upper = 1.0 + 2.0 * y / (3.9715 * (1.0 - y))     # >= the exactly-4 value too
     print(f"{name} n={n}: x_e in [{xe.min():.3e}, {xe.max():.6f}], upper {upper:.6f}")
     assert xe.min() >= 0.0 and xe.max() <= upper + 1e-12, f"ERROR x_e out of bounds ({name}, n={n})"
-    # R15: for 2400 <= z <= 2870 hydrogen is fully ionised (hydrogen Saha at the
+    # For 2400 <= z <= 2870 hydrogen is fully ionised (hydrogen Saha at the
     # fiducial cosmology: 1 - x_HII ~ 2e-9 at z = 2870, ~ 7e-8 at z = 2400)
     # and HeIII is negligible, so x_e <= 1 + f_He bounds the helium fraction
     # x_HeII <= 1. ThermoResult does not expose x_HeII; the clips are gone, so
@@ -244,7 +244,7 @@ def test_fractions_stay_physical_without_clips(recomb_cosmology, n):
 def test_no_spikes_for_T_cmb(recomb_cosmology, n):
     name, p = recomb_cosmology
     prim, tan = _prim_tan(name, p, n, "T_cmb")
-    for q in QS:      # R13
+    for q in QS:      # non-finite values must fail: max() below would silently drop a NaN ratio
         assert np.all(np.isfinite(tan[q])) and np.all(np.isfinite(prim[q])), \
             f"ERROR non-finite {q} table or tangent ({name}, T_cmb, n={n})"
     z = z_of(prim["loga"])
@@ -258,7 +258,7 @@ def test_no_spikes_for_T_cmb(recomb_cosmology, n):
 def test_coarse_grid_1500_helium_hydrogen_spike_free(recomb_cosmology, theta):
     name, p = recomb_cosmology
     prim, tan = _prim_tan(name, p, 1500, theta)
-    for q in QS:      # R13
+    for q in QS:      # non-finite values must fail: max() below would silently drop a NaN ratio
         assert np.all(np.isfinite(tan[q])) and np.all(np.isfinite(prim[q])), \
             f"ERROR non-finite {q} table or tangent ({name}, {theta}, n=1500)"
     z = z_of(prim["loga"])
@@ -273,8 +273,9 @@ def test_jit_and_eager_primal_agree(recomb_cosmology):
     prec = thermo_prec(20000)
     pt = as_traced(p)
     # thermodynamics_solve is itself @jax.jit, so tables() always runs it compiled;
-    # __wrapped__ is the uncompiled function (R20, what the probe's floor_diag measured).
-    # R21: 20000 points, where the probe measured and the RK4 code amplifies the rounding-level jit/eager gap; 3000 does not.
+    # __wrapped__ is the uncompiled function.
+    # 20000 points: the jit/eager rounding-level gap of the former RK4 code showed up on this
+    # grid (measured during the design study, not in the repo); 3000 points does not amplify it.
     a = np.asarray(thermodynamics_solve.__wrapped__(pt, prec, background_solve(pt, prec)).xe_of_loga.y)
     b = np.asarray(jax.jit(lambda q: tables(q, prec))(pt)["xe"])
     d = float(np.max(np.abs(a - b)))
@@ -295,14 +296,16 @@ def test_vmap_over_h_matches_loop(recomb_cosmology):
     assert d < 1e-12, f"ERROR vmap vs loop differ by {d:.3e} ({name})"
 
 
-# ---- D4 (Task 8): one helium-to-hydrogen number ratio, CLASS's _not4_ ----
+# ---- One helium-to-hydrogen number ratio, CLASS's _not4_ ----
 
 @pytest.mark.parametrize("n", GRIDS)
 def test_fully_ionised_xe_uses_class_helium_mass_ratio(recomb_cosmology, n):
     """x_e at z = 2e4 (H, He fully ionised) = 1 + 2 f_He with f_He = Y/(3.9715 (1-Y)),
-    CLASS thermodynamics.h:707 (_not4_). Fails while any site uses exactly 4.
-    Parametrised over GRIDS (R26): the value is grid-independent, so the 3000-point
-    case guards D4 routinely under --fast."""
+    CLASS thermodynamics.h:707 (_not4_). At z = 2e4 only the final x_e sum is
+    sensitive to the helium ratio, so this guards that sum alone: it fails if the
+    sum uses exactly 4 instead of 3.9715, a 1.2e-3 offset in x_e. It does not see a
+    reversion at any other site. Parametrised over GRIDS: the value is
+    grid-independent, so the 3000-point case runs routinely under --fast."""
     name, p = recomb_cosmology
     prec = thermo_prec(n)
     q = as_traced(p)

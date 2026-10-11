@@ -1,6 +1,7 @@
 """Shared helpers for the recombination-staging tests (smsharma/clax#48).
-Presets and metrics copy the variant probe (/lustre/work/n2minh/clax-probes/
-helium/scripts/thermo_probe.py) so the in-repo numbers are comparable."""
+Presets and metrics copy the design study's probe script (not in the repo:
+/lustre/work/n2minh/clax-probes/helium/scripts/thermo_probe.py) so the in-repo
+numbers are comparable."""
 import os
 from dataclasses import replace
 

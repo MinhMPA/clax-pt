@@ -57,9 +57,9 @@ VA-VE), run on 12 cosmologies against CLASS RECFAST with `recfast_Heswitch = 1`
 noted. "Spike ratio" is the maximum over grid points of |d ln Q/d theta| divided
 by its median over +-25 neighbours, for Q in {x_e, c_s^2, T_b} and theta in
 {h, omega_b, omega_cdm, Y_He, N_eff}, z 1500-6000. Source: the probe's results
-table `final_table.txt` (under `/lustre/work/n2minh/clax-probes/helium/out/`),
-jobs 22933-22937, 22948, 22949, 22952, 22953, 22959, 22972, 22973, 22976, 22977,
-23000, 23034, 23055, 23060.
+table `final_table.txt` (cluster scratch, not in the repo:
+`/lustre/work/n2minh/clax-probes/helium/out/`), jobs 22933-22937, 22948, 22949,
+22952, 22953, 22959, 22972, 22973, 22976, 22977, 23000, 23034, 23055, 23060.
 
 | variant | what changes | x_e vs CLASS, z 2000-5000 | x_e vs CLASS, z 800-1600 | spike ratio | k-chunk spread of df/dh (worst of 3 cosmologies) | CPU vs GPU tangents (normwise) | verdict |
 |---|---|---|---|---|---|---|---|
@@ -81,8 +81,12 @@ derivative.
 
 Recombination follows CLASS's approximation staging, advanced by one L-stable
 linearly implicit step, with **no clip anywhere in the recombination step**.
-This is probe variant VE; the in-repo tables agree with the stored VE tables to
-2.05e-12 in x_e at every grid knot (job 24182).
+This is probe variant VE, with one deliberate difference added afterwards (D4
+below). Before the helium-ratio change (D4), the in-repo tables agreed with the
+stored VE tables to 2.05e-12 in x_e at every grid knot (job 24182). The
+CLASS-ratio change then moves x_e by design: VE kept the helium-to-hydrogen
+ratio at exactly 4, which puts a 1.2e-3 offset in the fully ionised x_e and
+5.4e-4 in z 2870-5000, so the shipped tables no longer equal VE's.
 
 **D1. One shared stiff step, `_ros2_scalar_step` (internal).** The two-stage,
 L-stable, second-order linearly implicit Rosenbrock step ROS2
@@ -103,10 +107,12 @@ on its equilibrium without overshoot or oscillation, which is what removes the
 need for a clip. That holds for an exact Jacobian. Here J is taken with x_e held
 fixed, so for a rate proportional to x_e x_p the true stiffness is about twice J
 and the stiff limit of the step is a damped alternating approach (amplification
-about -0.66 per step) rather than a monotone one. It is stable and the effect is
-small, but the no-overshoot guarantee is not exact: the bounds tests are the
-guard, and the x_HeII <= 1 guard sees an overshoot only above about 5e-3 (see
-Tests).
+about -0.66 per ROS2 sub-step) rather than a monotone one. It is stable, but the
+no-overshoot guarantee is not exact. An estimate, not a measurement, is that this
+regime is not reached: at the one stiff place, hydrogen near z = 1600,
+photoionisation dominates J, so holding x_e fixed changes J by about 1%. The
+bounds tests are the guard, and the x_HeII <= 1 guard sees an overshoot only
+above about 5e-3 (see Tests).
 
 **D2. Helium, HeII -> HeI.** CLASS's staging: Saha equilibrium above z = 2870
 (`thermodynamics.c:4053-4067`, HeI ionisation temperature 285,335 K,
@@ -273,7 +279,8 @@ scalar ODE with a known answer), `tests/test_recomb_thermo.py` (S1, tables and
 forward tangents at 10 cosmologies on both grids; a `--fast` subset runs the
 3000-point grid at fiducial), `tests/test_recomb_downstream.py` (S2 and S3, the
 delta_m functional and the production gradient entry),
-`tests/test_recomb_gpu.py` (CPU vs GPU, skipped without a GPU) and
+`tests/test_recomb_gpu.py` (CPU vs GPU; run it with `JAX_PLATFORMS=cuda,cpu`, it
+skips when either backend is missing) and
 `tests/test_recomb_reference.py` (the reference data). Each new test family was
 shown failing on the unfixed code before the fix and passing after, with two
 kinds of exception. The red failures of S0 and of the reference-data tests were
@@ -282,7 +289,17 @@ not an assertion. The two bounds tests (x_e in [0, 1 + 2 f_He], and x_HeII <= 1
 for z in [2400, 2870]) cannot be red: the old clipped code satisfied them by
 construction. The
 x_HeII <= 1 guard has a 3.6e-4 to 5.2e-4 margin, so it catches an overshoot in
-x_HeII only above about 5e-3.
+x_HeII only above about 5e-3. The fully ionised x_e test (D4) sees only the final
+x_e sum; by inspection, not by test, a reversion to exactly 4 at another
+number-ratio site would stay inside the 1e-3 x_e windows.
+
+One existing test changed: `test_pk_table_auto_batch_matches_full_vmap`
+(`tests/test_end_to_end.py`) runs both solves at rtol = 1e-3 instead of 1e-2, bar
+1e-3 unchanged. With smooth tables the shared-step Rosenbrock solver shows a
+steady -1.09e-3 mismatch between auto-batched and full-vmap solves at
+rtol = 1e-2 (about rtol/10), which scatter of 7.2e-4 to 2.06e-3 had hidden; at
+rtol = 1e-3 it is 1.8e-4. This is a property of the shared step, not a loosening
+of the bar.
 
 **ADR 0001.** Its premise "forward mode is exact" is refined, not overturned; see
 the dated note appended there.
