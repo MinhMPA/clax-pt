@@ -59,8 +59,20 @@ on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   TT 0.27 / 0.24 / 0.42 / 0.26 / 0.22%, EE 0.75 / 1.03 / 0.84 / 0.78 / 0.99%,
   TE 0.37 / 0.35 / 0.44 / 0.44 / 0.31% for fiducial / h_high / omega_b_high /
   omega_cdm_low / ns_high. fit_cl vs CLASS massless RECFAST: TT 0.46% (l<=30),
-  0.69% (l<=500), EE 1.25% (5-500). Timings and the fast suite:
-  `slurm/preset-validation-v100.sbatch` sections 2-3, recorded below.
+  0.69% (l<=500), EE 1.25% (5-500).
+- Timings (job 24621, `scripts/benchmark_speed.py`, V100, cached second
+  call; note the script keeps the preset's 5 neutrino q-bins at m_ncdm=0, so
+  this is the massive-like cost): planck_cl thermodynamics 58.7 s,
+  perturbations 174.0 s, harmonic 12.7 s, total 246 s (was 4679 s with the
+  previous settings in the Oct 2026 sweep); fit_cl 1.8 / 51.9 / 7.2 s, total
+  61.5 s (was 34 s with rodas5 at rtol 1e-3 / atol 1e-4). Spot checks at
+  l=20/100/500/1000: planck_cl TT -0.07/+0.05/+0.20/+0.14%, EE -0.44/-0.28/
+  -0.10/+0.27%; fit_cl TT -0.37/+0.05/-0.32/-6.4% (20 k/decade limits l>500).
+- Fast suite (job 24621, `--fast`, known `test_pk_rosenbrock_vs_kvaerno5`
+  deselected): 326 passed, 74 skipped, 2 failed, both in
+  `tests/test_solver_selection.py` (`test_fit_cl_uses_rodas5`,
+  `test_fit_cl_loosened_atol`), which pin the previous fit_cl solver and
+  tolerance; updated with the final fit_cl choice (see below).
 
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 
