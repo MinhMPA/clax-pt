@@ -27,6 +27,11 @@ previous ``LocalLinearInterpolation`` unlensed TT was 46% low at l=2 relative
 to Kvaerno5 at rtol 1e-4 / atol 1e-6 and 4.1% at 1e-5 / 1e-10 (precision
 sweep of Oct 10-11, 2026, finding 5; error scaling as the square of the
 late-time step).  Cubic Hermite error scales as the fourth power.
+The extra evaluation is recovered FSAL-style: f(t1, y1) is carried in
+``solver_state`` and reused as the next step's f(t0, y0), recomputed only on
+the first step or after a jump (``made_jump``), exactly as diffrax's
+Runge-Kutta solvers do.  A rejected step keeps the previous ``solver_state``
+so the carried value stays f(t0, y0) of the retried step.
 
 References:
     Rodas5: Di Marzo (1993), "RODAS5(4) - Méthodes de Rosenbrock d'ordre 5(4)"
@@ -35,7 +40,9 @@ References:
 """
 
 import equinox as eqx
+import equinox.internal as eqxi
 import jax
+import jax.lax as lax
 import jax.numpy as jnp
 import jax.scipy.linalg as jla
 from diffrax import AbstractAdaptiveSolver, AbstractTerm, ODETerm, RESULTS
@@ -143,7 +150,9 @@ class Rodas5(AbstractAdaptiveSolver):
         return 4
 
     def init(self, terms, t0, t1, y0, args):
-        return None
+        # (first_step, f carried from the previous step's end); see module
+        # docstring.  The zeros are a placeholder of the right shape.
+        return jnp.array(True), jnp.zeros_like(y0)
 
     def func(self, terms, t0, y0, args):
         return terms.vf(t0, y0, args)
@@ -152,8 +161,14 @@ class Rodas5(AbstractAdaptiveSolver):
         dt = t1 - t0
         f = lambda t, y: terms.vf(t, y, args)
 
+        # -- f(t0, y0): carried from the previous step unless it is invalid --
+        # unvmap_any keeps the predicate unbatched under vmap over k-modes, so
+        # lax.cond stays a real branch instead of evaluating both sides.
+        first_step, f_carry = solver_state
+        eval_f0 = eqxi.unvmap_any(first_step | made_jump)
+        f0 = lax.cond(eval_f0, lambda: f(t0, y0), lambda: f_carry)
+
         # -- Jacobian and time derivative via forward-mode AD --
-        f0 = f(t0, y0)
         n = y0.shape[0]
         J = jax.jacfwd(lambda y: f(t0, y))(y0)
         dT = jax.jacfwd(lambda t: f(t, y0))(t0)
@@ -225,7 +240,8 @@ class Rodas5(AbstractAdaptiveSolver):
         # f(t1, y1) is not among the stage evaluations (stage 8 is at u8 != y1).
         f1 = f(t1, y1)
         dense_info = dict(y0=y0, y1=y1, k0=dt * f0, k1=dt * f1)
-        return y1, y_error, dense_info, solver_state, RESULTS.successful
+        new_solver_state = (jnp.array(False), f1)
+        return y1, y_error, dense_info, new_solver_state, RESULTS.successful
 
 
 class Rodas5Batched(AbstractAdaptiveSolver):
@@ -261,14 +277,13 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         return 4
 
     def init(self, terms, t0, t1, y0, args):
-        return None
+        # (first_step, f carried from the previous step's end); see Rodas5.
+        return jnp.array(True), jnp.zeros_like(y0)
 
     def func(self, terms, t0, y0, args):
         return terms.vf(t0, y0, args)
 
     def step(self, terms, t0, t1, y0, args, solver_state, made_jump):
-        del solver_state, made_jump
-
         f, _args = args
 
         n = y0[0].shape[0]  # state dimension from first batch element
@@ -331,8 +346,11 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         lu_solve_batched = jax.vmap(jla.lu_solve, (0, 0))
 
         # -- 8 Rosenbrock stages (transformed W-formulation) --
-        # Stage 1
-        dy1 = terms.vf(t=t0, y=y0, args=_args)
+        # Stage 1: f(t0, y0) carried from the previous step unless invalid
+        first_step, f_carry = solver_state
+        eval_f0 = eqxi.unvmap_any(first_step | made_jump)
+        dy1 = lax.cond(eval_f0, lambda: terms.vf(t=t0, y=y0, args=_args),
+                       lambda: f_carry)
         rhs = dy1 + dtd1 * dT
         k1 = lu_solve_batched(lu_and_piv, rhs)
 
@@ -391,4 +409,5 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         # Dense output: cubic Hermite from (y, dt*y') at both step ends
         f1 = terms.vf(t=t1, y=y1, args=_args)
         dense_info = dict(y0=y0, y1=y1, k0=dt * dy1, k1=dt * f1)
-        return y1, y_error, dense_info, None, RESULTS.successful
+        new_solver_state = (jnp.array(False), f1)
+        return y1, y_error, dense_info, new_solver_state, RESULTS.successful
