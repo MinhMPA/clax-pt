@@ -54,3 +54,56 @@ def bias_point(z: float, *, c: float = C_REF) -> dict[str, float]:
             "bGamma3": 23.0 / 42.0 * (b1 - 1.0),
             "c0": c, "c2": c, "c4": c, "cfog": CFOG_REF,
             "P_shot": 1.0, "a0": 0.0, "a2": 0.0}
+
+
+# --------------------------------------------------------------------------- error-bar gate numerics (spec §5.6)
+import numpy as np                                           # noqa: E402
+from scipy.interpolate import CubicSpline as _CubicSpline   # noqa: E402
+
+DK = 0.01                                                    # h/Mpc
+K_EDGES = np.round(np.arange(0.01, 0.2 + 1e-9, DK), 10)      # 0.01 ... 0.20
+K_CENTRES = 0.5 * (K_EDGES[1:] + K_EDGES[:-1])               # 0.015 ... 0.195 (19 bins)
+_ELLS = np.array([0, 2, 4])
+_GL_MU, _GL_W = np.polynomial.legendre.leggauss(40)
+_L = np.stack([np.ones_like(_GL_MU), 0.5 * (3 * _GL_MU**2 - 1), (35 * _GL_MU**4 - 30 * _GL_MU**2 + 3) / 8])
+
+
+def to_centres(P, kw):
+    """(3, Nw) on the window -> (3, Nb) at K_CENTRES, cubic spline in ln k (same for both codes)."""
+    return _CubicSpline(np.log(np.asarray(kw)), np.asarray(P), axis=1)(np.log(K_CENTRES))
+
+
+def multipole_covariance(P, k, V, dk):
+    """Gaussian covariance of (P0, P2, P4) per k-bin, (Nk, 3, 3):
+    C_ll'(k) = (2l+1)(2l'+1)/N_k * int_{-1}^{1} L_l L_l' P(k,mu)^2 dmu, N_k = V k^2 dk/(2 pi^2).
+    P(k, mu) = sum_l P_l L_l already contains the shot noise -- nothing is added (Review Focus 2)."""
+    P = np.asarray(P, dtype=float)
+    pkmu = P.T @ _L                                           # (Nk, 40)
+    Nk = V * np.asarray(k) ** 2 * dk / (2 * np.pi**2)
+    integ = np.einsum("m,am,bm,km->kab", _GL_W, _L, _L, pkmu**2)
+    return np.outer(2 * _ELLS + 1, 2 * _ELLS + 1)[None] * integ / Nk[:, None, None]
+
+
+def _cinv(C, v):
+    return np.linalg.solve(C, np.asarray(v, dtype=float).T[..., None])[..., 0]    # (Nk, 3)
+
+
+def delta_chi2(dP, C) -> float:
+    return float(np.sum(np.asarray(dP).T * _cinv(C, dP)))
+
+
+def counterterm_headroom(parts, c_ref) -> float:
+    """Smallest c >= 0 with sum_slices (d0 + c D)^T C^-1 (d0 + c D) = 1, D = (d1 - d0)/c_ref. Exact:
+    the counterterm residual is linear in c (c0 = c2 = c4 = c). parts: iterable of (d0, d1, C).
+    0.0 if already >= 1 at c = 0; inf if the counterterm adds no residual."""
+    a = b = e = 0.0
+    for d0, d1, C in parts:
+        D = (np.asarray(d1) - np.asarray(d0)) / c_ref
+        a += float(np.sum(D.T * _cinv(C, D)))
+        b += float(np.sum(D.T * _cinv(C, d0)))
+        e += float(np.sum(np.asarray(d0).T * _cinv(C, d0)))
+    if e >= 1.0:
+        return 0.0
+    if a <= 0.0:
+        return float("inf")
+    return float((-b + np.sqrt(b * b - a * (e - 1.0))) / a)

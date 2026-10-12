@@ -53,3 +53,38 @@ def test_bias_point_coevolution():
     assert th["cfog"] == pfs.CFOG_REF and th["P_shot"] == 1.0
     assert th["a0"] == th["a2"] == 0.0
     assert pfs.bias_point(z, c=0.0)["c0"] == 0.0
+
+
+import numpy as np
+
+
+def test_covariance_isotropic_closed_forms():
+    # Isotropic P(k, mu) = P0: C00 = 2 P0^2/N_k, C22 = 25 * (2/5) P0^2 / N_k = 10 P0^2/N_k, C02 = 0.
+    # Built ONLY from the P passed in -- no extra 1/nbar (Review Focus 2).
+    k = np.array([0.1, 0.2])
+    P = np.zeros((3, 2))
+    P[0] = [1.0e4, 5.0e3]
+    C = pfs.multipole_covariance(P, k, V=1e9, dk=0.01)
+    Nk = 1e9 * k**2 * 0.01 / (2 * np.pi**2)
+    np.testing.assert_allclose(C[:, 0, 0], 2 * P[0] ** 2 / Nk, rtol=1e-12)
+    np.testing.assert_allclose(C[:, 1, 1], 10 * P[0] ** 2 / Nk, rtol=1e-12)
+    np.testing.assert_allclose(C[:, 0, 1], 0.0, atol=1e-12 * np.max(C[:, 0, 0]))
+
+
+def test_delta_chi2_and_headroom():
+    C = np.broadcast_to(np.eye(3), (4, 3, 3)).copy()
+    d1 = np.ones((3, 4))                          # at c = 2: chi2 = 12
+    assert pfs.delta_chi2(d1, C) == pytest.approx(12.0)
+    # d0 = 0 -> chi2(c) = 3 c^2 -> c* = 1/sqrt(3)
+    assert pfs.counterterm_headroom([(np.zeros((3, 4)), d1, C)], 2.0) == pytest.approx(1 / np.sqrt(3))
+    assert pfs.counterterm_headroom([(np.full((3, 4), 2.0), d1, C)], 2.0) == 0.0     # already >= 1
+    assert pfs.counterterm_headroom([(np.zeros((3, 4)), np.zeros((3, 4)), C)], 2.0) == np.inf
+
+
+def test_bins_and_interpolation():
+    assert pfs.K_CENTRES[0] == pytest.approx(0.015) and pfs.K_CENTRES[-1] == pytest.approx(0.195)
+    assert len(pfs.K_CENTRES) == 19 and pfs.DK == 0.01
+    kw = np.geomspace(1e-3, 0.3, 80)
+    P = np.stack([kw**-1.0, kw**0.5, np.log(kw)])
+    np.testing.assert_allclose(pfs.to_centres(P, kw), np.stack([pfs.K_CENTRES**-1.0, pfs.K_CENTRES**0.5,
+                                                               np.log(pfs.K_CENTRES)]), rtol=1e-6)
