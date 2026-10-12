@@ -21,10 +21,10 @@ What must stay true, and what breaks if it does not:
     (.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/progress.md) and CHANGELOG; the fast-suite
     wrapper deselects only those two parametrizations (Task 9, controller amendment E, Oct 13, 2026), and
     scripts/ps1loop_convergence_ladder.py measures the remainder per ps_1loop setting. That remainder
-    is non-smooth in k, peaks at k = 0.13-0.25 h/Mpc and is 11-14x the primal remainder ps - clax - D
-    (scratch job 24845). The direct ps-vs-clax numbers are logged and printed but not asserted: they
-    contain dD/dt, which along the AP directions is large (scratch job 24167, lcdm_fiducial: alpha_para
-    3.1 / 10.4 / 8.7% at l = 0 / 2 / 4).
+    is non-smooth in k, peaks at k = 0.13-0.25 h/Mpc and is 11-14x the primal remainder ps - clax - D,
+    both measured over the stretch derivative's scale max|jvp_clax| (scratch job 24845). The direct
+    ps-vs-clax numbers are logged and printed but not asserted: they contain dD/dt, which along the AP
+    directions is large (scratch job 24167, lcdm_fiducial: alpha_para 3.1 / 10.4 / 8.7% at l = 0 / 2 / 4).
   * primal guard (test_primal_closure_guard): at x0, ps - D matches clax at the same thresholds and
     discrimination rule.
     If it breaks, D is mis-assembled (a sign, a missing monomial, a wrong bias-point value), and the

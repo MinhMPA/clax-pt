@@ -21,12 +21,13 @@ clax's P_nw, Sigma^2 and AP geometry. Three checks guard it:
     denominator, the closure residual must be <= 0.5 x the measured difference, so a line cannot
     pass the gate merely by being small. Lines measured at <= 1e-3 (0.1% of the coefficient's
     scale, e.g. the l = 4 isotropic loops) are physically negligible and held to the gate only.
-ps_1loop runs at its default nfft = 256 (locked decision). The closure remainder is BAO-phased and
+ps_1loop runs at its default nfft = 256 (locked decision). The closure remainder is non-smooth in k and
 on the 1% gate worst for b1*bG2:l2, 0.56% of its max|clax| at z = 0; the candidate is ps
 interpolating its loops in k on its 256-point grid (not O(P_w^2), which cancels, nor AP, since that
 worst case has none).
 Scratch measurement (Oct 10, 2026; 3 files at z = 0.38): the b1*bG2:l2 remainder 0.52% -> 0.14% at
-nfft = 512; to be formalised by Task 9.
+nfft = 512; the Task 9 convergence ladder did not re-measure this per-line remainder (docs/ps1loop-findings.md,
+finding 1).
 
 42 files in full mode (closures, reproduction) and the 14 z = 0 files (IR off); vc.FAST_CASES at
 vc.FAST_Z under --fast. Multi-cosmology rule: by construction."""

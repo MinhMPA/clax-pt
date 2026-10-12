@@ -40,7 +40,7 @@ Rungs (br.ps_model exposes nfft and the mu grid; br.ps_batch the Simpson num):
   rbao110          ps_1loop's default BAO scale instead of r_s(z_d) h (finding 1, spec §9)
 Not laddered (br.ps_model does not expose them): the FFTLog range kmin_fft / kmax_fft and the IR cut ks.
 Not laddered because ps_1loop 0.5.0 cannot run it: nfft 2048 -- its PT matrices come out non-finite there
-(pt_matrix.get_I, a ratio of complex Gamma functions, underflows at the larger FFTLog frequencies; job 24917:
+(pt_matrix.get_I, a ratio of complex Gamma functions, overflows in its divide at the larger FFTLog frequencies; job 24917:
 "RuntimeWarning: overflow encountered in divide", then non-finite multipoles).
 
 Usage (igpu node through sbatch, env clax; slurm/ps1loop-ladder.sbatch):

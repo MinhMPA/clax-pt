@@ -10,7 +10,11 @@ assertion is on that fixed-nuisance Delta chi^2, and it fails by design: the exc
 the full mu-dependent P_IR in true coordinates, clax-pt applies the l = 4 projection times an
 isotropic factor to every multipole, in observed k^2). With the AP map switched off in both codes
 Delta chi^2 <= 0.03 at cfog = 500 on all five cosmologies (scratch investigation, jobs 24867-24871:
-/lustre/work/n2minh/std/clax/ps1loop/scratch-task8/ap-origin-report.md).
+/lustre/work/n2minh/std/clax/ps1loop/scratch-task8/ap-origin-report.md). That AP-off value sits below
+the floor of ps_1loop's AP branch, which is discontinuous with its no-AP branch at zero AP offset:
+for lcdm_fiducial at cfog = 500 and offsets x 0.001, Delta chi^2 = 0.128 against 0.014 with AP off
+(job 24871); at the ladder's `best` setting (nfft 1024, 201-node mu grid) 0.027 against 0.025
+(job 24919). The key numbers are kept in docs/ps1loop-findings.md (findings 3 and 6).
 
 Reported, not asserted (all with the covariance frozen at clax-pt at the gate point, so every
 Delta chi^2 below is an exact quadratic form in the nuisance amplitudes):

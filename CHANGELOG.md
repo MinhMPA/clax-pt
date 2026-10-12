@@ -8,6 +8,126 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 13, 2026: clax-pt vs ps_1loop_jax second-oracle validation (feat/ps1loop-cross-validation)
+
+**What it means for a PFS analysis.** Both codes were given the same linear input: CLASS-PT's P_cb, growth rate f,
+BAO scale r_s h and AP ratios. With that input, clax-pt and ps_1loop_jax 0.5.0 agree on every one-loop galaxy
+multipole coefficient at the code-accuracy gates (1% / 1% / 2% of the coefficient's scale at l = 0 / 2 / 4), on
+14 cosmologies x z = 0, 0.38, 0.8. This holds once the documented model differences are taken out by exact closed
+forms. After that, the total P_0,2,4 at the PFS bias point agree to <= 0.064% of max|clax P_l| (job 24864).
+
+Two differences show at PFS precision (Takada et al. 2014: 7 slices, k <= 0.2 h/Mpc):
+1. **The AP treatment of the k^4 fingers-of-god term.** At a BOSS-like cfog = 500 (Mpc/h)^4 with fixed nuisance
+   parameters, the fiducial cosmology gives Delta chi^2 = 1.55 and an omega_cdm 20% low cosmology gives 40.6
+   (job 24884). If ps_1loop refits its own (c, cfog), the difference falls to Delta chi^2 = 0.12-0.78, at the price
+   of a cfog shifted by up to +20%.
+2. **ps_1loop's AP branch jumps by 0.15 sigma at zero AP offset** at its default resolution. It is 0.006 sigma at
+   nfft 1024 with a 201-node mu grid (jobs 24871, 24919).
+
+Derivatives agree along f, alpha_perp and alpha_para once the derivative of the model difference is removed
+(<= 0.44% of the derivative's scale). Along a k-stretch of P_lin, a remainder of 0.25-1.5% of the derivative's
+scale stays unexplained (jobs 24864, 24919). The findings, with their cost to a PFS analysis and the recommended
+settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
+
+**Setup.**
+- Spec `docs/superpowers/specs/2026-10-05-clax-pt-vs-ps1loop-validation-design.md`; plan
+  `docs/superpowers/plans/2026-10-05-clax-pt-vs-ps1loop-validation.md`; decisions in the SDD ledger
+  `.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/progress.md`.
+- ps_1loop_jax 0.5.0 (fork main 576ec09). The campaign started at 0.4.0 (270b2b5), then paused while the ps defects
+  it found were fixed in MinhMPA/ps_1loop_jax-for-pfs#6.
+- clax-pt includes the RSD-basis gradient fix (Oct 10 entry, merged as 74222a6). CLASS-PT breaks ties.
+- New references: 35 PFS-slice and 3 IR-off CLASS-PT files (`slurm/classpt-refgen-pfs.sbatch`, job 22370).
+
+**Results** (ps_1loop at its default nfft = 256).
+- **Coefficient gate** (`tests/test_ps1loop_coefficients.py`; 14 exactly translating monomials x l = 0, 2, 4):
+  42/42 files pass, worst b1*b1:l4 at 1.559% (omega_cdm_low z = 0.8, 2% gate; job 23193). The 13
+  omitted-projection lines are gated by the closure below instead.
+- **Model-difference closure** (`tests/test_ps1loop_model_difference.py`, 140 tests, job 24110):
+  - counterterm / fingers-of-god / a0 map: 42/42, worst c4:l0 0.193%;
+  - omitted-projection closure (13 lines, including ps's IR-resummation scheme term): 42/42, worst bG2:l4 0.705%
+    (2% gate) and b1*bG2:l2 0.560% (1% gate); the discrimination rule is asserted on 347 of 546 line x file
+    checks, and all pass;
+  - reproduction of clax's kept projections: identical to the last bit, 42/42;
+  - counterterm map with IR off: exact to 9.2e-7, 14/14.
+- **Real space, IR off** (`tests/test_ps1loop_real_space.py`, job 24147): 42/42, worst c0 (the k^2 P shape) at
+  0.617%. This is ps's 256-point spline of the BAO wiggle: 0.057-0.125% at nfft 512 (job 24155). clax-pt IR off
+  vs CLASS-PT IR off: 3/3, <= 0.0016%.
+- **Gradients** (`tests/test_ps1loop_gradients.py`, 3 cosmologies; job 24898, which reproduces job 24864's
+  numbers digit for digit):
+  - ps AD vs finite differences: 3/3, worst 1.42e-6 (gate 1e-4);
+  - traced-IR primal: 3/3, <= 7.4e-16;
+  - primal guard: 3/3;
+  - cross-code derivative closure: f, alpha_perp and alpha_para pass 9/9 (closed <= 0.44%); amplitude passes 2/3;
+    stretch passes 0/3. The failures are the discrimination rule.
+- **PFS error-bar gate** (`tests/test_ps1loop_pfs_gate.py`, job 24884), in the order lcdm_fiducial /
+  omega_cdm_low / massive_nu_015 / massive_nu_030 / w0wa_m07_m10:
+  - fixed-nuisance Delta chi^2 1.553 / 40.558 / 2.528 / 4.446 / 3.150, so 0/5 pass;
+  - headroom c* = 0 in every cosmology;
+  - marginalised Delta chi^2 (ps refits its own c and cfog) 0.120 / 0.689 / 0.126 / 0.137 / 0.782;
+  - crossing cfog 384 / 75 / 291 / 213 / 277 (Mpc/h)^4;
+  - with AP off in both codes, <= 0.03 (jobs 24867-24868); with cfog = 0 in both codes, 0.07-0.13 (job 24860).
+- **Convergence ladder** (`scripts/ps1loop_convergence_ladder.py`, job 24919).
+  - Rungs that move a z = 2.2 slice Delta chi^2 by more than 10%: lcdm_fiducial nfft512 0.3500 -> 0.3050
+    (-12.9%), nfft1024 0.3022 (-13.7%), best 0.3009 (-14.0%). For w0wa_m07_m10 the largest move is +6.6%.
+    Resolution does not remove the gate excess.
+  - Stretch remainder: no setting ps exposes closes it.
+  - AP jump at zero offset: nfft 1024 + 201 mu nodes reduces it 13-25x.
+  - nfft 2048: non-finite PT matrices in ps 0.5.0 (job 24917).
+
+**Two tests are red by the user's decision; the fast-suite wrapper deselects them.**
+- **`tests/test_ps1loop_gradients.py::test_cross_code_tangents`, the stretch and amplitude parametrizations**
+  (pytest ids `<case>-stretch` and `<case>-amplitude` for lcdm_fiducial, massive_nu_030, w0wa_m07_m10).
+  - Why red: along the k-stretch and the amplitude of P_lin, the derivative closure fails the discrimination rule
+    (closed residual > 0.5 x direct difference). That is the unexplained 0.25-1.5% remainder.
+  - Decision: Oct 12, 2026, keep the rule on all five directions.
+  - Deselect: `slurm/run-ps1loop-fast-suite.sh` deselects these six parametrizations. Remove the deselect when the
+    remainder is attributed and the rule passes on every line, or when the user revises the rule.
+- **`tests/test_ps1loop_pfs_gate.py::test_pfs_error_bar_gate`.**
+  - Why red: the fixed-nuisance Delta chi^2 is 1.55-40.6, at or above 1, because of the fingers-of-god AP treatment.
+  - Decision: Oct 12, 2026, keep the spec's fixed-nuisance gate red as the finding, and report the marginalised
+    Delta chi^2 and the crossing cfog.
+  - Deselect: remove it when one code's fingers-of-god AP treatment is changed to match the other's, or when the
+    user changes the gate's nuisance treatment.
+- The older Rosenbrock deselect (Oct 7) stays.
+
+**Docs and wording (this commit).**
+- `docs/ps1loop-findings.md`: findings 1-8 and 4b, each with its cost to a PFS analysis and a recommended setting
+  or fix. Drafted, not posted; the user decides whether to open issues on MinhMPA/ps_1loop_jax-for-pfs.
+- Wording sweep, with no number, threshold or gate changed:
+  - "BAO-phased" -> "non-smooth in k" for the Task 5 remainder (`tests/test_ps1loop_model_difference.py`), because
+    the quartic-fit metric cannot tell an oscillation from a hump. Its stale "to be formalised by Task 9" now says
+    that the ladder did not re-measure that line;
+  - `tests/test_ps1loop_gradients.py` now says that the 11-14x compares both remainders over the derivative's
+    scale;
+  - the ladder docstring now says that `get_I` overflows in its divide (job 24917 log);
+  - the PFS gate docstring now names ps's AP-branch floor.
+
+**Test pass rates (final tree).**
+- The nine campaign test files, full mode (job 24932): 289 passed, 9 failed of 298 in 29 min 55 s. The failures
+  are exactly the 4 + 5 red tests above, and every ERROR line is a discrimination line or a fixed-nuisance PFS
+  line. Per file: test_pfs_survey 17, test_classpt_pfs_references 9, test_ps1loop_bridge 13,
+  test_ps1loop_coefficients 42, test_ps1loop_model_difference 140, test_ps1loop_real_space 45 and
+  test_ps1loop_ladder 3 pass; test_ps1loop_gradients 20 of 24 and test_ps1loop_pfs_gate 0 of 5 pass. Its log
+  records reproduce every test-level worst value quoted above (coefficients, closures, real space, gradients,
+  PFS gate) to the printed digit. The full ladder (job 24919) was not rerun; its 3 smoke tests were.
+- Fast suite through the wrapper `slurm/run-ps1loop-fast-suite.sh` (job 24933, 1 h 36 min): PASS, with 520
+  passed, 174 skipped and 0 failed, counted from the progress line. That equals the count at e38504b (job
+  24920), as expected for edits that touch only docstrings and docs.
+
+**Failed approaches and dead ends (do not retry).**
+- The first coefficient run against ps 0.4.0 (job 22610) gave 39 ERROR lines. They came from ps defects (later
+  fixed in 0.5.0) and from CLASS-PT's omitted projections (now closed, see above). None came from the wiring:
+  clax-pt vs CLASS-PT agreed to 0.04-0.30%.
+- Changing only ps's DST cuts made its de-wiggling worse (job 22623). CLASS-PT's de-wiggling was ported instead.
+- Closing the omitted projections with clax's IR scheme alone leaves b1*bG2:l2 at 1.015% (job 23244, fails the 1%
+  gate). The closed form must include ps's IR-resummation scheme term, which is 89% of that residual (job 23253).
+- Profiling the same (c, cfog) in both codes reaches Delta chi^2 0.05-0.09 only by driving cfog to zero. It is not
+  a marginalisation (jobs 24867-24868).
+- Extrapolating the crossing cfog as (cfog/500)^2 overshoots by 2-11%. Use the exact quadratic.
+- The "~20x" amplification of the stretch remainder compared two different scales and was withdrawn. Like for
+  like, both over the derivative's scale, it is 8.4-14.1x.
+- An nfft 2048 rung is not runnable in ps 0.5.0 (job 24917).
+
 ### Oct 10, 2026: RSD one-loop basis now differentiable through the traced IR split (clax-pt)
 
 **Bug.** Before this fix most of d(P_0,2,4)/d(P_lin) was missing at every k in
