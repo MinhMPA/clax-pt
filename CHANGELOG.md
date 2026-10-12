@@ -8,6 +8,81 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 10, 2026: RSD one-loop basis now differentiable through the traced IR split (clax-pt)
+
+**Bug.** Before this fix most of d(P_0,2,4)/d(P_lin) was missing at every k in
+the 0.01-0.3 h/Mpc window, for any parameter that moves P_lin (A_s, n_s, ω_b,
+ω_cdm, h, m_ν): AD gradients of the redshift-space multipoles from
+`compute_ept_from_clax` were wrong at order unity. `compute_ept`'s
+`_ir_precomputed` path read a `stop_gradient` snapshot of the IR split (the
+split of P_lin into a smooth no-wiggle part P_nw and the BAO wiggle part
+P_w = P_lin - P_nw; the "PHASE-2 FREEZE" comment, explicit since 322a6ab; a
+leftover of the NumPy-only splitter). The snapshot fed both the one-loop
+FFTLog basis and the no-wiggle spectrum used by the angular integration (tree,
+counterterms, P13ratio, IFG2 rescaling), so d(P_0,2,4)/d(P_lin) lacked the
+no-wiggle tree response as well as the one-loop response; of the
+redshift-space tree only the wiggle share (P_w times the BAO damping factor, a
+few % of P) responded. Task 7 of the clax-pt vs ps_1loop_jax cross-validation
+plan (branch feat/ps1loop-cross-validation) found forward-mode AD vs central
+finite differences ~90% (amplitude) / ~100% (stretch) off at lcdm z=0.38 (jobs
+24165/24167), along two directions in P_lin: amplitude (δP ∝ P, a change of
+A_s) and stretch (δP ∝ dP/dln k, a rescaling of k). The reproducer (job 24203,
+lcdm_fiducial z=0 table, f=0.75; relative error at l=0/2/4) reads amplitude
+0.91/0.93/1.98, stretch 1.06/1.60/1.70, wiggle (δP ∝ P_w, the BAO wiggles
+alone) 0.035/0.027/0.13, matter monopole 0.92, i.e. ~90-200% on the amplitude
+and stretch tangents. f and AP-ratio derivatives were unaffected.
+The existing gradient tests did not see it: they hold the IR split fixed in both
+arms or use real-space functionals. No earlier test asserts, and no analysis
+uses, a value of this channel. The e2e campaign's `test_e2e_gradient_finite`
+(tests/test_ept_e2e_multicosmo.py on branches feat/classpt-e2e-ap-validation
+and feat/e2e-ap-on-tau0-fix, not on this branch) logs three
+d(sum pk_gg_l0)/d(omega_cdm) values computed through the frozen basis (the
+test asserts finite and nonzero only); they are wrong at order unity. Any
+Fisher matrix, optimiser or HMC mass matrix built from `compute_ept_from_clax`
+multipole gradients before this fix inherits that.
+
+**Fix.** The one-loop basis and the no-wiggle spectrum of the angular
+integration are both built from the traced pk_nw / pk_w already in hand
+(`clax/ept.py`, commit 01816a9). Values on the NumPy path are unchanged (its
+np.array round trip is gone; test_ept_accuracy 9/9). At lcdm_fiducial a scratch
+check (eager and jit; not committed; the argument: the same IEEE subtraction
+pk_lin_h - pk_nw on the same arrays feeds the same jnp FFT) found the basis
+inputs and their decompositions bitwise equal (max |old - new| = 0), and the
+traced-vs-NumPy primal gap is unchanged (7.657e-15 before and after). This
+holds for every caller whose IR-split tuple was built from the same pk_lin_h
+(`compute_ept_from_clax` and the new test); a legacy NumPy tuple reused at a different P_lin
+now gets the wiggle basis from pk_lin_h - pk_nw instead of the tuple's stale
+pk_w, honouring `compute_ept`'s docstring promise that the wiggle component is
+recomputed as pk_lin_h - pk_nw. New `tests/test_ept_rsd_basis_gradients.py` runs
+AD vs FD along the amplitude, stretch and wiggle tangents (plus the matter
+monopole) on the `lcdm_cosmology` grid.
+
+**Measured (after the fix, 5-cosmology grid, job 24208, 30 passed).**
+- AD vs FD, worst over the grid: amplitude 1.5e-10 (omega_b_high, l=4),
+  stretch 2.8e-9 (omega_cdm_low, l=4), wiggle 5.3e-10 (h_high, l=4); matter
+  monopole <= 1.6e-11 (measured max 1.54e-11). Before the fix the same
+  quantities were 0.03-2 at lcdm_fiducial (job 24203, above).
+- Forward mode = reverse mode: <= 3.8e-14 over the grid.
+- Traced path vs NumPy path, primal: 7.657e-15 at fiducial before AND after the
+  fix (max 1.1e-14 over the grid).
+
+**Test pass rates.** The five EPT test files, `--fast`: 40 passed / 20 skipped
+(job 24209), identical to the pre-fix baseline (job 24201).
+`tests/test_ept_accuracy.py` 9/9 (job 24211). Fast suite PASS (job 24210): 451
+passed / 174 skipped, with the standing deselect of
+`test_pk_rosenbrock_vs_kvaerno5` (fails on upstream code too, see Oct 7). New
+test file: red before the fix (job 24203), green at fiducial after it (job
+24205), green on the full grid (job 24208). Review hardening (Oct 11, 2026):
+the AD-vs-FD gate tightened from 1e-2 to 1e-6 (a partial re-freeze reads
+>= 3e-2), NaN-safe maxima, finiteness asserted on the FD arm and on both
+primal arms; green again, `--fast` 6 passed / 24 skipped (job 24248) and full
+grid 30 passed (jobs 24249, 24251).
+
+**Still pinned (documented).** The h-dependence of the DST grid inside
+`_ir_resummation_jax` (the grid itself, not just its endpoints; see the CAVEAT
+in `clax/ept.py`). The measured ~1.4% end-to-end h-gradient residual (job
+14146) stays as documented.
+
 ### Oct 7, 2026: Linear P(k) at z=0 was 0.33% low through the C_l solve -- fixed, and the silent clamp now raises
 
 **Bug (smsharma/clax#42, part 1).** `perturbations_solve` integrates to
@@ -406,7 +481,8 @@ anchor; it continues to serve `compute_ept`'s direct/NumPy branch
    `k_max2 = 7.0/h` and the boolean mask built from them stay outside the
    traced graph -- these mirror CLASS-PT's own hardcoded cuts
    (`nonlinear_pt.c:5322`), not a clax approximation.
-2. **RSD FFTLog basis inputs (PHASE-2 FREEZE).** Explicit `stop_gradient`,
+2. **RSD FFTLog basis inputs (PHASE-2 FREEZE)** (removed Oct 10, 2026 — see
+   the Oct 10, 2026 entry at the top). Explicit `stop_gradient`,
    deferred out of this branch's scope; verified below to be immaterial to
    the `pk_mm_real` observable these tests exercise.
 

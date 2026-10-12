@@ -571,10 +571,11 @@ def test_grad_ln10A_s_end_to_end_from_cosmoparams_matches_fd(fast_mode, request)
     frozen-bg/pt setup (``pipeline_fast_cl_k5_mpk`` fixture, no perturbation
     re-solve) also means
     ``pk_mm_real`` -- the real-space, non-RSD matter power spectrum --
-    never touches the RSD-basis freeze still deferred elsewhere in
-    ``compute_ept_from_clax`` (that freeze only matters for redshift-space
-    multipoles), so this particular test path has no other residual channel
-    left to show. Contrast the ``h`` end-to-end test below, which re-solves
+    never touched the RSD-basis freeze in ``compute_ept_from_clax`` (removed
+    Oct 10, 2026, tests/test_ept_rsd_basis_gradients.py; that freeze only
+    ever mattered for redshift-space multipoles), so this particular test
+    path has no other residual channel left to show. Contrast the ``h``
+    end-to-end test below, which re-solves
     the full background/thermodynamics/perturbations pipeline per probed
     ``h``; its job-14146 residual (1.38%) did not collapse with the traced
     splitter, and is of the size of the CPU/GPU spread of the AD gradient
@@ -705,10 +706,11 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     commit, bg/pt frozen -- collapsed to 1.8231e-07. OBSERVED AD SPREAD below
     shows a spread of this size between CPU and GPU on identical code, so the
     1.38% alone does not discriminate between channels. The RSD-basis
-    freeze does not touch this test: ``compute_ept_from_clax``'s own in-line
-    comment states plainly that ``pk_mm_real`` "is unaffected -- it never reads
-    those FFTLog bases" (that freeze only matters for redshift-space
-    multipoles, which this test's real-space observable never touches).
+    freeze, removed Oct 10, 2026 (tests/test_ept_rsd_basis_gradients.py),
+    never touched this test: ``compute_ept_from_clax``'s own docstring states
+    plainly that ``pk_mm_real`` "is unaffected -- it never reads those FFTLog
+    bases" (that freeze only ever mattered for redshift-space multipoles,
+    which this test's real-space observable never touches).
 
     At the time, the leading suspect for the surviving 1.38% was the DST
     grid endpoints inside ``_ir_resummation_jax`` -- ``k_min2 = 7e-5/h_conc``,
