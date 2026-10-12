@@ -27,6 +27,7 @@ import jax
 import jax.numpy as jnp
 
 from clax.ept import EPTPrecisionParams, _ir_resummation_jax, compute_ept, pk_gg_l0, pk_gg_l2, pk_gg_l4
+from clax.interpolation import CubicSpline
 from scripts import classpt_assembly as ca
 from tests import ept_campaign_utils as cu
 
@@ -705,7 +706,7 @@ def monomial_value(lab: str, theta: dict) -> float:
     return float(np.prod([1.0 if v == "1" else theta[v] for v in lab.split("*")]))
 
 
-def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE) -> dict:
+def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE, model=None) -> dict:
     """The documented ps_1loop - clax-pt model difference (spec §4.2) on the TOTAL P_0, P_2, P_4 at the
     parameter point theta, on the window kw, as {"ctr": (3, Nw), "closure": (3, Nw)}; their sum is D.
     Every input that the derivative tangents move -- P_lin, f and the AP ratios -- is read from `inp`,
@@ -726,9 +727,13 @@ def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE) -> di
     Not predicted: the exact monomials and the closure monomials' other rows, whose ps - clax is one-loop
     numerics gated directly by Tasks 4-5. NumPy-valued -- the closure reads clax's mu-loop through the
     `capture_gl_inputs` spy -- so it cannot be differentiated with jax; derivatives of D are taken by
-    central differences of this function."""
+    central differences of this function.
+
+    model = the ps_1loop instance whose P_IR enters "ctr" (default ps_model(inp["rbao"]), the gates' model;
+    the convergence ladder passes each rung's model, so D follows ps's rbao / DST cuts there)."""
     th = np.array([[theta[n] for n in THETA_NAMES]], dtype=float)
-    ctr = model_difference_factory(ps_model(inp["rbao"]), inp, kw, ndens=ndens)(th)[0]
+    ps = ps_model(inp["rbao"]) if model is None else model
+    ctr = model_difference_factory(ps, inp, kw, ndens=ndens)(th)[0]
     captured = capture_gl_inputs(inp)
     omitted = omitted_predicted(omitted_projections(inp, kw, captured=captured))
     full_clax = clax_scheme_projections(inp, kw, captured=captured)
@@ -736,6 +741,94 @@ def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE) -> di
                                captured=captured)
     closure = sum(monomial_value(lab, theta) * pred[lab] for lab in pred)
     return {"ctr": np.asarray(ctr, dtype=float), "closure": np.asarray(closure, dtype=float)}
+
+
+# --------------------------------------------------------------------------- derivative closure (Task 7; Task 9's ladder)
+# Moved here from tests/test_ps1loop_gradients.py (Task 9, controller amendment B, Oct 12, 2026) so that the
+# convergence ladder evaluates the same closure with each rung's ps_1loop model and Simpson num; with the
+# defaults (model=None, num=256) every function below is the Task 7 code it replaced, line for line.
+
+FD_STEP = 1e-4   # central-difference step along a tangent: dD/dt here, and ps's own AD-vs-FD check
+TANGENTS = ("f", "a_perp", "a_para", "stretch", "amplitude")
+
+
+def tangent_setup(inp, theta: dict, mask, *, model=None, num=256):
+    """(ps_fun, clax_fun, x0, tangents) for the derivative closure at the shared inputs and the parameter
+    point theta. ps_fun and clax_fun map x = (f, alpha_perp, alpha_para, P_lin) to the (3, Nw) multipoles on
+    the window (AP on, ndens = NDENS_PROBE); clax_fun runs the traced IR split by default so a traced P_lin
+    can be differentiated. x0 = the file's values; tangents = {name: dx} along f, alpha_perp, alpha_para,
+    the k-stretch t = P dlnP/dlnk and the amplitude t = P. model / num = ps_1loop's instance and Simpson
+    num (default: ps_model(rbao) and 256, what the gates run)."""
+    k_h, kw = jnp.asarray(inp["k_h"]), jnp.asarray(inp["k_h"][mask])
+    ps = ps_model(inp["rbao"]) if model is None else model
+
+    def ps_fun(f, a_perp, a_para, pk):
+        return ps_multipoles_jax(ps, k_h, pk, inp["h"], f, a_perp, a_para, theta, kw,
+                                 ap=True, ndens=NDENS_PROBE, num=num)
+
+    def clax_fun(f, a_perp, a_para, pk, ir_traced=True):
+        hratio, Dratio = 1.0 / a_para, a_perp
+        e = clax_ept(inp, pk=pk, f=f, hratio=hratio, Dratio=Dratio, ir_traced=ir_traced)
+        cb = to_clax(theta, f=f, ndens=NDENS_PROBE, Pd2d2_0=e.Pd2d2_0, hratio=hratio, Dratio=Dratio)
+        return clax_multipoles_jax(e, cb)[:, mask]
+
+    a_perp, a_para = ap_alphas(inp["hratio"], inp["Dratio"])
+    pk0 = jnp.asarray(inp["pk"])
+    x0 = (jnp.asarray(inp["f"]), jnp.asarray(a_perp), jnp.asarray(a_para), pk0)
+    t_stretch = pk0 * CubicSpline(jnp.log(k_h), jnp.log(pk0)).derivative(jnp.log(k_h))   # P dlnP/dlnk
+    one, zero, zpk = jnp.asarray(1.0), jnp.asarray(0.0), jnp.zeros_like(pk0)
+    tangents = {"f": (one, zero, zero, zpk), "a_perp": (zero, one, zero, zpk),
+                "a_para": (zero, zero, one, zpk), "stretch": (zero, zero, zero, t_stretch),
+                "amplitude": (zero, zero, zero, pk0)}
+    return ps_fun, clax_fun, x0, tangents
+
+
+def predicted_difference_at(inp, theta: dict, kw, x, *, model=None):
+    """(D(x), parts): the documented ps - clax on the total multipoles (3, Nw) at x = (f, a_perp, a_para, P_lin),
+    i.e. predicted_total_difference on a copy of the shared inputs carrying x (AP: hratio = 1/a_para,
+    Dratio = a_perp, the convention of tangent_setup's clax_fun)."""
+    f, a_perp, a_para, pk = x
+    inp_x = {**inp, "f": float(f), "hratio": 1.0 / float(a_para), "Dratio": float(a_perp),
+             "pk": np.asarray(pk, dtype=float)}
+    parts = predicted_total_difference(inp_x, theta, kw, ndens=NDENS_PROBE, model=model)
+    return parts["ctr"] + parts["closure"], parts
+
+
+def primal_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, *, model=None) -> dict:
+    """{"l<l>": {"direct", "closed", "k"}} at x0: direct = rel(ps, clax), closed = rel(ps - D, clax) (campaign
+    metric, fraction of max|clax P_l| on the window), k = where |ps - D - clax| peaks."""
+    d0, _ = predicted_difference_at(inp, theta, kw, x0, model=model)
+    ps0, cl0 = np.asarray(ps_fun(*x0)), np.asarray(clax_fun(*x0))
+    return {f"l{l}": {"direct": cu.rel(ps0[i], cl0[i]), "closed": cu.rel(ps0[i] - d0[i], cl0[i]),
+                      "k": float(kw[int(np.argmax(np.abs(ps0[i] - d0[i] - cl0[i])))])}
+            for i, l in enumerate(ELLS)}
+
+
+def tangent_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, t, *, fd_step=FD_STEP, model=None) -> dict:
+    """{"l<l>": {...}} along the tangent t: direct = rel(jvp_ps, jvp_clax); closed = rel(jvp_ps - dD/dt,
+    jvp_clax), dD/dt the central difference of D at x0 +/- fd_step t (D is NumPy-valued, so not jvp-able);
+    ratio = closed / direct; k / k_direct = where the closed / direct differences peak; dD_ctr / dD_closure =
+    max|dD/dt| of the counterterm-map and closure-line parts, as fractions of max|jvp_clax|."""
+    jps = np.asarray(jax.jvp(ps_fun, x0, t)[1])
+    jcl = np.asarray(jax.jvp(clax_fun, x0, t)[1])
+    dp, pp = predicted_difference_at(inp, theta, kw, tuple(x + fd_step * dx for x, dx in zip(x0, t)), model=model)
+    dm, pm = predicted_difference_at(inp, theta, kw, tuple(x - fd_step * dx for x, dx in zip(x0, t)), model=model)
+    dD = (dp - dm) / (2.0 * fd_step)
+    d_ctr = (pp["ctr"] - pm["ctr"]) / (2.0 * fd_step)
+    d_clo = (pp["closure"] - pm["closure"]) / (2.0 * fd_step)
+    out = {}
+    for i, l in enumerate(ELLS):
+        scale = max(float(np.max(np.abs(jcl[i]))), 1e-300)
+        direct = cu.rel(jps[i], jcl[i])
+        resid = jps[i] - dD[i] - jcl[i]
+        closed = cu.rel(jps[i] - dD[i], jcl[i])
+        k_c = float(kw[int(np.argmax(np.abs(resid)))]) if np.all(np.isfinite(resid)) else float("nan")
+        k_d = float(kw[int(np.argmax(np.abs(jps[i] - jcl[i])))])
+        ratio = closed / direct if direct > 0 else float("nan")
+        out[f"l{l}"] = {"direct": direct, "closed": closed, "ratio": ratio, "k": k_c, "k_direct": k_d,
+                        "dD_ctr": float(np.max(np.abs(d_ctr[i])) / scale),
+                        "dD_closure": float(np.max(np.abs(d_clo[i])) / scale)}
+    return out
 
 
 # --------------------------------------------------------------------------- real space, IR off (spec §5.4)

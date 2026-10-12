@@ -3,7 +3,8 @@
 (pfs.bias_point) along f, alpha_perp, alpha_para, a k-stretch t = P dlnP/dlnk and the amplitude t = P.
 
 What must stay true, and what breaks if it does not:
-  * ps-vs-clax-closed (test_cross_code_tangents): d(ps - clax)/dt equals dD/dt, the derivative of the
+  * ps-vs-clax-closed (test_cross_code_tangents, one test per tangent, pytest ids f / a_perp / a_para /
+    stretch / amplitude): d(ps - clax)/dt equals dD/dt, the derivative of the
     documented model difference D(x), x = (f, alpha_perp, alpha_para, P_lin) (br.predicted_total_difference:
     counterterm / fingers-of-god / a0 maps, omitted projections, ps's IR-resummation scheme; spec §4.2
     items 1-5), at the code-accuracy thresholds 1% / 1% / 2% for l = 0 / 2 / 4. Task 5's discrimination
@@ -17,12 +18,15 @@ What must stay true, and what breaks if it does not:
     line passes the discrimination rule only if its direct difference is itself below DISCRIM_MIN of the
     scale. USER RULING (Oct 12, 2026): the rule is kept on all five tangents; the stretch/amplitude lines
     fail it until the remainder is isolated -- see the SDD ledger
-    (.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/progress.md) and CHANGELOG. That remainder
+    (.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/progress.md) and CHANGELOG; the fast-suite
+    wrapper deselects only those two parametrizations (Task 9, controller amendment E, Oct 13, 2026), and
+    scripts/ps1loop_convergence_ladder.py measures the remainder per ps_1loop setting. That remainder
     is non-smooth in k, peaks at k = 0.13-0.25 h/Mpc and is 11-14x the primal remainder ps - clax - D
     (scratch job 24845). The direct ps-vs-clax numbers are logged and printed but not asserted: they
     contain dD/dt, which along the AP directions is large (scratch job 24167, lcdm_fiducial: alpha_para
     3.1 / 10.4 / 8.7% at l = 0 / 2 / 4).
-  * primal guard (same test): at x0, ps - D matches clax at the same thresholds and discrimination rule.
+  * primal guard (test_primal_closure_guard): at x0, ps - D matches clax at the same thresholds and
+    discrimination rule.
     If it breaks, D is mis-assembled (a sign, a missing monomial, a wrong bias-point value), and the
     derivative closure built on it means nothing.
   * ps-AD-vs-FD: ps_1loop's own jvp equals its central differences to FD_THRESHOLD = 1e-4 (tightened
@@ -31,6 +35,8 @@ What must stay true, and what breaks if it does not:
   * traced-IR primal: the differentiable IR split clax uses here reproduces the validated NumPy IR path
     to 1e-8, so the clax derivatives are taken at the validated spectra.
 
+The setup, D and the closure numerics live in tests/ps1loop_bridge.py (br.tangent_setup,
+br.predicted_difference_at, br.primal_closure, br.tangent_closure), shared with the convergence ladder.
 D is NumPy-valued (it reads clax's mu-loop through the br.capture_gl_inputs spy), so it cannot be
 jvp'd: dD/dt is the central difference of D at x0 +/- FD_STEP * t, the step ps_1loop's own FD check uses.
 D is smooth in x: its clax pieces run clax's NumPy IR path, whose central differences equal the traced
@@ -50,16 +56,14 @@ import pytest
 
 pytest.importorskip("ps_1loop_jax")
 import jax
-import jax.numpy as jnp
 
-from clax.interpolation import CubicSpline
 from tests import ept_campaign_utils as cu
 from tests import pfs_survey as pfs
 from tests import ps1loop_bridge as br
 
 GRAD_CASES = ("lcdm_fiducial", "massive_nu_030", "w0wa_m07_m10")
 Z = 0.38
-FD_STEP = 1e-4
+FD_STEP = br.FD_STEP   # 1e-4: central-difference step for dD/dt and for ps AD vs FD (bridge)
 # ps AD vs its own central differences: tightened 1e-2 -> 1e-4 by controller ruling (measured worst 1.4e-6,
 # central-difference floor ~1e-8 at FD_STEP = 1e-4). Never widened.
 FD_THRESHOLD = 1e-4
@@ -80,29 +84,9 @@ def _inputs(case):
 
 
 def _setup(case):
+    """(ps_fun, clax_fun, x0, tangents) at Z with ps_1loop's default settings (br.tangent_setup)."""
     inp, mask, theta = _inputs(case)
-    k_h, kw = jnp.asarray(inp["k_h"]), jnp.asarray(inp["k_h"][mask])
-    model = br.ps_model(inp["rbao"])
-
-    def ps_fun(f, a_perp, a_para, pk):
-        return br.ps_multipoles_jax(model, k_h, pk, inp["h"], f, a_perp, a_para, theta, kw,
-                                    ap=True, ndens=br.NDENS_PROBE)
-
-    def clax_fun(f, a_perp, a_para, pk, ir_traced=True):
-        hratio, Dratio = 1.0 / a_para, a_perp
-        e = br.clax_ept(inp, pk=pk, f=f, hratio=hratio, Dratio=Dratio, ir_traced=ir_traced)
-        cb = br.to_clax(theta, f=f, ndens=br.NDENS_PROBE, Pd2d2_0=e.Pd2d2_0, hratio=hratio, Dratio=Dratio)
-        return br.clax_multipoles_jax(e, cb)[:, mask]
-
-    a_perp, a_para = br.ap_alphas(inp["hratio"], inp["Dratio"])
-    pk0 = jnp.asarray(inp["pk"])
-    x0 = (jnp.asarray(inp["f"]), jnp.asarray(a_perp), jnp.asarray(a_para), pk0)
-    t_stretch = pk0 * CubicSpline(jnp.log(k_h), jnp.log(pk0)).derivative(jnp.log(k_h))   # P dlnP/dlnk
-    one, zero, zpk = jnp.asarray(1.0), jnp.asarray(0.0), jnp.zeros_like(pk0)
-    tangents = {"f": (one, zero, zero, zpk), "a_perp": (zero, one, zero, zpk),
-                "a_para": (zero, zero, one, zpk), "stretch": (zero, zero, zero, t_stretch),
-                "amplitude": (zero, zero, zero, pk0)}
-    return ps_fun, clax_fun, x0, tangents
+    return br.tangent_setup(inp, theta, mask)
 
 
 def _check(case, layer, pairs, thresholds, kw):
@@ -137,38 +121,17 @@ def test_traced_ir_primal_matches_numpy_ir(case):
     assert e <= 1e-8, f"ERROR {case} traced IR primal differs from numpy IR by {e:.3e}"
 
 
-def _predicted_difference(inp, theta, kw, x):
-    """D(x) = documented ps - clax on the total multipoles (3, Nw) at x = (f, a_perp, a_para, P_lin):
-    br.predicted_total_difference on a copy of the shared inputs carrying x (AP: hratio = 1/a_para,
-    Dratio = a_perp, the convention of clax_fun)."""
-    f, a_perp, a_para, pk = x
-    inp_x = {**inp, "f": float(f), "hratio": 1.0 / float(a_para), "Dratio": float(a_perp),
-             "pk": np.asarray(pk, dtype=float)}
-    parts = br.predicted_total_difference(inp_x, theta, kw, ndens=br.NDENS_PROBE)
-    return parts["ctr"] + parts["closure"], parts
-
-
-def test_cross_code_tangents(case):
-    """ps-vs-clax-closed gate (module docstring): rel(jvp_ps - dD/dt, jvp_clax) <= br.COEF_THRESHOLDS[l]
-    per tangent and l, and <= DISCRIM_RATIO x the direct rel(jvp_ps, jvp_clax) wherever the direct value
-    exceeds DISCRIM_MIN. Logged per tangent and l: direct, closed, ratio, k of the worst closed point, and
-    the sizes of the counterterm-map and closure-line parts of dD/dt (fraction of max|jvp_clax|). The
-    primal guard (ps - D vs clax at x0) is asserted with the same thresholds and discrimination rule: it
-    checks how D is assembled."""
-    ps_fun, clax_fun, x0, tangents = _setup(case)
+def test_primal_closure_guard(case):
+    """Primal guard (module docstring): rel(ps - D, clax) at x0 <= br.COEF_THRESHOLDS[l], and <= DISCRIM_RATIO
+    x the direct rel(ps, clax) wherever the direct value exceeds DISCRIM_MIN. It checks how D is assembled;
+    the derivative closure of test_cross_code_tangents is built on the same D."""
+    ps_fun, clax_fun, x0, _ = _setup(case)
     inp, mask, theta = _inputs(case)
     kw = inp["k_h"][mask]
-
-    d0, _ = _predicted_difference(inp, theta, kw, x0)
-    ps0, cl0 = np.asarray(ps_fun(*x0)), np.asarray(clax_fun(*x0))
-    primal = {f"l{l}": {"direct": cu.rel(ps0[i], cl0[i]), "closed": cu.rel(ps0[i] - d0[i], cl0[i]),
-                        "k": float(kw[int(np.argmax(np.abs(ps0[i] - d0[i] - cl0[i])))])}
-              for i, l in enumerate(br.ELLS)}
+    primal = br.primal_closure(ps_fun, clax_fun, inp, theta, kw, x0)
     print(f"{case} [primal] ps-vs-clax direct/closed % " + " | ".join(
         f"l{l} {100 * primal[f'l{l}']['direct']:.3f}/{100 * primal[f'l{l}']['closed']:.3f}" for l in br.ELLS))
-
-    direct_errs, closed_errs, lines = {}, {}, []
-    # primal guard: ps - D vs clax at x0, same thresholds and discrimination rule as the tangents
+    lines = []
     for l in br.ELLS:
         pr, thr = primal[f"l{l}"], br.COEF_THRESHOLDS[f"l{l}"]
         if not np.isfinite(pr["closed"]) or pr["closed"] > thr:
@@ -177,41 +140,44 @@ def test_cross_code_tangents(case):
         if pr["direct"] > DISCRIM_MIN and not pr["closed"] <= DISCRIM_RATIO * pr["direct"]:
             lines.append(f"ERROR {case} primal discrimination l={l}: closed {100 * pr['closed']:.3f}% > "
                          f"{DISCRIM_RATIO} x direct {100 * pr['direct']:.3f}% at k={pr['k']:.3f}")
-    for name, t in tangents.items():
-        jps = np.asarray(jax.jvp(ps_fun, x0, t)[1])
-        jcl = np.asarray(jax.jvp(clax_fun, x0, t)[1])
-        dp, pp = _predicted_difference(inp, theta, kw, tuple(x + FD_STEP * dx for x, dx in zip(x0, t)))
-        dm, pm = _predicted_difference(inp, theta, kw, tuple(x - FD_STEP * dx for x, dx in zip(x0, t)))
-        dD = (dp - dm) / (2.0 * FD_STEP)
-        d_ctr = (pp["ctr"] - pm["ctr"]) / (2.0 * FD_STEP)
-        d_clo = (pp["closure"] - pm["closure"]) / (2.0 * FD_STEP)
-        cells = []
-        for i, l in enumerate(br.ELLS):
-            key, thr = f"d/d{name}:l{l}", br.COEF_THRESHOLDS[f"l{l}"]
-            scale = max(float(np.max(np.abs(jcl[i]))), 1e-300)
-            direct = cu.rel(jps[i], jcl[i])
-            resid = jps[i] - dD[i] - jcl[i]
-            closed = cu.rel(jps[i] - dD[i], jcl[i])
-            k_c = float(kw[int(np.argmax(np.abs(resid)))]) if np.all(np.isfinite(resid)) else float("nan")
-            k_d = float(kw[int(np.argmax(np.abs(jps[i] - jcl[i])))])
-            ratio = closed / direct if direct > 0 else float("nan")
-            direct_errs[key] = {"err": direct, "k": k_d}
-            closed_errs[key] = {"err": closed, "k": k_c, "direct": direct, "ratio": ratio,
-                                "dD_ctr": float(np.max(np.abs(d_ctr[i])) / scale),
-                                "dD_closure": float(np.max(np.abs(d_clo[i])) / scale)}
-            if not np.isfinite(closed) or closed > thr:
-                lines.append(f"ERROR {case} ps-vs-clax-closed d/d{name} l={l}: {100 * closed:.3f}% > "
-                             f"{100 * thr:.1f}% at k={k_c:.3f} (direct {100 * direct:.3f}%)")
-            if direct > DISCRIM_MIN and not closed <= DISCRIM_RATIO * direct:
-                lines.append(f"ERROR {case} discrimination d/d{name} l={l}: closed {100 * closed:.3f}% > "
-                             f"{DISCRIM_RATIO} x direct {100 * direct:.3f}% (ratio {ratio:.3f}) at k={k_c:.3f}")
-            cells.append(f"l{l} {100 * direct:.3f}/{100 * closed:.3f}% r={ratio:.2f} k={k_c:.3f}")
-        print(f"{case} [ps-vs-clax-closed] d/d{name} direct/closed: " + " | ".join(cells))
+    br.log_record(layer="grad", case=case, z=Z, preset="primal-guard",
+                  errors={f"l{l}": {"err": primal[f"l{l}"]["closed"], "k": primal[f"l{l}"]["k"],
+                                    "direct": primal[f"l{l}"]["direct"]} for l in br.ELLS})
+    assert not lines, "\n".join(lines)
+
+
+@pytest.mark.parametrize("tangent", br.TANGENTS)
+def test_cross_code_tangents(case, tangent):
+    """ps-vs-clax-closed gate (module docstring) along one tangent: rel(jvp_ps - dD/dt, jvp_clax) <=
+    br.COEF_THRESHOLDS[l] per l, and <= DISCRIM_RATIO x the direct rel(jvp_ps, jvp_clax) wherever the direct
+    value exceeds DISCRIM_MIN. Logged per l: direct, closed, ratio, k of the worst closed point, and the sizes
+    of the counterterm-map and closure-line parts of dD/dt (fraction of max|jvp_clax|)."""
+    ps_fun, clax_fun, x0, tangents = _setup(case)
+    inp, mask, theta = _inputs(case)
+    kw = inp["k_h"][mask]
+    rec = br.tangent_closure(ps_fun, clax_fun, inp, theta, kw, x0, tangents[tangent], fd_step=FD_STEP)
+
+    direct_errs, closed_errs, lines, cells = {}, {}, [], []
+    for l in br.ELLS:
+        r, key, thr = rec[f"l{l}"], f"d/d{tangent}:l{l}", br.COEF_THRESHOLDS[f"l{l}"]
+        direct, closed, ratio, k_c = r["direct"], r["closed"], r["ratio"], r["k"]
+        direct_errs[key] = {"err": direct, "k": r["k_direct"]}
+        closed_errs[key] = {"err": closed, "k": k_c, "direct": direct, "ratio": ratio,
+                            "dD_ctr": r["dD_ctr"], "dD_closure": r["dD_closure"]}
+        if not np.isfinite(closed) or closed > thr:
+            lines.append(f"ERROR {case} ps-vs-clax-closed d/d{tangent} l={l}: {100 * closed:.3f}% > "
+                         f"{100 * thr:.1f}% at k={k_c:.3f} (direct {100 * direct:.3f}%)")
+        if direct > DISCRIM_MIN and not closed <= DISCRIM_RATIO * direct:
+            lines.append(f"ERROR {case} discrimination d/d{tangent} l={l}: closed {100 * closed:.3f}% > "
+                         f"{DISCRIM_RATIO} x direct {100 * direct:.3f}% (ratio {ratio:.3f}) at k={k_c:.3f}")
+        cells.append(f"l{l} {100 * direct:.3f}/{100 * closed:.3f}% r={ratio:.2f} k={k_c:.3f}")
+    print(f"{case} [ps-vs-clax-closed] d/d{tangent} direct/closed: " + " | ".join(cells))
 
     br.log_record(layer="grad", case=case, z=Z, preset="ps-vs-clax", errors=direct_errs)
     br.log_record(layer="grad", case=case, z=Z, preset="ps-vs-clax-closed", errors=closed_errs,
-                  extra={"primal": primal, "fd_step": FD_STEP})
-    print(f"{case} [ps-vs-clax] (not asserted) {br.worst(direct_errs)}; [ps-vs-clax-closed] {br.worst(closed_errs)}")
+                  extra={"fd_step": FD_STEP})
+    print(f"{case} [ps-vs-clax] d/d{tangent} (not asserted) {br.worst(direct_errs)}; "
+          f"[ps-vs-clax-closed] {br.worst(closed_errs)}")
     assert not lines, "\n".join(lines)
 
 
