@@ -32,7 +32,7 @@ jax.config.update("jax_enable_x64", True)
 from clax.params import CosmoParams, PrecisionParams
 from clax.background import background_solve
 from clax.thermodynamics import thermodynamics_solve
-from clax.perturbations import perturbations_solve, tensor_perturbations_solve
+from clax.perturbations import perturbations_solve, perturbations_solve_mpk, tensor_perturbations_solve
 from clax.lensing import compute_cl_pp
 from clax.harmonic import compute_cl_bb
 
@@ -105,6 +105,10 @@ def main():
     t_pt = time.time() - t0
     print(f"  perturbations_solve: {t_pt:.2f}s")
     print(f"  source_phi_plus_psi shape: {tuple(pt.source_phi_plus_psi.shape)}")
+    # Built after the timed solve above so t_pt stays the C_l solve alone;
+    # blocked on so it cannot leak into the compute_cl_pp timings below.
+    pt_mpk = perturbations_solve_mpk(params, prec, bg, th)   # nonlinear lookups need tau0 (#42)
+    jax.block_until_ready(pt_mpk.delta_m)
     print()
 
     # --- Step 2: compute_cl_pp at three nonlinear settings ---
@@ -115,6 +119,7 @@ def main():
             times, cl_pp = time_call(
                 compute_cl_pp, pt, params, bg, th, args.l_max,
                 nonlinear=nl,
+                pt_mpk=pt_mpk,
                 n_warmup=args.n_warmup, n_repeat=args.n_repeat,
             )
             t_med = float(np.median(times))

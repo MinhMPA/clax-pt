@@ -81,6 +81,9 @@ def compute_pk_from_perturbations(
     Extracts delta_m from the perturbation output grid, interpolating in
     both conformal time (tau) and wavenumber (k).
 
+    Raises (eqx runtime error) if tau(z) lies outside pt's tau grid; for z near 0
+    pass a tau0-complete result from perturbations_solve_mpk (smsharma/clax#42).
+
     Args:
         pt: Perturbation results containing delta_m(k, tau)
         bg: Background results (for tau(z) conversion)
@@ -103,10 +106,15 @@ def compute_pk_from_perturbations(
     log_k_pt = jnp.log(pt.k_grid)
     log_k_eval = jnp.log(k_eval)
 
-    # Always interpolate along tau to keep this path vmap-safe over z. At
-    # z=0 the spline endpoint reproduces ``pt.delta_m[:, -1]`` exactly,
-    # so there is no accuracy cost relative to the previous fast path.
-    tau_z = jnp.clip(tau_of_z(bg, z), tau_grid[0], tau_grid[-1])
+    # Always interpolate along tau to keep this path vmap-safe over z.
+    # tau(z) must lie inside the solved grid: perturbations_solve stops at
+    # 0.999*tau0, so a z~0 lookup on its result would clamp to z~0.003
+    # (-0.33% in P; smsharma/clax#42). The guard raises instead; the clip
+    # only absorbs its 1e-8 tolerance band so the spline index stays in range.
+    from clax.perturbations import _raise_if_tau_outside_grid
+    tau_z = _raise_if_tau_outside_grid(
+        tau_of_z(bg, z), tau_grid, "compute_pk_from_perturbations")
+    tau_z = jnp.clip(tau_z, tau_grid[0], tau_grid[-1])
     def _interp_single_k(delta_m_k):
         return CubicSpline(tau_grid, delta_m_k).evaluate(tau_z)
     delta_m_at_z = jax.vmap(_interp_single_k)(pt.delta_m)
@@ -131,6 +139,9 @@ def compute_linear_matter_pk_from_perturbations(
 
     Reuses the perturbation-table interpolation for ``delta_m(k, z)`` and
     applies the primordial normalization at the requested ``k`` values.
+
+    Raises (eqx runtime error) if tau(z) lies outside pt's tau grid; for z near 0
+    pass a tau0-complete result from perturbations_solve_mpk (smsharma/clax#42).
 
     Args:
         pt: perturbation results containing ``delta_m(k, tau)``

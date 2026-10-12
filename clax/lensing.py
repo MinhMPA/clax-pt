@@ -29,7 +29,7 @@ from jaxtyping import Array, Float
 from clax.background import BackgroundResult
 from clax.bessel import spherical_jl
 from clax.params import CosmoParams, PrecisionParams
-from clax.perturbations import PerturbationResult
+from clax.perturbations import MatterPerturbationResult, PerturbationResult
 from clax.primordial import primordial_scalar_pk
 
 
@@ -124,6 +124,8 @@ def _halofit_modulator(
     th,
     n_z: int = 100,
     k_max_extend: float = 20.0,
+    *,
+    pt_mpk: MatterPerturbationResult,
 ) -> Float[Array, "Nk Ntau"]:
     """Build sqrt(R(k, tau)) modulator for source-Limber NL injection.
 
@@ -163,6 +165,10 @@ def _halofit_modulator(
             Default 20 — log-log power-law extension of ``pt.k_grid`` to
             this value, mirroring CLASS's dedicated nonlinear k-grid.
             Set to 0 to disable extension.
+        pt_mpk: tau0-complete matter solve (perturbations_solve_mpk). Every
+            P_lin(k, z) is read from it -- the z-grid starts at 0, beyond the
+            C_l solve's 0.999*tau0 grid (smsharma/clax#42) -- evaluated at
+            ``pt.k_grid``, so the output stays on ``pt``'s lattice.
 
     Returns:
         ``sqrt(R(k, tau))`` of shape ``(Nk, Ntau)`` on the
@@ -191,8 +197,10 @@ def _halofit_modulator(
 
     # --- P_lin(k_pt, z) on the native pt.k_grid via the public helper ---
     def _pk_lin_on_pt_grid(z):
+        # tau0-complete solve, evaluated at pt's k: explicit k, not an array
+        # index, so a pt_mpk at another precision cannot misalign.
         return compute_linear_matter_pk_from_perturbations(
-            pt, bg, params, pt.k_grid, z=z)
+            pt_mpk, bg, params, pt.k_grid, z=z)
 
     pk_lin_pt_z = jax.vmap(_pk_lin_on_pt_grid)(z_grid)  # (n_z, Nk_pt)
 
@@ -265,6 +273,8 @@ def _ept_modulator(
     params: CosmoParams,
     bg: BackgroundResult,
     th,
+    *,
+    pt_mpk: MatterPerturbationResult,
 ) -> Float[Array, "Nk Ntau"]:
     """Build sqrt(R(k, tau)) modulator for source-Limber EPT injection.
 
@@ -279,6 +289,18 @@ def _ept_modulator(
     ``k <= 0.3 h/Mpc``; subleading EFT counterterm time dependence is
     neglected.
 
+    Args:
+        pt: C_l perturbation solve; supplies only the output lattice
+            (``k_grid``, ``tau_grid``).
+        params: cosmological parameters
+        bg: background results
+        th: thermodynamics results
+        pt_mpk: tau0-complete matter solve (perturbations_solve_mpk). Both
+            P_NL (the EPT run at z=0) and P_lin(z=0) are read from it -- the
+            z=0 lookup lies beyond the C_l solve's 0.999*tau0 grid
+            (smsharma/clax#42) -- evaluated at explicit k, so the output
+            stays on ``pt``'s lattice.
+
     Returns ``sqrt(R(k, tau))`` of shape ``(Nk, Ntau)`` on the
     ``pt.k_grid x pt.tau_grid`` lattice. The CLASS source-multiplication
     recipe applies this directly to the lensing source.
@@ -291,7 +313,9 @@ def _ept_modulator(
 
     # --- Run EPT once at z=0 (Mpc/h units inside, convert to Mpc^-1) ---
     # total-matter field: the ratio below divides by the matter P_lin (C0)
-    ept = compute_ept_from_clax(params, bg, pt, z=0.0, field="m")
+    # Numerator AND denominator from pt_mpk: splitting them across solves
+    # would turn the old second-order residual into a first-order one.
+    ept = compute_ept_from_clax(params, bg, pt_mpk, z=0.0, field="m")
     pk_mm_h = pk_mm_real(ept)                  # (Mpc/h)^3 on EPT k-grid (h/Mpc)
     k_h = ept_kgrid()                           # h/Mpc
     k_ept_mpc = jnp.array(k_h) * h              # Mpc^-1
@@ -306,7 +330,7 @@ def _ept_modulator(
 
     # P_lin(k_eval, z=0) on overlapping grid
     pk_lin_eval = compute_linear_matter_pk_from_perturbations(
-        pt, bg, params, k_eval, z=0.0)
+        pt_mpk, bg, params, k_eval, z=0.0)
 
     # R0(k) = P_NL/P_lin at z=0, defaulting to 1.0 outside overlap
     R0_eval = jnp.where(pk_lin_eval > 0,
@@ -342,6 +366,7 @@ def compute_cl_pp(
     l_max: int,
     *,
     nonlinear: str = "none",
+    pt_mpk: MatterPerturbationResult | None = None,
 ) -> Float[Array, "Nl"]:
     """Compute C_l^phiphi via source-based Limber (CLASS-accurate at all l).
 
@@ -387,6 +412,10 @@ def compute_cl_pp(
               k <= 0.3 h/Mpc; subleading EFT counterterm time dependence
               neglected.
             Anything else raises ``ValueError``.
+        pt_mpk: tau0-complete matter solve (perturbations_solve_mpk for the
+            same params/prec). REQUIRED when ``nonlinear`` is "halofit" or
+            "ept": their P_lin lookups start at z=0, beyond ``pt``'s grid,
+            which stops at 0.999*tau0 (smsharma/clax#42). Ignored for "none".
 
     Returns:
         C_l^phiphi array of shape (l_max+1,), indexed by l (l=0,1 are zero)
@@ -395,6 +424,11 @@ def compute_cl_pp(
         raise ValueError(
             f"compute_cl_pp: unknown nonlinear={nonlinear!r}. "
             f"Accepted values: 'none', 'halofit', 'ept'.")
+    if nonlinear != "none" and pt_mpk is None:
+        raise ValueError(
+            f"compute_cl_pp: nonlinear={nonlinear!r} needs pt_mpk="
+            "perturbations_solve_mpk(params, prec, bg, th): its P_lin lookups "
+            "start at z=0, beyond the C_l solve's 0.999*tau0 grid.")
 
     # --- Section A: Setup (all JAX, no numpy) ---
     tau_grid = pt.tau_grid
@@ -421,9 +455,9 @@ def compute_cl_pp(
 
     # NL injection: S(k,tau) -> S(k,tau) * sqrt(R(k, z(tau)))
     if nonlinear == "halofit":
-        S_transfer = S_transfer * _halofit_modulator(pt, params, bg, th)
+        S_transfer = S_transfer * _halofit_modulator(pt, params, bg, th, pt_mpk=pt_mpk)
     elif nonlinear == "ept":
-        S_transfer = S_transfer * _ept_modulator(pt, params, bg, th)
+        S_transfer = S_transfer * _ept_modulator(pt, params, bg, th, pt_mpk=pt_mpk)
 
     log_k = jnp.log(k_grid)
     dlnk = jnp.diff(log_k)

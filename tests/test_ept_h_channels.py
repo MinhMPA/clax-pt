@@ -23,7 +23,8 @@ from clax.ept import compute_ept_from_clax, pk_mm_real
 
 @pytest.fixture(scope="module")
 def stage_setup(request):
-    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5")
+    # z=0 EPT needs the tau0-complete matter solve (smsharma/clax#42).
+    params, _prec, bg, _th, pt = request.getfixturevalue("pipeline_fast_cl_k5_mpk")
     return params, bg, pt
 
 
@@ -45,26 +46,49 @@ def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
     per-k relative errors at BAO scales. GREEN after the k_mpc fix
     (job 14140): residual was the frozen-pk_nw share, median 3.294e-02.
 
-    FURTHER CLOSED (job 14146, fix/ir-resummation-traced @ 322a6ab): with
+    FURTHER CLOSED (GPU-allocated job 14146, actual JAX platform unverified:
+    test_ept_gradients.py's import-time CPU pin; C_l solve,
+    fix/ir-resummation-traced @ 322a6ab; figures here are as measured THEN): with
     the frozen-pk_nw IR split also traced through JAX now (commit 01b5162,
     wired in by 322a6ab), this frozen-bg/pt stage test (no full pipeline
     re-solve, so no discretization noise -- unlike the end-to-end h test in
     ``tests/test_ept_gradients.py``) measured median rel 9.825e-03
     (max 3.619e-02) over 31 modes in [0.05,0.3] -- ~3.35x lower than the
-    prior 3.294e-02. The bound below (0.02) is 2x the measured 9.825e-03
-    (=0.01965), rounded up to one significant figure -- never tighter than
-    2x measured, per this branch's ratchet rule.
+    prior 3.294e-02.
 
-    Note on the surviving 9.825e-03: it is NOT a further-openable share of
-    the now-closed frozen-pk_nw channel (that channel's own d(pk_nw)/dh
-    contribution flows exactly through the traced splitter). This test
-    computes ``pk_mm_real`` through ``compute_ept_from_clax`` with the same
-    frozen-bg/pt setup as ``test_grad_h_end_to_end_from_cosmoparams_matches_fd``
-    in ``tests/test_ept_gradients.py``, so it shares that test's leading
-    suspect: the DST grid endpoints/``in_range`` mask inside
-    ``_ir_resummation_jax``, built from a concrete
-    ``h_conc = stop_gradient(h)`` that moves under central FD but is pinned
-    under AD (see that test's FINDING docstring for the full mechanism)."""
+    CURRENT (frozen bg/pt): this branch (tau0-complete matter solve via
+    ``pipeline_fast_cl_k5_mpk``, job 21738) measures median 1.926e-03 (max
+    1.526e-02); UNMODIFIED upstream e894567 (C_l solve via
+    ``pipeline_fast_cl_k5``, job 21814) measures median 1.930e-03 (max
+    1.520e-02); a GPU run of an unpinned copy of this test (job 22431) gives
+    median 1.924e-03 on the matter-solve fixture. So this test is UNAFFECTED
+    by the tau-grid-end change (smsharma/clax#42): it freezes bg/pt, so the
+    tau grid end never moves with h. It differentiates only the EPT stage
+    (``jacfwd``, bg/pt frozen), so neither ``thermodynamics_solve`` nor the
+    perturbation solve is in its differentiated path; it does not show the
+    CPU/GPU AD spread observed for the end-to-end h test (see OBSERVED AD
+    SPREAD in ``tests/test_ept_gradients.py``): its own CPU and GPU values
+    agree to 0.1%. Its documented 9.825e-03 was already out of date on
+    upstream: the upstream figure above differs from GPU-allocated job
+    14146's 9.825e-03 (322a6ab; actual JAX platform unverified). This branch
+    measures 1.926e-03 on CPU and 1.924e-03 on GPU, so the platform does not
+    explain the difference; the cause was not investigated.
+
+    The surviving median is NOT a further-openable share of the now-closed
+    frozen-pk_nw channel (that channel's own d(pk_nw)/dh contribution flows
+    exactly through the traced splitter). Its cause is not isolated. The DST
+    grid endpoints/``in_range`` mask inside ``_ir_resummation_jax`` (built
+    from a concrete ``h_conc = stop_gradient(h)`` that moves under central FD
+    but is pinned under AD; see the HISTORY section of the docstring of
+    ``test_grad_h_end_to_end_from_cosmoparams_matches_fd`` in
+    ``tests/test_ept_gradients.py`` for the mechanism) remain a candidate, as
+    for that test's residual, but nothing measured so far singles it out.
+
+    Ratchet arithmetic: 2x the largest of the current measurements
+    (1.930e-03 CPU upstream; 1.926e-03 CPU and 1.924e-03 GPU on this
+    branch) is 3.86e-03, rounded up to one significant figure is 4e-3. The
+    bound is tightened from 0.02 (2x the stale 9.825e-03) to 0.004. The GPU
+    figure (job 22431) confirms the 0.004 bar on a second platform."""
     if fast_mode:
         pytest.skip("uses the shared full-mode pipeline fixture")
     params, bg, pt = request.getfixturevalue("stage_setup")
@@ -82,18 +106,25 @@ def test_stage_grad_h_matches_fd_per_k(fast_mode, request):
     med = float(np.median(rel))
     print(f"\nper-k d(pk_mm)/dh AD-vs-FD: median rel {med:.3e} "
           f"(max {float(rel.max()):.3e}) over {int(sel.sum())} modes in [0.05,0.3]")
-    # 0.02 = 2x the measured 9.825e-03 (job 14146), rounded up to one
-    # significant figure -- never tighter than 2x measured. See docstring:
-    # the traced IR-resummation splitter closed most of the frozen-pk_nw
+    # 0.004 = 2x the largest current measurement (1.930e-03, upstream e894567
+    # C_l solve, CPU job 21814; this branch's matter solve gave 1.926e-03 on
+    # CPU, job 21738, and 1.924e-03 on GPU, job 22431) = 3.86e-03, rounded up
+    # to one significant figure -- never
+    # tighter than 2x measured. Tightened from 0.02, which was 2x the 9.825e-03
+    # of job 14146; upstream e894567 already measures 1.930e-03 (see docstring).
+    # The traced IR-resummation splitter closed most of the frozen-pk_nw
     # share on top of the pre-existing k_mpc fix; the surviving median is
-    # attributed to the frozen DST-grid-endpoint/in_range channel, not a
-    # further pk_nw share.
-    assert med < 0.02, (
-        f"median per-k AD-vs-FD rel err {med:.3e} >= 0.02: either the "
-        f"k_mpc resampling channel (job 13313: -9.48e4), the frozen-pk_nw "
-        f"IR split (closed by commit 01b5162/322a6ab), or the DST-grid-"
-        f"endpoint/in_range channel (see the FINDING in "
-        f"tests/test_ept_gradients.py's h end-to-end test) has regressed")
+    # not attributed to a specific channel.
+    assert med < 0.004, (
+        f"median per-k AD-vs-FD rel err {med:.3e} >= 0.004: either the "
+        f"k_mpc resampling channel (job 13313: -9.48e4) or the frozen-pk_nw "
+        f"IR split (closed by commit 01b5162/322a6ab) has regressed, or the "
+        f"unattributed residual has grown (candidate: the DST-grid-endpoint/"
+        f"in_range channel, see the HISTORY section in "
+        f"tests/test_ept_gradients.py's h end-to-end test docstring; "
+        f"measured 1.926e-03 (CPU, job 21738) and 1.924e-03 (GPU, job "
+        f"22431) on the matter solve, 1.930e-03 on upstream e894567, job "
+        f"21814)")
 
 
 def test_growth_rate_is_not_hardcoded(request, fast_mode):
@@ -114,7 +145,8 @@ def test_growth_rate_is_not_hardcoded(request, fast_mode):
         f"(the hardcoded-0.8 fallback is still active)")
     # Physical oracle bound, independent of the f_of_loga implementation:
     # LCDM z=0 has f ~ Omega_m**0.55 = 0.315**0.55 ~ 0.53 (measured 0.5258,
-    # GPU job 14140). Catches a broken f_grid/spline that the
+    # GPU-allocated job 14140, actual JAX platform unverified). Catches a
+    # broken f_grid/spline that the
     # self-referential check above cannot.
     assert 0.45 < f_val < 0.60, (
         f"EPT growth rate {f_val} outside the physical LCDM z=0 range")

@@ -42,7 +42,7 @@ All comparisons at Planck 2018 best-fit LCDM, z=0.38, k < 0.30 h/Mpc:
 
 Sub-percent on all monopoles and quadrupoles. Hexadecapole within 2% (limited by the small signal amplitude and zero-crossings — see project memory `project_ept_hexadecapole_floor`).
 
-The `clax.ept` module additionally feeds CMB lensing C_l^phiphi corrections via `compute_cl_pp(... nonlinear="ept")`.
+The `clax.ept` module additionally feeds CMB lensing C_l^phiphi corrections via `compute_cl_pp(... nonlinear="ept", pt_mpk=...)` (`pt_mpk` is the solve that reaches today, `perturbations_solve_mpk`).
 
 ## Accuracy comparison against CLASS v3.3.4
 
@@ -85,8 +85,11 @@ Lensing algorithm sub-0.2% at all l=10-2000 for TT and EE (tested with CLASS unl
 
 ### Lensing potential C_l^phiphi
 
-`clax.compute_cl_pp(pt, params, bg, th, l_max, *, nonlinear="none")` uses
-the source-based Limber kernel (CLASS `transfer.c` + `harmonic.c`):
+`clax.compute_cl_pp(pt, params, bg, th, l_max, *, nonlinear="none", pt_mpk=None)` uses
+the source-based Limber kernel (CLASS `transfer.c` + `harmonic.c`).
+`pt_mpk` (from `perturbations_solve_mpk`) is required for `nonlinear="halofit"`
+and `"ept"`, whose P_lin lookups start at z=0, beyond the C_l solve's grid; it
+is ignored for `"none"`.
 
 With `pt_k_max_cl >= 5.0 Mpc^-1` (required for Halofit's σ(R) bisection),
 measured residuals at the default cosmology:
@@ -202,13 +205,15 @@ params = CosmoParams()
 bg = clax.background_solve(params, prec)
 th = clax.thermodynamics_solve(params, prec, bg)
 pt = perturbations_solve(params, prec, bg, th)
+# nonlinear lookups start at z=0, which needs the solve that reaches today (#42)
+pt_mpk = clax.perturbations_solve_mpk(params, prec, bg, th)
 cl_tt = compute_cl_tt_interp(pt, params, bg, [30, 100, 200])
 cl_ee = compute_cl_ee_interp(pt, params, bg, [30, 100, 200])
 
 # CMB lensing potential C_l^phiphi (linear or Halofit-corrected)
 cl_pp_lin = clax.compute_cl_pp(pt, params, bg, th, l_max=2500)
 cl_pp_nl  = clax.compute_cl_pp(pt, params, bg, th, l_max=2500,
-                                nonlinear="halofit")
+                                nonlinear="halofit", pt_mpk=pt_mpk)
 
 # Lens the unlensed CMB spectra
 cl_tt_lensed, cl_ee_lensed, cl_te_lensed, cl_bb_lensed = clax.lens_cls(
