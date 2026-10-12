@@ -164,9 +164,25 @@ files (§3); clax-pt's IR-off path is first checked against them on its own.
 
 At `lcdm_fiducial`, `massive_nu_030`, `w0wa_m07_m10`, z = 0.38, at the PFS bias point
 for z = 0.38: forward-mode tangents of P_ℓ along f, α⊥, α∥, a k-stretch
-t = P·dlnP/dlnk and the amplitude t = P. Cross-code gate: §5.1 thresholds on the
-tangent spectra. ps_1loop's own AD vs central differences (step 1e-4): 1% (CLAUDE.md
-gradient target). clax-pt's own AD-vs-FD tests already exist.
+t = P·dlnP/dlnk and the amplitude t = P.
+
+Cross-code gate (derivative closure, user decision Oct 10, 2026):
+- D(x), x = (f, α⊥, α∥, P_lin), is the predicted ps − clax on the total P_ℓ at the bias point.
+  It is the counterterm/FoG/a0 map (§4.2 items 1-3) plus the 13 closure lines (items 4-5), each
+  monomial times its bias-point value (`br.predicted_total_difference`).
+- dD/dt is a central difference of D at x0 ± 1e-4·t along each tangent. D reads clax's μ-loop
+  through a spy, so it cannot be differentiated with jax.
+- Gate: rel(jvp_ps − dD/dt, jvp_clax) ≤ the §5.1 thresholds, per tangent and ℓ.
+- Discrimination rule: where the direct rel(jvp_ps, jvp_clax) > 1e-3, the closed residual must be
+  ≤ 0.5 × direct.
+- Primal guard: ps − D vs clax at x0, with the same thresholds and discrimination rule.
+- The direct ps-vs-clax numbers are logged and printed but not asserted.
+- User ruling (Oct 12, 2026): the discrimination rule stays on all five tangents, and the
+  stretch/amplitude lines fail it until their remainder is isolated (Task 9).
+
+ps_1loop's own AD vs central differences (step 1e-4): 1e-4. This is tightened from the 1%
+CLAUDE.md gradient target: the measured worst is 1.4e-6 and the central-difference floor is ~1e-8.
+clax-pt's own AD-vs-FD tests already exist.
 
 ### 5.6 Error-bar gate
 

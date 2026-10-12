@@ -42,8 +42,6 @@ from tests import ept_campaign_utils as cu
 from tests import ps1loop_bridge as br
 
 REPRO_TOL = 1e-10      # rebuilt vs clax's own projections / coefficients, fraction of their scale
-DISCRIM_MIN = 1e-3     # lines measured below this (fraction of the gate denominator) are negligible
-DISCRIM_RATIO = 0.5    # closure residual <= DISCRIM_RATIO x measured difference above DISCRIM_MIN
 
 
 def pytest_generate_tests(metafunc):
@@ -166,10 +164,10 @@ def test_omitted_projections_close(case_z):
                                        scale=sc)["err"],
                "clax_vs_classpt": (br.coef_error(clax[lab][i], res["classpt"][lab][i], kw, scale=sc)["err"]
                                    if lab in res.get("classpt", {}) else None)}
-        if m > DISCRIM_MIN:
+        if m > br.DISCRIM_MIN:
             rec["ratio"] = ratios[n] = r / m
-            if not ratios[n] <= DISCRIM_RATIO:
-                lines.append(f"ERROR discrimination {n}: closure residual {100 * r:.3f}% > {DISCRIM_RATIO} x "
+            if not ratios[n] <= br.DISCRIM_RATIO:
+                lines.append(f"ERROR discrimination {n}: closure residual {100 * r:.3f}% > {br.DISCRIM_RATIO} x "
                              f"measured {100 * m:.3f}% (ratio {ratios[n]:.3f}) at k={errs[n]['k']:.3f}")
         per_line[n] = rec
     br.log_record(layer="closure", case=case, z=z, preset="omitted-projections+ps-scheme", errors=errs,
@@ -177,6 +175,6 @@ def test_omitted_projections_close(case_z):
     wr = max(ratios, key=ratios.get) if ratios else None
     wk = max(kept, key=lambda n: np.inf if not np.isfinite(kept[n]) else kept[n])
     print(f"{case} z={z:.2f} [omitted closure] {br.worst(errs)}; worst ratio "
-          + (f"{wr} {ratios[wr]:.3f} (of {len(ratios)} lines > {DISCRIM_MIN:.0e})" if wr else "n/a")
+          + (f"{wr} {ratios[wr]:.3f} (of {len(ratios)} lines > {br.DISCRIM_MIN:.0e})" if wr else "n/a")
           + f"; kept-coefficient worst {kept[wk]:.1e}")
     assert not lines, f"{case} z={z:.2f}:\n" + "\n".join(lines)

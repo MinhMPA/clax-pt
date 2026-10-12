@@ -38,6 +38,12 @@ K_NL = 0.45            # h/Mpc; clax-pt hard-codes (k/0.45)^2 in a0/a2 (ept.py p
 NDENS_PROBE = 3.0e-4   # (h/Mpc)^3; only rescales the stochastic monomials
 IR_KS = 0.2            # h/Mpc; ps_1loop default k_s, = CLASS-PT's Sigma^2_BAO cut
 STRUCTURAL_ZERO = 1e-12
+# Discrimination rule (Task 5; reused by Task 7's derivative closure): wherever the measured ps - clax
+# difference exceeds DISCRIM_MIN of the gate denominator, the closure residual (measured minus the
+# documented model difference) must be at most DISCRIM_RATIO of it, so a line cannot pass the closure
+# merely by being small. Below DISCRIM_MIN a line is held to the gate threshold only.
+DISCRIM_MIN = 1e-3
+DISCRIM_RATIO = 0.5
 
 EXACT_MONOMIALS = (("1",), ("b1",), ("b1", "b1"), ("b2",), ("b1", "b2"), ("b2", "b2"),
                    ("bG2",), ("b1", "bG2"), ("bG2", "bG2"), ("b2", "bG2"),
@@ -709,7 +715,8 @@ def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE) -> di
         (`model_difference_factory` evaluated at theta itself; it is polynomial in theta, so this is
         the sum over MODEL_DIFF_MONOMIALS with their values). NOT zero with IR resummation on: ps_1loop
         multiplies the full mu_t-dependence by P_IR(k_t, mu_t), while clax-pt keeps only Legendre moments
-        of the AP-projected k_t^2 P_IR (Task 5: up to ~1% of c0's and ~8% of cfog's coefficient at z = 0.38).
+        of the AP-projected k_t^2 P_IR (Task 5 at z = 0.38, fraction of the coefficient's scale: c0 / cfog =
+        1.0 / 0.9% lcdm_fiducial, 1.0 / 1.8% massive_nu_030, 1.1 / 10.2% w0wa_m07_m10).
       "closure" (items 4-5): the 13 CLOSURE_LINES -- the projections clax-pt omits plus ps's
         IR-resummation scheme -- as `ps_scheme_predicted` per closure monomial times its value at theta.
         The kept coefficient it subtracts is the rebuilt <X_clax>_l - `omitted_predicted`, which equals
