@@ -14,7 +14,8 @@ power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 BAO scale r_s h and AP ratios. With that input, clax-pt and ps_1loop_jax 0.5.0 agree on every one-loop galaxy
 multipole coefficient at the code-accuracy gates (1% / 1% / 2% of the coefficient's scale at l = 0 / 2 / 4), on
 14 cosmologies x z = 0, 0.38, 0.8. This holds once the documented model differences are taken out by exact closed
-forms. After that, the total P_0,2,4 at the PFS bias point agree to <= 0.064% of max|clax P_l| (job 24864).
+forms. After that, the total P_0,2,4 at the PFS bias point agree to <= 0.064% of max|clax P_l| (three cosmologies
+at z = 0.38, job 24864).
 
 Two differences show at PFS precision (Takada et al. 2014: 7 slices, k <= 0.2 h/Mpc):
 1. **The AP treatment of the k^4 fingers-of-god term.** At a BOSS-like cfog = 500 (Mpc/h)^4 with fixed nuisance
@@ -45,8 +46,9 @@ settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
 - **Model-difference closure** (`tests/test_ps1loop_model_difference.py`, 140 tests, job 24110):
   - counterterm / fingers-of-god / a0 map: 42/42, worst c4:l0 0.193%;
   - omitted-projection closure (13 lines, including ps's IR-resummation scheme term): 42/42, worst bG2:l4 0.705%
-    (2% gate) and b1*bG2:l2 0.560% (1% gate); the discrimination rule is asserted on 347 of 546 line x file
-    checks, and all pass;
+    (2% gate) and b1*bG2:l2 0.560% (1% gate). The discrimination rule says: wherever the direct ps - clax
+    difference exceeds 1e-3 of the scale, the closed residual must be <= 0.5 x that difference, so a line cannot
+    pass merely by being small. It is asserted on 347 of 546 line x file checks, and all pass;
   - reproduction of clax's kept projections: identical to the last bit, 42/42;
   - counterterm map with IR off: exact to 9.2e-7, 14/14.
 - **Real space, IR off** (`tests/test_ps1loop_real_space.py`, job 24147): 42/42, worst c0 (the k^2 P shape) at
@@ -65,7 +67,8 @@ settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
   - headroom c* = 0 in every cosmology;
   - marginalised Delta chi^2 (ps refits its own c and cfog) 0.120 / 0.689 / 0.126 / 0.137 / 0.782;
   - crossing cfog 384 / 75 / 291 / 213 / 277 (Mpc/h)^4;
-  - with AP off in both codes, <= 0.03 (jobs 24867-24868); with cfog = 0 in both codes, 0.07-0.13 (job 24860).
+  - with AP off in both codes, <= 0.03 (jobs 24867-24868). With c = 0 and cfog = 0 in both codes, 0.07-0.13
+    (job 24860); at the gate's c = 2 with cfog = 0, 0.05-0.09 (jobs 24867-24868).
 - **Convergence ladder** (`scripts/ps1loop_convergence_ladder.py`, job 24919).
   - Rungs that move a z = 2.2 slice Delta chi^2 by more than 10%: lcdm_fiducial nfft512 0.3500 -> 0.3050
     (-12.9%), nfft1024 0.3022 (-13.7%), best 0.3009 (-14.0%). For w0wa_m07_m10 the largest move is +6.6%.
@@ -77,8 +80,12 @@ settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
 **Two tests are red by the user's decision; the fast-suite wrapper deselects them.**
 - **`tests/test_ps1loop_gradients.py::test_cross_code_tangents`, the stretch and amplitude parametrizations**
   (pytest ids `<case>-stretch` and `<case>-amplitude` for lcdm_fiducial, massive_nu_030, w0wa_m07_m10).
-  - Why red: along the k-stretch and the amplitude of P_lin, the derivative closure fails the discrimination rule
-    (closed residual > 0.5 x direct difference). That is the unexplained 0.25-1.5% remainder.
+  - Why red: the derivative closure fails the discrimination rule, i.e. the closed residual exceeds 0.5 x the
+    direct difference.
+    - Along the k-stretch, that is the unexplained 0.25-1.5% remainder (fraction of the derivative's scale), red in
+      all three cosmologies.
+    - Along the amplitude, only lcdm_fiducial l = 4 is red (0.098% closed vs 0.185% direct); massive_nu_030 and
+      w0wa_m07_m10 pass (job 24898).
   - Decision: Oct 12, 2026, keep the rule on all five directions.
   - Deselect: `slurm/run-ps1loop-fast-suite.sh` deselects these six parametrizations. Remove the deselect when the
     remainder is attributed and the rule passes on every line, or when the user revises the rule.
@@ -115,7 +122,8 @@ settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
   24920), as expected for edits that touch only docstrings and docs.
 
 **Failed approaches and dead ends (do not retry).**
-- The first coefficient run against ps 0.4.0 (job 22610) gave 39 ERROR lines. They came from ps defects (later
+- The first coefficient run against ps 0.4.0 (job 22610) gave 41 ERROR lines (13 lcdm_fiducial, 13
+  massive_nu_015, 15 w0wa_m07_m10). They came from ps defects (later
   fixed in 0.5.0) and from CLASS-PT's omitted projections (now closed, see above). None came from the wiring:
   clax-pt vs CLASS-PT agreed to 0.04-0.30%.
 - Changing only ps's DST cuts made its de-wiggling worse (job 22623). CLASS-PT's de-wiggling was ported instead.
