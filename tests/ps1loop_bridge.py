@@ -26,7 +26,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from clax.ept import EPTPrecisionParams, compute_ept, pk_gg_l0, pk_gg_l2, pk_gg_l4
+from clax.ept import EPTPrecisionParams, _ir_resummation_jax, compute_ept, pk_gg_l0, pk_gg_l2, pk_gg_l4
 from scripts import classpt_assembly as ca
 from tests import ept_campaign_utils as cu
 
@@ -207,13 +207,22 @@ def to_clax(theta: dict, *, f, ndens, Pd2d2_0, hratio, Dratio) -> dict:
 
 # --------------------------------------------------------------------------- clax-pt and CLASS-PT
 
-def clax_ept(inp, *, ir=True, pk=None, f=None, hratio=None, Dratio=None):
-    """compute_ept on the shared inputs; the overrides let Task 7 trace f, AP and P_lin."""
-    return compute_ept(jnp.asarray(inp["pk"]) if pk is None else pk, jnp.asarray(inp["k_h"]),
+def clax_ept(inp, *, ir=True, pk=None, f=None, hratio=None, Dratio=None, ir_traced=False):
+    """compute_ept on the shared inputs; the overrides let Task 7 trace f, AP and P_lin.
+
+    ir_traced=True feeds compute_ept the traced IR split (_ir_resummation_jax, as
+    compute_ept_from_clax does) so a traced pk can be differentiated; the default keeps
+    the numpy IR path validated in Tasks 4-6."""
+    pk_in = jnp.asarray(inp["pk"]) if pk is None else pk
+    k_in = jnp.asarray(inp["k_h"])
+    kw = {}
+    if ir and ir_traced:
+        kw["_ir_precomputed"] = _ir_resummation_jax(pk_in, np.asarray(inp["k_h"]), inp["rbao"], float(inp["h"]))
+    return compute_ept(pk_in, k_in,
                        h=inp["h"], f=inp["f"] if f is None else f,
                        prec=EPTPrecisionParams(ir_resummation=ir), rs_h=inp["rbao"],
                        hratio=inp["hratio"] if hratio is None else hratio,
-                       Dratio=inp["Dratio"] if Dratio is None else Dratio)
+                       Dratio=inp["Dratio"] if Dratio is None else Dratio, **kw)
 
 
 def clax_multipoles_jax(e, cb: dict):
@@ -681,6 +690,45 @@ def ps_scheme_predicted(inp, kw, clax_coef, *, captured=None) -> dict:
     X = {n: Cn[n] + g["Exp"] * (C[n] - Cn[n]) for n in PS_SCHEME_CHANNELS}
     proj = _project_monomials(closure_integrands(X, g["f"], g["mu2t"], X["Pk_IFG2"]), g["W"], mask)
     return restrict_to_closure_lines({lab: proj[lab] - np.asarray(clax_coef[lab], dtype=float) for lab in proj})
+
+
+# --------------------------------------------------------------------------- documented difference on the total (Task 7)
+
+def monomial_value(lab: str, theta: dict) -> float:
+    """Value at the parameter point theta of the monomial named `lab` ("1", "b1", "b1*bG2", ...)."""
+    return float(np.prod([1.0 if v == "1" else theta[v] for v in lab.split("*")]))
+
+
+def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE) -> dict:
+    """The documented ps_1loop - clax-pt model difference (spec §4.2) on the TOTAL P_0, P_2, P_4 at the
+    parameter point theta, on the window kw, as {"ctr": (3, Nw), "closure": (3, Nw)}; their sum is D.
+    Every input that the derivative tangents move -- P_lin, f and the AP ratios -- is read from `inp`,
+    so D can be re-evaluated at a displaced point by passing a modified copy of the shared inputs.
+
+      "ctr" (items 1-3): the k^2 counterterms, the k^4 fingers-of-god term and a0
+        (`model_difference_factory` evaluated at theta itself; it is polynomial in theta, so this is
+        the sum over MODEL_DIFF_MONOMIALS with their values). NOT zero with IR resummation on: ps_1loop
+        multiplies the full mu_t-dependence by P_IR(k_t, mu_t), while clax-pt keeps only Legendre moments
+        of the AP-projected k_t^2 P_IR (Task 5: up to ~1% of c0's and ~8% of cfog's coefficient at z = 0.38).
+      "closure" (items 4-5): the 13 CLOSURE_LINES -- the projections clax-pt omits plus ps's
+        IR-resummation scheme -- as `ps_scheme_predicted` per closure monomial times its value at theta.
+        The kept coefficient it subtracts is the rebuilt <X_clax>_l - `omitted_predicted`, which equals
+        clax-pt's reported coefficient to <= 1e-10 (kept-coefficient check, test_omitted_projections_close),
+        so no clax-pt coefficient spectra are needed.
+
+    Not predicted: the exact monomials and the closure monomials' other rows, whose ps - clax is one-loop
+    numerics gated directly by Tasks 4-5. NumPy-valued -- the closure reads clax's mu-loop through the
+    `capture_gl_inputs` spy -- so it cannot be differentiated with jax; derivatives of D are taken by
+    central differences of this function."""
+    th = np.array([[theta[n] for n in THETA_NAMES]], dtype=float)
+    ctr = model_difference_factory(ps_model(inp["rbao"]), inp, kw, ndens=ndens)(th)[0]
+    captured = capture_gl_inputs(inp)
+    omitted = omitted_predicted(omitted_projections(inp, kw, captured=captured))
+    full_clax = clax_scheme_projections(inp, kw, captured=captured)
+    pred = ps_scheme_predicted(inp, kw, {lab: full_clax[lab] - omitted[lab] for lab in full_clax},
+                               captured=captured)
+    closure = sum(monomial_value(lab, theta) * pred[lab] for lab in pred)
+    return {"ctr": np.asarray(ctr, dtype=float), "closure": np.asarray(closure, dtype=float)}
 
 
 # --------------------------------------------------------------------------- real space, IR off (spec §5.4)
