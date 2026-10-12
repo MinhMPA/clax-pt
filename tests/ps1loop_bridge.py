@@ -179,13 +179,16 @@ def _ps_batch_jit(model, k_h, pk, h, f, a_perp, a_para, thetas, k, ndens, *, ap,
     return jax.vmap(one)(thetas)
 
 
-def ps_batch(model, inp, kw, *, ndens=NDENS_PROBE, num=256):
+def ps_batch(model, inp, kw, *, ndens=NDENS_PROBE, num=256, ap=None):
+    """F(thetas) -> (M, 3, Nw) ps_1loop multipoles on kw. ap=None takes ps's AP branch iff the inputs carry AP
+    (has_ap); ap=True forces the AP branch (the convergence ladder uses it at alpha_perp = alpha_para = 1)."""
     a_perp, a_para = ap_alphas(inp["hratio"], inp["Dratio"])
     args = (jnp.asarray(inp["k_h"]), jnp.asarray(inp["pk"]), inp["h"], inp["f"], a_perp, a_para)
+    branch = has_ap(inp) if ap is None else bool(ap)
 
     def F(thetas):
         return np.asarray(_ps_batch_jit(model, *args, jnp.asarray(thetas, dtype=float),
-                                        jnp.asarray(kw), ndens, ap=has_ap(inp), num=num))
+                                        jnp.asarray(kw), ndens, ap=branch, num=num))
     return F
 
 
@@ -795,12 +798,14 @@ def predicted_difference_at(inp, theta: dict, kw, x, *, model=None):
 
 
 def primal_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, *, model=None) -> dict:
-    """{"l<l>": {"direct", "closed", "k"}} at x0: direct = rel(ps, clax), closed = rel(ps - D, clax) (campaign
-    metric, fraction of max|clax P_l| on the window), k = where |ps - D - clax| peaks."""
+    """{"l<l>": {"direct", "closed", "k", "resid_max"}} at x0: direct = rel(ps, clax), closed = rel(ps - D, clax)
+    (campaign metric, fraction of max|clax P_l| on the window), k = where |ps - D - clax| peaks, resid_max =
+    max|ps - D - clax| itself [(Mpc/h)^3], so it can be put over another scale (the ladder's derivative scale)."""
     d0, _ = predicted_difference_at(inp, theta, kw, x0, model=model)
     ps0, cl0 = np.asarray(ps_fun(*x0)), np.asarray(clax_fun(*x0))
     return {f"l{l}": {"direct": cu.rel(ps0[i], cl0[i]), "closed": cu.rel(ps0[i] - d0[i], cl0[i]),
-                      "k": float(kw[int(np.argmax(np.abs(ps0[i] - d0[i] - cl0[i])))])}
+                      "k": float(kw[int(np.argmax(np.abs(ps0[i] - d0[i] - cl0[i])))]),
+                      "resid_max": float(np.max(np.abs(ps0[i] - d0[i] - cl0[i])))}
             for i, l in enumerate(ELLS)}
 
 
@@ -808,7 +813,8 @@ def tangent_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, t, *, fd_step=FD
     """{"l<l>": {...}} along the tangent t: direct = rel(jvp_ps, jvp_clax); closed = rel(jvp_ps - dD/dt,
     jvp_clax), dD/dt the central difference of D at x0 +/- fd_step t (D is NumPy-valued, so not jvp-able);
     ratio = closed / direct; k / k_direct = where the closed / direct differences peak; dD_ctr / dD_closure =
-    max|dD/dt| of the counterterm-map and closure-line parts, as fractions of max|jvp_clax|."""
+    max|dD/dt| of the counterterm-map and closure-line parts, as fractions of max|jvp_clax|; scale = max|jvp_clax|
+    itself (the derivative's scale every fraction here is taken of)."""
     jps = np.asarray(jax.jvp(ps_fun, x0, t)[1])
     jcl = np.asarray(jax.jvp(clax_fun, x0, t)[1])
     dp, pp = predicted_difference_at(inp, theta, kw, tuple(x + fd_step * dx for x, dx in zip(x0, t)), model=model)
@@ -825,7 +831,7 @@ def tangent_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, t, *, fd_step=FD
         k_c = float(kw[int(np.argmax(np.abs(resid)))]) if np.all(np.isfinite(resid)) else float("nan")
         k_d = float(kw[int(np.argmax(np.abs(jps[i] - jcl[i])))])
         ratio = closed / direct if direct > 0 else float("nan")
-        out[f"l{l}"] = {"direct": direct, "closed": closed, "ratio": ratio, "k": k_c, "k_direct": k_d,
+        out[f"l{l}"] = {"direct": direct, "closed": closed, "ratio": ratio, "k": k_c, "k_direct": k_d, "scale": scale,
                         "dD_ctr": float(np.max(np.abs(d_ctr[i])) / scale),
                         "dD_closure": float(np.max(np.abs(d_clo[i])) / scale)}
     return out
