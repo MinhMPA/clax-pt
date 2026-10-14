@@ -29,7 +29,9 @@ REPO=${CLAX_REPO:-/home/n2minh/clax-ps1loop}
 cd "$REPO"
 export PYTHONPATH="$REPO"
 export JAX_PLATFORMS=${JAX_PLATFORMS:-cpu}
-echo "HEAD: $(git -C "$REPO" rev-parse --short HEAD)  ps_1loop: $(git -C /home/n2minh/ps_1loop_jax-for-pfs rev-parse --short HEAD)"
+# ps_1loop's commit from the checkout the environment actually imports (as tests/ps1loop_bridge.py ps1loop_commit())
+PS_DIR=$(python -c "import os, ps_1loop_jax; print(os.path.dirname(os.path.realpath(ps_1loop_jax.__file__)))")
+echo "HEAD: $(git -C "$REPO" rev-parse --short HEAD)  ps_1loop: $(git -C "$PS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown) ($PS_DIR)"
 git -C "$REPO" status --porcelain | head -20
 python -c "import jax, ps_1loop_jax; print('devices', jax.devices())"
 echo "ladder args: $*"

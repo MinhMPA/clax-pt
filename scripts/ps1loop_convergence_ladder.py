@@ -9,14 +9,17 @@ that a rung removes is a resolution effect (spec §6), filed as a recommended se
 At REMAINDER_POINTS (lcdm_fiducial, z = 0.38; Task 9 controller amendments B and D, Oct 12-13, 2026)
 every rung also logs the two open remainders, with ps_1loop at that rung's settings:
   * primal_remainder -- max|ps - clax - D| / max|clax P_l| per l and its k, D = the documented model
-    difference (br.predicted_total_difference, its ps part rebuilt with the rung's model);
+    difference (br.predicted_total_difference, spec §4.2 items 1-6: counterterm / fingers-of-god / a0 maps,
+    omitted projections, ps's IR scheme on every bias row, the matter loops' O(P_w^2) scheme term; its ps
+    part rebuilt with the rung's model);
     primal_remainder_over_dscale -- the same max|ps - clax - D| over the stretch derivative's scale
     max|jvp_clax| (Task 7's R0_over_scale), so that stretch_amplification = stretch_closed / it compares
     the derivative remainder with the primal one over ONE scale (Task 9 fix round 1);
   * stretch_direct / stretch_closed / stretch_ratio (+ stretch_k) -- Task 7's derivative closure along
-    the k-stretch tangent t = P dlnP/dlnk (br.tangent_closure, the same code that keeps
-    test_cross_code_tangents red on its stretch lines): how differently the two codes respond to a shift
-    of the BAO / broadband features in k, after the documented model difference is taken out;
+    the k-stretch tangent t = P dlnP/dlnk (br.tangent_closure, the code test_cross_code_tangents asserts;
+    at the nfft512 rung the very numbers it asserts, tests/test_ps1loop_ladder.py): how differently the two
+    codes respond to a shift of the BAO / broadband features in k, after the documented model difference is
+    taken out;
   * ap_zero_offset -- max|P_l(ps, AP offsets x 0.001) - P_l(ps, AP off)| / max|P_l(ps, AP off)| per l
     and its k: ps_1loop's AP branch (P(k, mu) tabulated on its FFTLog k grid x mu grid, then remapped by
     interp2d) against its no-AP branch (evaluated directly) at almost zero AP offset (Task 8 scratch,
@@ -29,10 +32,11 @@ at the same offsets -- giving the survey Delta chi^2 of ps - clax, of ps's jump 
 its no-AP branch, and of clax's (the physical change), with the largest jump in units of sigma.
 
 Rungs (br.ps_model exposes nfft and the mu grid; br.ps_batch the Simpson num):
-  default          the gates' ps_1loop: nfft 256, mu grid 51, Simpson num 256, DST cuts 120-240 (0.5.0),
-                   rbao = this cosmology's r_s(z_d) h
+  default          ps_1loop's defaults, as the coefficient, closure and PFS gates run it: nfft 256, mu grid 51,
+                   Simpson num 256, DST cuts 120-240 (0.5.0), rbao = this cosmology's r_s(z_d) h
   nfft512/1024     FFTLog sampling -- also the k grid (geomspace 1e-5..1e3 h/Mpc) on which ps tabulates
-                   the one-loop P(k, mu) and, in the AP branch, the whole P(k, mu)
+                   the one-loop P(k, mu) and, in the AP branch, the whole P(k, mu). nfft512 is the derivative
+                   gate's setting (tests/test_ps1loop_gradients.py PS_NFFT_GATE, Task 11)
   simpson1024      Simpson num of the final mu projection
   mugrid201        the mu grid of the same table (one-loop interpolation and AP remap)
   best             nfft 1024 + mu grid 201 + Simpson num 1024
