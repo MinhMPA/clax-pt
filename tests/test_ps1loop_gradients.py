@@ -47,6 +47,11 @@ resummation on it is not zero (Task 5 at z = 0.38, fraction of the coefficient's
 1.0 / 0.9% lcdm_fiducial, 1.0 / 1.8% massive_nu_030, 1.1 / 10.2% w0wa_m07_m10), and the bias point
 carries c0 = c2 = c4 = 2 (Mpc/h)^2 and cfog = 500 (Mpc/h)^4; a0 = 0 there, so the a0 map adds nothing.
 
+ps_1loop runs at nfft = PS_NFFT_GATE = 512 in every test of this file (ps model, D's counterterm part and
+ps's own AD-vs-FD check alike), not at its default 256: the closure closes only once ps's FFTLog noise is
+below the remainder; at ps's default 256 its own resolution spikes at k ~ 0.14 and 0.25 h/Mpc set the
+maximum (finding F5; scratch jobs 24968 / 24970 / 24971).
+
 lcdm_fiducial, massive_nu_030, w0wa_m07_m10 at z = 0.38 (AP non-trivial) in full mode; lcdm_fiducial
 under --fast. Multi-cosmology rule: 3 cosmologies."""
 from __future__ import annotations
@@ -68,6 +73,10 @@ FD_STEP = br.FD_STEP   # 1e-4: central-difference step for dD/dt and for ps AD v
 # central-difference floor ~1e-8 at FD_STEP = 1e-4). Never widened.
 FD_THRESHOLD = 1e-4
 DISCRIM_MIN, DISCRIM_RATIO = br.DISCRIM_MIN, br.DISCRIM_RATIO   # Task 5's discrimination rule (bridge)
+# ps_1loop's FFTLog sampling for this gate. The closure closes only once ps's FFTLog noise is below the
+# remainder; at ps's default 256 its own resolution spikes at k ~ 0.14 and 0.25 h/Mpc set the maximum
+# (finding F5).
+PS_NFFT_GATE = 512
 
 
 def pytest_generate_tests(metafunc):
@@ -83,10 +92,15 @@ def _inputs(case):
     return inp, cu.window(inp["k_h"]), pfs.bias_point(Z)
 
 
+def _model(inp):
+    """The ps_1loop instance of this gate: nfft = PS_NFFT_GATE, every other setting at ps's default."""
+    return br.ps_model(inp["rbao"], nfft=PS_NFFT_GATE)
+
+
 def _setup(case):
-    """(ps_fun, clax_fun, x0, tangents) at Z with ps_1loop's default settings (br.tangent_setup)."""
+    """(ps_fun, clax_fun, x0, tangents) at Z with ps_1loop at nfft = PS_NFFT_GATE (br.tangent_setup)."""
     inp, mask, theta = _inputs(case)
-    return br.tangent_setup(inp, theta, mask)
+    return br.tangent_setup(inp, theta, mask, model=_model(inp))
 
 
 def _check(case, layer, pairs, thresholds, kw):
@@ -128,7 +142,7 @@ def test_primal_closure_guard(case):
     ps_fun, clax_fun, x0, _ = _setup(case)
     inp, mask, theta = _inputs(case)
     kw = inp["k_h"][mask]
-    primal = br.primal_closure(ps_fun, clax_fun, inp, theta, kw, x0)
+    primal = br.primal_closure(ps_fun, clax_fun, inp, theta, kw, x0, model=_model(inp))
     print(f"{case} [primal] ps-vs-clax direct/closed % " + " | ".join(
         f"l{l} {100 * primal[f'l{l}']['direct']:.3f}/{100 * primal[f'l{l}']['closed']:.3f}" for l in br.ELLS))
     lines = []
@@ -155,7 +169,8 @@ def test_cross_code_tangents(case, tangent):
     ps_fun, clax_fun, x0, tangents = _setup(case)
     inp, mask, theta = _inputs(case)
     kw = inp["k_h"][mask]
-    rec = br.tangent_closure(ps_fun, clax_fun, inp, theta, kw, x0, tangents[tangent], fd_step=FD_STEP)
+    rec = br.tangent_closure(ps_fun, clax_fun, inp, theta, kw, x0, tangents[tangent], fd_step=FD_STEP,
+                             model=_model(inp))
 
     direct_errs, closed_errs, lines, cells = {}, {}, [], []
     for l in br.ELLS:
