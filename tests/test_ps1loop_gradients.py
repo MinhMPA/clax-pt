@@ -6,8 +6,9 @@ What must stay true, and what breaks if it does not:
   * ps-vs-clax-closed (test_cross_code_tangents, one test per tangent, pytest ids f / a_perp / a_para /
     stretch / amplitude): d(ps - clax)/dt equals dD/dt, the derivative of the
     documented model difference D(x), x = (f, alpha_perp, alpha_para, P_lin) (br.predicted_total_difference:
-    counterterm / fingers-of-god / a0 maps, omitted projections, ps's IR-resummation scheme; spec §4.2
-    items 1-5), at the code-accuracy thresholds 1% / 1% / 2% for l = 0 / 2 / 4. Task 5's discrimination
+    counterterm / fingers-of-god / a0 maps, omitted projections, ps's IR-resummation scheme on every bias row,
+    the matter loops' second-order-in-P_w scheme term; spec §4.2 items 1-6), at the code-accuracy thresholds
+    1% / 1% / 2% for l = 0 / 2 / 4. Task 5's discrimination
     rule applies: where the direct ps-vs-clax derivative difference exceeds 0.1% of the clax derivative's
     scale, the closed residual must be at most half of it, so a line cannot pass merely by being small.
     If this breaks, the two codes respond differently to f, the AP distortion or the linear spectrum in a
@@ -16,14 +17,18 @@ What must stay true, and what breaks if it does not:
     spectra themselves agree. USER DECISION (Oct 10, 2026) and controller ruling: the closure gate applies
     to all five tangents. Where dD/dt is negligible the closed and direct differences coincide, so such a
     line passes the discrimination rule only if its direct difference is itself below DISCRIM_MIN of the
-    scale. USER RULING (Oct 12, 2026): the rule is kept on all five tangents; the stretch/amplitude lines
-    fail it until the remainder is isolated -- see the SDD ledger
-    (.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/progress.md) and CHANGELOG; the fast-suite
-    wrapper deselects only those two parametrizations (Task 9, controller amendment E, Oct 13, 2026), and
-    scripts/ps1loop_convergence_ladder.py measures the remainder per ps_1loop setting. That remainder
-    is non-smooth in k, peaks at k = 0.13-0.25 h/Mpc and is 11-14x the primal remainder ps - clax - D,
-    both measured over the stretch derivative's scale max|jvp_clax| (scratch job 24845). The direct
-    ps-vs-clax numbers are logged and printed but not asserted: they contain dD/dt, which along the AP
+    scale. USER RULING (Oct 12, 2026): the rule is kept on all five tangents. With D carrying ps's scheme
+    term on the 13 omitted lines only, the stretch lines (and amplitude l = 4 in lcdm_fiducial) failed it:
+    the stretch derivative kept a non-smooth-in-k remainder at k = 0.13-0.25 h/Mpc, 11-14x the primal
+    remainder ps - clax - D, both over the stretch derivative's scale max|jvp_clax| (scratch job 24845).
+    USER DECISION (Oct 14, 2026): D carries ps's IR-resummation scheme on every bias row clax keeps and the
+    matter loops' O(P_w^2) scheme term (br.ps_scheme_all_rows, br.matter_scheme_term), and ps runs at
+    nfft 512 (below); then every line passes threshold and discrimination in all three cosmologies (scratch
+    jobs 24970 / 24971 at nfft 512: worst stretch ratio 0.42, worst f / AP ratio 0.13). Both decisions are
+    restated in CHANGELOG (Oct 13 and Oct 14, 2026) and docs/ps1loop-findings.md "Test status";
+    scripts/ps1loop_convergence_ladder.py measures the remainder per ps_1loop setting. Logged per line:
+    direct, closed, ratio, k of the worst closed point and the size of each part of dD/dt (br.D_PARTS). The
+    direct ps-vs-clax numbers are logged and printed but not asserted: they contain dD/dt, which along the AP
     directions is large (scratch job 24167, lcdm_fiducial: alpha_para 3.1 / 10.4 / 8.7% at l = 0 / 2 / 4).
   * primal guard (test_primal_closure_guard): at x0, ps - D matches clax at the same thresholds and
     discrimination rule.
@@ -164,8 +169,8 @@ def test_primal_closure_guard(case):
 def test_cross_code_tangents(case, tangent):
     """ps-vs-clax-closed gate (module docstring) along one tangent: rel(jvp_ps - dD/dt, jvp_clax) <=
     br.COEF_THRESHOLDS[l] per l, and <= DISCRIM_RATIO x the direct rel(jvp_ps, jvp_clax) wherever the direct
-    value exceeds DISCRIM_MIN. Logged per l: direct, closed, ratio, k of the worst closed point, and the sizes
-    of the counterterm-map and closure-line parts of dD/dt (fraction of max|jvp_clax|)."""
+    value exceeds DISCRIM_MIN. Logged per l: direct, closed, ratio, k of the worst closed point, and the size
+    of each part of dD/dt (br.D_PARTS; fraction of max|jvp_clax|)."""
     ps_fun, clax_fun, x0, tangents = _setup(case)
     inp, mask, theta = _inputs(case)
     kw = inp["k_h"][mask]
@@ -178,7 +183,7 @@ def test_cross_code_tangents(case, tangent):
         direct, closed, ratio, k_c = r["direct"], r["closed"], r["ratio"], r["k"]
         direct_errs[key] = {"err": direct, "k": r["k_direct"]}
         closed_errs[key] = {"err": closed, "k": k_c, "direct": direct, "ratio": ratio,
-                            "dD_ctr": r["dD_ctr"], "dD_closure": r["dD_closure"]}
+                            **{f"dD_{n}": r[f"dD_{n}"] for n in br.D_PARTS}}
         if not np.isfinite(closed) or closed > thr:
             lines.append(f"ERROR {case} ps-vs-clax-closed d/d{tangent} l={l}: {100 * closed:.3f}% > "
                          f"{100 * thr:.1f}% at k={k_c:.3f} (direct {100 * direct:.3f}%)")
@@ -187,6 +192,8 @@ def test_cross_code_tangents(case, tangent):
                          f"{DISCRIM_RATIO} x direct {100 * direct:.3f}% (ratio {ratio:.3f}) at k={k_c:.3f}")
         cells.append(f"l{l} {100 * direct:.3f}/{100 * closed:.3f}% r={ratio:.2f} k={k_c:.3f}")
     print(f"{case} [ps-vs-clax-closed] d/d{tangent} direct/closed: " + " | ".join(cells))
+    print(f"{case} [dD parts] d/d{tangent} max|dD/dt| % of scale (" + "/".join(br.D_PARTS) + "): " + " | ".join(
+        f"l{l} " + "/".join(f"{100 * rec[f'l{l}'][f'dD_{n}']:.3f}" for n in br.D_PARTS) for l in br.ELLS))
 
     br.log_record(layer="grad", case=case, z=Z, preset="ps-vs-clax", errors=direct_errs)
     br.log_record(layer="grad", case=case, z=Z, preset="ps-vs-clax-closed", errors=closed_errs,

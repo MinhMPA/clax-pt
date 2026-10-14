@@ -3,7 +3,9 @@
 
 Exempt from the multi-cosmology rule: parameter-space stencil algebra, AP and Legendre
 algebra, caching and API parity. The fixture-based tests use lcdm_fiducial z = 0.38 only
-to exercise ps_1loop's own API against itself, not to compare physics."""
+to exercise ps_1loop's own API against itself, not to compare physics. The one exception,
+test_extended_closed_form_rebuild (spec §4.2 items 5-6), ties the extended closed form to clax's
+own numbers and runs at the three cosmologies of the derivative gate (lcdm_fiducial under --fast)."""
 from __future__ import annotations
 
 import json
@@ -16,6 +18,22 @@ import jax.numpy as jnp
 
 from tests import ept_campaign_utils as cu
 from tests import ps1loop_bridge as br
+
+
+# The derivative gate's cosmologies (tests/test_ps1loop_gradients.py GRAD_CASES), at its redshift.
+SCHEME_CASES = ("lcdm_fiducial", "massive_nu_030", "w0wa_m07_m10")
+SCHEME_Z = 0.38
+# Round-off bounds of the extended closed form's rebuild (scratch maxima, jobs 24970 / 24971, in brackets):
+P22_BILINEAR_TOL = 1e-12   # [9.2e-14]
+P13_UV_TOL = 1e-13         # [8.6e-16]
+KEPT_COEF_TOL = 1e-10      # [2.4e-15]; = REPRO_TOL of tests/test_ps1loop_model_difference.py
+RESTRICT_TOL = 1e-12       # extended form on the 13 lines vs ps_scheme_predicted [4.1e-18 on the total, job 24968]
+
+
+def pytest_generate_tests(metafunc):
+    if "scheme_case" in metafunc.fixturenames:
+        fast = metafunc.config.getoption("--fast", default=False)
+        metafunc.parametrize("scheme_case", ["lcdm_fiducial"] if fast else list(SCHEME_CASES))
 
 
 @pytest.fixture(scope="module")
@@ -164,6 +182,63 @@ def test_omitted_predicted_covers_exactly_the_closure_lines():
         nonzero = {f"{lab}:{ch}" for lab, arr in p.items()
                    for i, ch in enumerate(br.CHANNELS) if np.any(arr[i] != 0.0)}
         assert nonzero == set(br.CLOSURE_LINES) and len(br.CLOSURE_LINES) == 13
+
+
+def test_kept_scheme_rows_are_the_rows_clax_keeps():
+    """KEPT_SCHEME_ROWS (where D carries ps's IR scheme beyond the 13 lines) are exactly the 14 rows of
+    SCHEME_MONOMIALS that are not CLOSURE_LINES: together they cover every row once (pure bookkeeping)."""
+    every = {f"{br.label(m)}:{ch}" for m in br.SCHEME_MONOMIALS for ch in br.CHANNELS}
+    kept = set(br.KEPT_SCHEME_ROWS)
+    assert len(br.KEPT_SCHEME_ROWS) == len(kept) == 14
+    assert not kept & set(br.CLOSURE_LINES) and kept | set(br.CLOSURE_LINES) == every
+    assert br.MATTER_LOOPS == {"1": "vv", "b1": "vd", "b1*b1": "dd"}
+
+
+def test_extended_closed_form_rebuild(scheme_case):
+    """What must stay true for D's two new terms (spec §4.2 items 5-6) to be the model difference and not a
+    fit; each check fails if a channel, a sign or the UV bookkeeping is wrong:
+      * matter rebuild (br.matter_rebuild_checks): the P22 channels are bilinear in the input spectrum,
+        L22[P] = L22[P_nw] + 2 L22[P_nw, P_w] + L22[P_w, P_w], to P22_BILINEAR_TOL, so the rebuilt term is the
+        second-order piece; the P13 UV term was removed exactly (P_nw (P_w I13[P_w]) = P_w (P_nw I13[P_w]) to
+        P13_UV_TOL);
+      * kept coefficients: br.clax_scheme_coefficients equals the coefficient spectra of clax's accessors
+        pk_gg_l0/l2/l4 on all 27 rows of SCHEME_MONOMIALS to KEPT_COEF_TOL of each monomial's scale, so D
+        subtracts what clax reports (the b2 row included);
+      * restriction: br.ps_scheme_all_rows on the 13 CLOSURE_LINES equals br.ps_scheme_predicted, the form
+        Task 5 validates on 42 files, to RESTRICT_TOL of each monomial's scale;
+      * the matter term is finite on the window."""
+    inp = br.shared_inputs(cu.require_reference(scheme_case, SCHEME_Z))
+    mask = cu.window(inp["k_h"])
+    kw = inp["k_h"][mask]
+    caps = br.scheme_captures(inp)
+    chk = br.matter_rebuild_checks(caps)
+    rebuilt = br.clax_scheme_coefficients(inp, kw, caps=caps)
+    clax = br.coefficients(br.clax_batch(br.clax_ept(inp), inp, mask), br.SCHEME_MONOMIALS)
+    rows = br.ps_scheme_all_rows(inp, kw, caps=caps)
+    closure_labels = [br.label(m) for m in br.CLOSURE_MONOMIALS]
+    pred13 = br.ps_scheme_predicted(inp, kw, {lab: rebuilt[lab] for lab in closure_labels},
+                                    captured=(None, caps["on"]))
+    restricted = br.restrict_to_closure_lines(rows)
+    matter = br.matter_scheme_term(inp, kw, caps=caps)
+    scale = {lab: max(float(np.max(np.abs(clax[lab]))), 1e-300) for lab in clax}
+    kept_err = {lab: float(np.max(np.abs(rebuilt[lab] - clax[lab]))) / scale[lab] for lab in clax}
+    restr_err = {lab: float(np.max(np.abs(restricted[lab] - pred13[lab]))) / scale[lab] for lab in closure_labels}
+    lines = []
+    if not chk["p22_bilinear"] <= P22_BILINEAR_TOL:
+        lines.append(f"ERROR {scheme_case} P22 bilinearity {chk['p22_bilinear']:.2e} > {P22_BILINEAR_TOL:.0e}")
+    if not chk["p13_uv_removed"] <= P13_UV_TOL:
+        lines.append(f"ERROR {scheme_case} P13 UV removal {chk['p13_uv_removed']:.2e} > {P13_UV_TOL:.0e}")
+    lines += [f"ERROR {scheme_case} kept coefficient {lab}: rebuilt vs clax accessors {e:.2e} > {KEPT_COEF_TOL:.0e}"
+              for lab, e in kept_err.items() if not e <= KEPT_COEF_TOL]
+    lines += [f"ERROR {scheme_case} {lab}: extended form on CLOSURE_LINES vs ps_scheme_predicted {e:.2e} > "
+              f"{RESTRICT_TOL:.0e}" for lab, e in restr_err.items() if not e <= RESTRICT_TOL]
+    lines += [f"ERROR {scheme_case} matter term {lab} non-finite" for lab, m in matter.items()
+              if not np.all(np.isfinite(m))]
+    wk, wr = max(kept_err, key=kept_err.get), max(restr_err, key=restr_err.get)
+    print(f"{scheme_case} z={SCHEME_Z} [extended closed form] P22 bilinearity {chk['p22_bilinear']:.1e}, "
+          f"P13 UV removal {chk['p13_uv_removed']:.1e}, kept coefficient worst {wk} {kept_err[wk]:.1e}, "
+          f"13-line restriction worst {wr} {restr_err[wr]:.1e}")
+    assert not lines, "\n".join(lines)
 
 
 def test_log_record_carries_both_commits(tmp_path, monkeypatch):

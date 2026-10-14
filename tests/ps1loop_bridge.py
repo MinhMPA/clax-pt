@@ -702,6 +702,197 @@ def ps_scheme_predicted(inp, kw, clax_coef, *, captured=None) -> dict:
     return restrict_to_closure_lines({lab: proj[lab] - np.asarray(clax_coef[lab], dtype=float) for lab in proj})
 
 
+# --------------------------------------------------------------------------- ps IR scheme beyond the 13 lines (spec §4.2 items 5-6)
+# What these two terms buy (USER DECISION Oct 14, 2026; Task 11): with them in D, the derivative closure of
+# tests/test_ps1loop_gradients.py closes on every line -- f, alpha_perp, alpha_para, the k-stretch and the
+# amplitude of P_lin, l = 0, 2, 4, three cosmologies -- once ps_1loop runs at nfft >= 512 (scratch jobs
+# 24970 / 24971). Without them the stretch derivative kept a BAO-scale, non-smooth-in-k remainder that was
+# 11-14x the primal one (Task 7 / Task 9), i.e. a difference in how the two codes move the BAO feature.
+#
+# (i) Kept bias rows (item 5 extended). ps_1loop resums its WHOLE one-loop sum as
+# loop[P_nw] + e^{-x(mu)} (loop[P] - loop[P_nw]) (ps_1loop.py:474-494 get_pkmu_irres_LO_NLO; the two channels
+# at 464-471). clax-pt, like CLASS-PT, feeds every bias loop the isotropically damped P_nw + e^{-k^2 Sigma^2} P_w
+# (ept.py:2085 pk_resummed, the FFTLog input of _compute_bias_spectra at 2164) and rescales only the F_G2
+# external leg by p_lo(mu) (ept.py:1220-1221). The scheme difference <X_ps>_l - clax_l of `ps_scheme_predicted`
+# is therefore not confined to the 13 omitted projections: it sits on every row clax keeps that is built
+# from the same channels, the 14 KEPT_SCHEME_ROWS. Construction: `ps_scheme_predicted`'s, unrestricted,
+# extended by the linear b2 row, whose integrand c(Pk_0_b2) + L2(mu_t) c(Pk_2_b2) + L4(mu_t) c(Pk_4_b2) is
+# ept.py:1239-1242 (Pb2_in), kept on all three l (pk_gg_l0/l2/l4, ept.py:2433 / 2494 / 2545).
+#   Per-row decision on the six F_G2 kept rows (bG2:l0, bG2:l2, b1*bG2:l0 carry a 22-type part plus F_G2;
+#   bGamma3:l0, bGamma3:l2, b1*bGamma3:l0 are F_G2 only): KEPT, all six. The F_G2 integrand is one integrand,
+#   and its l = 4 / b1*bG2:l2 projections (C1_LINES) already carry this scheme term in the validated Task 5
+#   closure; dropping it on l = 0, 2 would make D an l-by-l selection rather than the model difference.
+#   Data at the gate setting, ps nfft 512, lcdm_fiducial z = 0.38 (max|ps - clax| -> max|ps - clax - predicted|,
+#   % of the monomial's largest clax multipole; scratch job 24970): bG2:l0 0.035 -> 0.025, bG2:l2 0.091 -> 0.048,
+#   b1*bG2:l0 0.047 -> 0.049, bGamma3:l0 0.026 -> 0.029, bGamma3:l2 0.048 -> 0.056, b1*bGamma3:l0 0.055 -> 0.062
+#   (massive_nu_030 / w0wa_m07_m10 the same pattern, job 24971): the pure-F_G2 rows keep a 0.03-0.06%
+#   remainder that is not the scheme term, three orders of magnitude below the 1% gate. On the total at the PFS
+#   bias point (bG2 = -0.015, bGamma3 = +0.029) the six rows move no derivative-closure line by more than the
+#   printed 0.001% (all 45 lines, nfft 256 / 512 / 1024, jobs 24970 / 24971).
+#
+# (ii) Matter loops (item 6). ps resums the vv, vd, dd loops EXACTLY in the wiggle spectrum P_w: with
+# L[X] = L22[X, X] + X I13[X] + UV, it adds e^{-x} (L[P] - L[P_nw]). CLASS-PT and clax-pt linearise in P_w: the
+# mu-loop adds e^{-x} (2 L22[P_nw, P_w] + P_w I13[P_nw] + P_nw I13[P_w]) through the "_w" channels and
+# P13ratio (ept.py:1178, 1183-1193; channels from qf_split / p13_split, 1739-1768). The difference,
+#     e^{-x(k_t, mu_t)} (L22[P_w, P_w] + P_w I13[P_w]),
+# is second order in P_w and sits on the monomials 1 (vv), b1 (vd), b1^2 (dd) (pk_gg_l0, ept.py:2424-2426).
+# It is rebuilt from ONE extra IR-off clax capture on P_w (FFTLog is linear in its input and uses the same
+# bias, so its "_nw" channels are L22[P_w, P_w] and P_w I13[P_w]), after removing the P13 UV term
+# sigma_v^2[P_w] k^2 P_w that clax's IR-off p13_split adds (UV coefficients ept.py:1690, 1699-1703; ps keeps one
+# sigma~^2[P] for both channels, ps_1loop.py:464-468 and 411-447), and projected by clax's own
+# `_gl_multipoles` (same AP geometry, Sigma_tot(mu), GL weights). Left out: the UV normalisation difference
+# (sigma~^2[P] - sigma_v^2[P_res]) k^2 P_res, whose size is (sigma^2[P] - sigma^2[P_res]) / sigma^2[P] = -3.1e-6
+# (job 24970). The rebuild is pinned by `matter_rebuild_checks` (P22 bilinearity, UV removal), asserted in
+# tests/test_ps1loop_bridge.py.
+
+B2_CHANNELS = ("Pk_0_b2", "Pk_2_b2", "Pk_4_b2")
+SCHEME_CHANNELS = PS_SCHEME_CHANNELS + B2_CHANNELS
+# The closure monomials plus the linear b2 row: every bias monomial whose clax rows are built from the
+# isotropically damped channels or F_G2.
+SCHEME_MONOMIALS = CLOSURE_MONOMIALS + (("b2",),)
+# The 14 rows of SCHEME_MONOMIALS that clax keeps (all rows not in CLOSURE_LINES).
+KEPT_SCHEME_ROWS = tuple(f"{label(m)}:{ch}" for m in SCHEME_MONOMIALS for ch in CHANNELS
+                         if f"{label(m)}:{ch}" not in CLOSURE_LINES)
+# Galaxy monomial -> clax matter loop (pk_gg_l0: Pk_l_vv1 + b1 Pk_l_vd1 + b1^2 Pk_l_dd1).
+MATTER_LOOPS = {"1": "vv", "b1": "vd", "b1*b1": "dd"}
+# P13 UV coefficient per unit sigma_v^2 of each mu-power P13 channel (ept.py:1690 UV_mu6, 1699-1703 UV_mu*;
+# CLASS-PT nonlinear_pt.c:8219-8226), f-dependent.
+P13_UV_PER_SIGMA2 = {"P13_mu0_dd": lambda f: -61.0 / 105.0,
+                     "P13_mu2_dd": lambda f: -f * (105.0 * f - 6.0) / 105.0,
+                     "P13_mu2_vd": lambda f: -f * (250.0 + 144.0 * f) / 105.0,
+                     "P13_mu4_vv": lambda f: -f ** 2 * (63.0 + 48.0 * f) / 35.0,
+                     "P13_mu4_vd": lambda f: -f ** 2 * (44.0 + 70.0 * f) / 35.0,
+                     "P13_mu6": lambda f: -f ** 3 * (46.0 + 35.0 * f) / 35.0}
+
+
+def scheme_integrands(ch, f, mu2t, ifg2) -> dict:
+    """`closure_integrands` plus the linear b2 row, c(Pk_0_b2) + L2(mu_t) c(Pk_2_b2) + L4(mu_t) c(Pk_4_b2)
+    (ept.py:1239-1242, Pb2_in): {label: (40, Nk)} for every SCHEME_MONOMIALS monomial."""
+    out = dict(closure_integrands(ch, f, mu2t, ifg2))
+    L2t = 0.5 * (3.0 * mu2t - 1.0)
+    L4t = (35.0 * mu2t ** 2 - 30.0 * mu2t + 3.0) / 8.0
+    out["b2"] = ch["Pk_0_b2"] + L2t * ch["Pk_2_b2"] + L4t * ch["Pk_4_b2"]
+    return out
+
+
+def scheme_captures(inp, *, captured=None) -> dict:
+    """The four clax mu-loop captures (`capture_gl_inputs`) the extended closed form reads, on the shared
+    inputs: "on" = IR on (geometry, Sigma^2, dSigma^2, P_nw, P_w, clax's own channels), "off" = IR off on P,
+    "nw" = IR off on clax's P_nw, "ww" = IR off on clax's P_w (matter term). `captured` reuses an "on" capture."""
+    _, cap_on = capture_gl_inputs(inp) if captured is None else captured
+    _, cap_off = capture_gl_inputs(inp, ir=False)
+    _, cap_nw = capture_gl_inputs(inp, ir=False, pk=jnp.asarray(cap_on["chan"]["pk_nw"]))
+    _, cap_ww = capture_gl_inputs(inp, ir=False, pk=jnp.asarray(cap_on["chan"]["pk_w"]))
+    return {"on": cap_on, "off": cap_off, "nw": cap_nw, "ww": cap_ww}
+
+
+def _project_scheme(integ, g, mask) -> dict:
+    """{label: (3, Nw)}: l = 0, 2, 4 projections of each SCHEME_MONOMIALS integrand with clax's AP-folded
+    weights g["W"] (`mu_loop_geometry`), on the window."""
+    return {label(m): np.stack([np.asarray(jnp.einsum("m,mk->k", g["W"][l], integ[label(m)]))[mask] for l in ELLS])
+            for m in SCHEME_MONOMIALS}
+
+
+def clax_scheme_coefficients(inp, kw, *, caps=None) -> dict:
+    """{monomial label: (3, Nw)} clax-pt's own coefficient of every SCHEME_MONOMIALS monomial, rebuilt from its
+    IR-on mu-loop: the full integrand (`scheme_integrands` on the captured channels, F_G2 = IFG2_in) projected
+    on l = 0, 2, 4, minus `omitted_predicted` (the b2 row omits nothing). It equals the coefficient spectrum of
+    clax's accessors pk_gg_l0/l2/l4 to round-off on all 27 rows (asserted in tests/test_ps1loop_bridge.py),
+    so D subtracts what clax actually reports."""
+    import clax.ept as E
+    caps = scheme_captures(inp) if caps is None else caps
+    cap_on = caps["on"]
+    mask = _window_mask(inp, kw, tuple(caps.values()))
+    g = mu_loop_geometry(cap_on)
+    at = E._channels_at(g["k"], cap_on["chan"], g["kk"])
+    full = _project_scheme(scheme_integrands(at, g["f"], g["mu2t"], _ifg2_in(at, g["Exp"])), g, mask)
+    omitted = omitted_predicted({n: v[mask] for n, v in mu_loop_projections(cap_on).items()})
+    omitted["b2"] = np.zeros_like(full["b2"])
+    return {lab: full[lab] - omitted[lab] for lab in full}
+
+
+def ps_scheme_all_rows(inp, kw, *, caps=None) -> dict:
+    """{monomial label: (3, Nw)} predicted ps_1loop - clax-pt on EVERY row of SCHEME_MONOMIALS, ps's IR scheme
+    included: <X_ps(mono)>_l - clax_coef_l, X_ps = C[P_nw] + e^{-x}(C[P] - C[P_nw]) as in `ps_scheme_predicted`
+    (same captures, same geometry), clax_coef = `clax_scheme_coefficients`. Restricted to CLOSURE_LINES this is
+    `ps_scheme_predicted` (asserted to round-off in tests/test_ps1loop_bridge.py); on KEPT_SCHEME_ROWS it is
+    ps's scheme term on the rows clax keeps (section comment, item (i))."""
+    import clax.ept as E
+    caps = scheme_captures(inp) if caps is None else caps
+    cap_on, cap_off, cap_nw = caps["on"], caps["off"], caps["nw"]
+    mask = _window_mask(inp, kw, tuple(caps.values()))
+    g = mu_loop_geometry(cap_on)
+    C = E._channels_at(g["k"], {n: cap_off["chan"][n] for n in SCHEME_CHANNELS}, g["kk"])
+    Cn = E._channels_at(g["k"], {n: cap_nw["chan"][n] for n in SCHEME_CHANNELS}, g["kk"])
+    X = {n: Cn[n] + g["Exp"] * (C[n] - Cn[n]) for n in SCHEME_CHANNELS}
+    ps_full = _project_scheme(scheme_integrands(X, g["f"], g["mu2t"], X["Pk_IFG2"]), g, mask)
+    clax_coef = clax_scheme_coefficients(inp, kw, caps=caps)
+    return {lab: ps_full[lab] - clax_coef[lab] for lab in ps_full}
+
+
+def _matter_ww_channels(caps) -> dict:
+    """{loop channel name: (Nk,)} L22[P_w, P_w] (P22 channels) and P_w I13[P_w] (P13 channels) on clax's k grid:
+    the "_nw" channels of the IR-off capture on P_w, with the P13 UV term sigma_v^2[P_w] k^2 P_w e^{-(k/k_cut)^6}
+    that p13_split adds (ept.py:1749-1757, sigma_v^2 1629, damping 1336) removed."""
+    import clax.ept as E
+    cap_on, cap_ww = caps["on"], caps["ww"]
+    k, f = cap_on["k"], cap_on["f"]
+    uv_damp = jnp.exp(-(k / EPTPrecisionParams().cutoff_h) ** 6)
+    pw = jnp.asarray(cap_ww["chan"]["pk_disc"])            # IR off: the FFTLog input, = P_w on the grid
+    sig2_w = jnp.trapezoid(pw * k, jnp.log(k)) / (6.0 * jnp.pi ** 2)
+    out = {}
+    for n in E._GL_CHANNELS_LOOP:
+        L = jnp.asarray(cap_ww["chan"][n + "_nw"])
+        if n in P13_UV_PER_SIGMA2:
+            L = L - P13_UV_PER_SIGMA2[n](f) * sig2_w * k ** 2 * pw * uv_damp
+        out[n] = L
+    return out
+
+
+def matter_scheme_term(inp, kw, *, caps=None) -> dict:
+    """{"1" | "b1" | "b1*b1": (3, Nw)} = the l = 0, 2, 4 projections of e^{-x(k_t, mu_t)} (L22[P_w, P_w]
+    + P_w I13[P_w]) on the vv / vd / dd loops: ps's exact-in-P_w matter-loop resummation minus clax's linearised
+    one (section comment, item (ii)). Projected by clax's own `_gl_multipoles` fed only those channels as its
+    wiggle ("_w") channels, every other channel zero and P_w = 0 so that P13ratio = 1."""
+    import clax.ept as E
+    caps = scheme_captures(inp) if caps is None else caps
+    cap_on = caps["on"]
+    mask = _window_mask(inp, kw, tuple(caps.values()))
+    k = cap_on["k"]
+    zeros = jnp.zeros_like(k)
+    chan = dict(cap_on["chan"])
+    for n, L in _matter_ww_channels(caps).items():
+        chan[n + "_nw"], chan[n + "_w"] = zeros, L
+    for n in E._GL_CHANNELS_BIAS:
+        chan[n] = zeros
+    chan["pk_w"] = zeros                                    # P13ratio = 1: only the e^{-x}-weighted "_w" terms
+    gl = E._gl_multipoles(chan, k, cap_on["f"], cap_on["s2"], cap_on["ds2"],
+                          hratio=cap_on["hratio"], Dratio=cap_on["Dratio"])
+    return {lab: np.stack([np.asarray(gl[f"Pk_{l}_{c}1"])[mask] for l in ELLS]) for lab, c in MATTER_LOOPS.items()}
+
+
+def matter_rebuild_checks(caps) -> dict:
+    """Round-off identities that pin the matter-term rebuild (the scratch measured them at 6e-14 - 9e-14 and
+    <= 8.6e-16, jobs 24970 / 24971):
+      p22_bilinear  max over P22 channels of max|L22[P] - L22[P_nw] - 2 L22[P_nw, P_w] - L22[P_w, P_w]| /
+                    max|L22[P]| -- the IR-off captures on P and P_nw, clax's IR-on wiggle channel (= 2 L22[P_nw, P_w],
+                    qf_split) and the rebuilt L22[P_w, P_w] add up, so the rebuild is the second-order piece;
+      p13_uv_removed max over P13 channels of max|P_nw (P_w I13[P_w]) - P_w (P_nw I13[P_w])| / max|P_w P_nw I13[P_w]|,
+                    the second factor clax's IR-on P13 wiggle channel: zero only if the UV term was removed exactly."""
+    import clax.ept as E
+    cap_on, cap_off, cap_nw = caps["on"], caps["off"], caps["nw"]
+    ww = _matter_ww_channels(caps)
+    pnw, pw = np.asarray(cap_on["chan"]["pk_nw"]), np.asarray(cap_on["chan"]["pk_w"])
+    on, off, nw = cap_on["chan"], cap_off["chan"], cap_nw["chan"]
+    p22 = [n for n in E._GL_CHANNELS_LOOP if n.startswith("P22")]
+    p13 = [n for n in E._GL_CHANNELS_LOOP if n.startswith("P13")]
+    bil = max(float(np.max(np.abs(np.asarray(off[n + "_nw"]) - np.asarray(nw[n + "_nw"]) - np.asarray(on[n + "_w"])
+                                  - np.asarray(ww[n]))) / np.max(np.abs(np.asarray(off[n + "_nw"])))) for n in p22)
+    uv = max(float(np.max(np.abs(np.asarray(ww[n]) * pnw - np.asarray(on[n + "_w"]) * pw))
+                   / np.max(np.abs(np.asarray(on[n + "_w"]) * pw))) for n in p13)
+    return {"p22_bilinear": bil, "p13_uv_removed": uv}
+
+
 # --------------------------------------------------------------------------- documented difference on the total (Task 7)
 
 def monomial_value(lab: str, theta: dict) -> float:
@@ -709,11 +900,15 @@ def monomial_value(lab: str, theta: dict) -> float:
     return float(np.prod([1.0 if v == "1" else theta[v] for v in lab.split("*")]))
 
 
+# The four parts of D, in the order predicted_total_difference returns them.
+D_PARTS = ("ctr", "closure", "kept", "matter")
+
+
 def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE, model=None) -> dict:
-    """The documented ps_1loop - clax-pt model difference (spec §4.2) on the TOTAL P_0, P_2, P_4 at the
-    parameter point theta, on the window kw, as {"ctr": (3, Nw), "closure": (3, Nw)}; their sum is D.
-    Every input that the derivative tangents move -- P_lin, f and the AP ratios -- is read from `inp`,
-    so D can be re-evaluated at a displaced point by passing a modified copy of the shared inputs.
+    """The documented ps_1loop - clax-pt model difference (spec §4.2 items 1-6) on the TOTAL P_0, P_2, P_4 at
+    the parameter point theta, on the window kw, as {"ctr", "closure", "kept", "matter"}: four (3, Nw) parts
+    whose sum is D. Every input that the derivative tangents move -- P_lin, f and the AP ratios -- is read from
+    `inp`, so D can be re-evaluated at a displaced point by passing a modified copy of the shared inputs.
 
       "ctr" (items 1-3): the k^2 counterterms, the k^4 fingers-of-god term and a0
         (`model_difference_factory` evaluated at theta itself; it is polynomial in theta, so this is
@@ -722,28 +917,38 @@ def predicted_total_difference(inp, theta: dict, kw, *, ndens=NDENS_PROBE, model
         of the AP-projected k_t^2 P_IR (Task 5 at z = 0.38, fraction of the coefficient's scale: c0 / cfog =
         1.0 / 0.9% lcdm_fiducial, 1.0 / 1.8% massive_nu_030, 1.1 / 10.2% w0wa_m07_m10).
       "closure" (items 4-5): the 13 CLOSURE_LINES -- the projections clax-pt omits plus ps's
-        IR-resummation scheme -- as `ps_scheme_predicted` per closure monomial times its value at theta.
-        The kept coefficient it subtracts is the rebuilt <X_clax>_l - `omitted_predicted`, which equals
-        clax-pt's reported coefficient to <= 1e-10 (kept-coefficient check, test_omitted_projections_close),
-        so no clax-pt coefficient spectra are needed.
+        IR-resummation scheme there -- per closure monomial times its value at theta. Equal to round-off to
+        `ps_scheme_predicted` (the form Task 5 validates on 42 files), here read off `ps_scheme_all_rows`
+        restricted to CLOSURE_LINES. The kept coefficient it subtracts is the rebuilt <X_clax>_l -
+        `omitted_predicted`, which equals clax-pt's reported coefficient to <= 1e-10 (kept-coefficient check,
+        test_omitted_projections_close), so no clax-pt coefficient spectra are needed.
+      "kept" (item 5 on the rows clax keeps): ps's IR-scheme term on the 14 KEPT_SCHEME_ROWS (b2:l0/l2/l4,
+        b1*b2:l0/l2, b2*b2:l0, bG2*bG2:l0, b2*bG2:l0 and the six F_G2 kept rows), `ps_scheme_all_rows` off
+        CLOSURE_LINES, times the monomial values.
+      "matter" (item 6): ps's exact-in-P_w matter-loop resummation minus clax's linearised one,
+        e^{-x} (L22[P_w, P_w] + P_w I13[P_w]) on the monomials 1, b1, b1^2 (`matter_scheme_term`), times
+        their values.
+    Section comment above `scheme_integrands`: what the last two buy (every derivative line closes at ps
+    nfft >= 512) and where each term comes from in clax/ept.py and ps_1loop.
 
-    Not predicted: the exact monomials and the closure monomials' other rows, whose ps - clax is one-loop
-    numerics gated directly by Tasks 4-5. NumPy-valued -- the closure reads clax's mu-loop through the
-    `capture_gl_inputs` spy -- so it cannot be differentiated with jax; derivatives of D are taken by
-    central differences of this function.
+    Not predicted: one-loop numerics (FFTLog sampling, splines, quadrature), which Tasks 4-5 gate directly
+    coefficient by coefficient, and the matter loops' UV-normalisation difference (relative size 3e-6, job 24970).
+    NumPy-valued -- every scheme part reads clax's mu-loop through the `capture_gl_inputs` spy -- so it cannot
+    be differentiated with jax; derivatives of D are taken by central differences of this function.
 
-    model = the ps_1loop instance whose P_IR enters "ctr" (default ps_model(inp["rbao"]), the gates' model;
-    the convergence ladder passes each rung's model, so D follows ps's rbao / DST cuts there)."""
+    model = the ps_1loop instance whose P_IR enters "ctr" (default ps_model(inp["rbao"])); the derivative gate
+    passes its nfft-512 model and the convergence ladder each rung's, so D follows ps's settings there."""
     th = np.array([[theta[n] for n in THETA_NAMES]], dtype=float)
     ps = ps_model(inp["rbao"]) if model is None else model
     ctr = model_difference_factory(ps, inp, kw, ndens=ndens)(th)[0]
-    captured = capture_gl_inputs(inp)
-    omitted = omitted_predicted(omitted_projections(inp, kw, captured=captured))
-    full_clax = clax_scheme_projections(inp, kw, captured=captured)
-    pred = ps_scheme_predicted(inp, kw, {lab: full_clax[lab] - omitted[lab] for lab in full_clax},
-                               captured=captured)
-    closure = sum(monomial_value(lab, theta) * pred[lab] for lab in pred)
-    return {"ctr": np.asarray(ctr, dtype=float), "closure": np.asarray(closure, dtype=float)}
+    caps = scheme_captures(inp)
+    rows = ps_scheme_all_rows(inp, kw, caps=caps)
+    on_lines = restrict_to_closure_lines(rows)
+    closure = sum(monomial_value(lab, theta) * on_lines[lab] for lab in rows)
+    kept = sum(monomial_value(lab, theta) * (rows[lab] - on_lines[lab]) for lab in rows)
+    matter = sum(monomial_value(lab, theta) * m for lab, m in matter_scheme_term(inp, kw, caps=caps).items())
+    return {"ctr": np.asarray(ctr, dtype=float), "closure": np.asarray(closure, dtype=float),
+            "kept": np.asarray(kept, dtype=float), "matter": np.asarray(matter, dtype=float)}
 
 
 # --------------------------------------------------------------------------- derivative closure (Task 7; Task 9's ladder)
@@ -794,7 +999,7 @@ def predicted_difference_at(inp, theta: dict, kw, x, *, model=None):
     inp_x = {**inp, "f": float(f), "hratio": 1.0 / float(a_para), "Dratio": float(a_perp),
              "pk": np.asarray(pk, dtype=float)}
     parts = predicted_total_difference(inp_x, theta, kw, ndens=NDENS_PROBE, model=model)
-    return parts["ctr"] + parts["closure"], parts
+    return sum(parts[n] for n in D_PARTS), parts
 
 
 def primal_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, *, model=None) -> dict:
@@ -812,16 +1017,16 @@ def primal_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, *, model=None) ->
 def tangent_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, t, *, fd_step=FD_STEP, model=None) -> dict:
     """{"l<l>": {...}} along the tangent t: direct = rel(jvp_ps, jvp_clax); closed = rel(jvp_ps - dD/dt,
     jvp_clax), dD/dt the central difference of D at x0 +/- fd_step t (D is NumPy-valued, so not jvp-able);
-    ratio = closed / direct; k / k_direct = where the closed / direct differences peak; dD_ctr / dD_closure =
-    max|dD/dt| of the counterterm-map and closure-line parts, as fractions of max|jvp_clax|; scale = max|jvp_clax|
-    itself (the derivative's scale every fraction here is taken of)."""
+    ratio = closed / direct; k / k_direct = where the closed / direct differences peak; dD_<part> = max|dD/dt|
+    of each part of D (D_PARTS: counterterm map, the 13 closure lines, ps's scheme term on the kept bias rows,
+    the matter-loop term), as fractions of max|jvp_clax|; scale = max|jvp_clax| itself (the derivative's
+    scale every fraction here is taken of)."""
     jps = np.asarray(jax.jvp(ps_fun, x0, t)[1])
     jcl = np.asarray(jax.jvp(clax_fun, x0, t)[1])
     dp, pp = predicted_difference_at(inp, theta, kw, tuple(x + fd_step * dx for x, dx in zip(x0, t)), model=model)
     dm, pm = predicted_difference_at(inp, theta, kw, tuple(x - fd_step * dx for x, dx in zip(x0, t)), model=model)
     dD = (dp - dm) / (2.0 * fd_step)
-    d_ctr = (pp["ctr"] - pm["ctr"]) / (2.0 * fd_step)
-    d_clo = (pp["closure"] - pm["closure"]) / (2.0 * fd_step)
+    d_part = {n: (pp[n] - pm[n]) / (2.0 * fd_step) for n in D_PARTS}
     out = {}
     for i, l in enumerate(ELLS):
         scale = max(float(np.max(np.abs(jcl[i]))), 1e-300)
@@ -832,8 +1037,7 @@ def tangent_closure(ps_fun, clax_fun, inp, theta: dict, kw, x0, t, *, fd_step=FD
         k_d = float(kw[int(np.argmax(np.abs(jps[i] - jcl[i])))])
         ratio = closed / direct if direct > 0 else float("nan")
         out[f"l{l}"] = {"direct": direct, "closed": closed, "ratio": ratio, "k": k_c, "k_direct": k_d, "scale": scale,
-                        "dD_ctr": float(np.max(np.abs(d_ctr[i])) / scale),
-                        "dD_closure": float(np.max(np.abs(d_clo[i])) / scale)}
+                        **{f"dD_{n}": float(np.max(np.abs(d_part[n][i])) / scale) for n in D_PARTS}}
     return out
 
 
