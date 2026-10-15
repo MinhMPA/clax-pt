@@ -15,8 +15,10 @@ USER DECISIONS Oct 14, 2026 add two rules:
     rows that coincide only without AP (list below) -- there is no model difference to test, so the rule is
     not applied and the line stays under the threshold gate.
     "Identically zero" is a test, not a tunable: max|predicted| <= PRED_IDENTICALLY_ZERO = 1e-12 of the gate
-    denominator, i.e. zero to round-off (the two expressions differ only in the order of the operations).
-    The ratio is logged on every line either way.
+    denominator, i.e. zero to round-off (the two expressions differ only in the order of the operations),
+    and the set of lines it selects is asserted to be the one the algebra predicts (ZERO_PREDICTION_LINES,
+    ZERO_PREDICTION_LINES_NO_AP), so a new zero or a lost one fails the test. The ratio residual / measured
+    is logged on every line either way.
   * ps_1loop runs at nfft = PS_NFFT_CTR_CLOSURE = 512 in this closure, the derivative gate's setting
     (tests/test_ps1loop_gradients.py PS_NFFT_GATE): at ps's default 256, c4:l2 -- a line with a real model
     difference -- closes to only 0.58-0.79 of its measured difference in 5 files (k = 0.191 h/Mpc, job
@@ -80,6 +82,12 @@ PS_NFFT_CTR_CLOSURE = 512
 # A predicted difference is identically zero when max|predicted| <= this fraction of the gate denominator: zero to
 # round-off, where the two codes' models are the same expression. A test of the algebra, not a tolerance to tune.
 PRED_IDENTICALLY_ZERO = 1e-12
+# The lines whose prediction the algebra makes identically zero, pinned (asserted per file): the c_j monomial on its
+# own multipole and the exactly mapped a0 rows in every file; without AP (k_t = k) also a0:l2 (a0 (k/k_nl)^2 is then
+# isotropic) and cfog*b1*b1:l4 (ps's b1^2 f^4 mu^4 k^4 P_IR and clax's (8/35)(35/8) b4 f^2 k^2 Pctr_4 coincide).
+# Measured: <= 2.9e-14 of the denominator on these, >= 3.0e-4 on every other line (job 25482).
+ZERO_PREDICTION_LINES = frozenset({"c0:l0", "c2:l2", "c4:l4", "a0:l0", "a0:l4"})
+ZERO_PREDICTION_LINES_NO_AP = ZERO_PREDICTION_LINES | {"a0:l2", "cfog*b1*b1:l4"}
 
 
 def pytest_generate_tests(metafunc):
@@ -118,9 +126,10 @@ def test_model_difference_closes(case_z):
         m, r = measured[n]["err"], errs[n]["err"]
         zero = bool(p <= PRED_IDENTICALLY_ZERO)
         per_line[n] = {"measured": m, "predicted": p, "residual": r, "k_residual": errs[n]["k"],
-                       "rule": "not applied: prediction identically zero" if zero else "applied"}
+                       "ratio": r / m if m > 0.0 else None,
+                       "rule": "not applied: prediction identically zero" if zero else "applied",
+                       "rule_checked": bool(m > br.DISCRIM_MIN and not zero)}
         if m > br.DISCRIM_MIN:
-            per_line[n]["ratio"] = r / m
             if zero:
                 exempt[n] = m
             else:
@@ -128,6 +137,12 @@ def test_model_difference_closes(case_z):
                 if not ratios[n] <= br.DISCRIM_RATIO:
                     lines.append(f"ERROR discrimination {n}: closure residual {100 * r:.3f}% > {br.DISCRIM_RATIO} x "
                                  f"measured {100 * m:.3f}% (ratio {ratios[n]:.3f}) at k={errs[n]['k']:.3f}")
+    zero_set = {n for n, d in per_line.items() if d["rule"] != "applied"}
+    expected = ZERO_PREDICTION_LINES if br.has_ap(inp) else ZERO_PREDICTION_LINES_NO_AP
+    if zero_set != expected:
+        lines.append(f"ERROR zero-prediction set {sorted(zero_set)} != the algebra's {sorted(expected)} "
+                     f"(AP {'on' if br.has_ap(inp) else 'off'}; extra {sorted(zero_set - expected)}, "
+                     f"missing {sorted(expected - zero_set)})")
     br.log_record(layer="closure", case=case, z=z, preset="model-difference", errors=errs,
                   extra={"model_difference_size": size, "lines": per_line, "ps_nfft": PS_NFFT_CTR_CLOSURE,
                          "pred_identically_zero": PRED_IDENTICALLY_ZERO})

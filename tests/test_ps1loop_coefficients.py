@@ -1,6 +1,12 @@
 # tests/test_ps1loop_coefficients.py
 """Code-accuracy gate on coefficient spectra (spec §5.1): ps_1loop vs clax-pt on CLASS-PT's
-own inputs, for every monomial whose translation is exact (spec §4.1). 14 cosmologies x
+own inputs, for every monomial whose translation is exact (spec §4.1). Exact translation does not mean an
+identical model: the rows of b2, b1*b2, b2^2, bG2^2, b2*bG2, the six F_G2 kept rows and 1, b1, b1^2 also carry
+the spec §4.2 items 5-6 model difference (ps's IR scheme on the kept bias rows; the matter loops' O(P_w^2)
+term), which this gate does not subtract. So these passes are partly physics-limited: b2:l2 uses 0.878% of its
+1% gate (omega_cdm_low z = 0.38), b1*b2:l2 0.854% (omega_cdm_low z = 0), b2:l4 1.316% of 2%
+(massive_nu_015_omega_cdm_low z = 0; job 25493), and at lcdm_fiducial z = 0.38 the scheme term explains b2:l2
+almost entirely (0.612% -> 0.026%, scratch job 24970; not measured at omega_cdm_low). 14 cosmologies x
 z in (0, 0.38, 0.8) in full mode; vc.FAST_CASES x vc.FAST_Z under --fast. Multi-cosmology
 rule: satisfied by construction. The thirteen br.CLOSURE_LINES (six F_G2 C1 lines, the six
 isotropic-loop l2/l4 lines of b2*b2, bG2*bG2, b2*bG2, and b1*b2:l4 = CLASS-PT's computed-but-unused

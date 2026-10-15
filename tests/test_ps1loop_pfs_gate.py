@@ -62,7 +62,9 @@ PFS_GATE_DECISION = (
     "changed to match the other's or the user changes the gate's nuisance treatment")
 
 
-@pytest.mark.xfail(strict=True, reason=PFS_GATE_DECISION)
+# raises=pytest.fail.Exception: only the gate's own pytest.fail counts as the decided failure; a crash (a missing
+# reference, a non-finite spectrum) is reported as a failure, not absorbed by the xfail.
+@pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason=PFS_GATE_DECISION)
 def test_pfs_error_bar_gate(case):
     parts_c, parts_cfog, parts_marg, per_slice, sig_max = [], [], [], [], 0.0
     for sl in pfs.load_slices():
