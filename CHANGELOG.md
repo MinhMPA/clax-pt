@@ -30,7 +30,8 @@ What they cost:
 - Along the stretch, terms 1 and 2 are each up to about 0.77% of the derivative's scale (l = 4; term 1: 0.748%
   lcdm_fiducial, 0.774% w0wa_m07_m10; term 2: 0.614% lcdm_fiducial; job 25321).
 - At ps nfft 256, ps's resolution alone sets derivative errors of the same size. For derivatives, run ps at
-  nfft >= 512.
+  nfft >= 512 (the derivative gate's setting, at which the closure passes, job 25321); for AP-on spectra the one
+  recommendation stays nfft >= 1024 with a 201-node mu grid (finding 9).
 - A single-code analysis is unaffected. The spectra already agreed, and the primal remainder max|ps - clax - D| is
   now 0.002 / 0.005 / 0.025% of max|clax P_l| (lcdm_fiducial, job 25321).
 
@@ -65,7 +66,7 @@ The PFS error-bar gate stays red by the user's decision of Oct 12, 2026, now as 
   pure-F_G2 kept rows is negligible there only because bG2 and bGamma3 are small; at bias points with large bG2 or
   bGamma3 it would weigh more.
 - w0wa_m07_m10 stretch l = 4 sits at 1.445% of its 2% threshold, up from 1.353% with the restricted form; the
-  ratio is 0.16 because the direct difference is 8.8%. It is the line closest to its threshold.
+  ratio is 0.16 because the direct difference is 8.8%. It is the derivative line closest to its threshold (72% of it; the next is at 36%); among the coefficient lines b2:l2 sits at 88% of its 1% gate.
 - The coefficient gate's "exact set" carries the same model difference unsubtracted: b2:l2 uses 0.878% of its 1%
   gate, b1*b2:l2 0.854%, b2:l4 1.316% of 2% (job 25493). Those passes are partly physics-limited (spec §5.1,
   findings, finding 4).
