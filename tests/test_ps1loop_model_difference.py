@@ -4,7 +4,37 @@
 
 Closure: for c0, c2, c4, cfog, cfog*b1, cfog*b1^2 and a0, the measured ps_1loop - clax-pt
 coefficient difference must EQUAL the closed-form model difference evaluated on ps_1loop's own
-P_IR (ps's _get_pk_irres_rsd).
+P_IR (ps's _get_pk_irres_rsd), at the gate thresholds 1% / 1% / 2% (l = 0 / 2 / 4) on every line.
+USER DECISIONS Oct 14, 2026 add two rules:
+  * Discrimination, as on the 13 lines below (br.DISCRIM_MIN / br.DISCRIM_RATIO), where the closed form
+    predicts a NONZERO difference: on such a line whose measured |ps - clax| exceeds 1e-3 of the gate
+    denominator, the closure residual must be <= 0.5 x the measured difference, so a counterterm,
+    fingers-of-god or a0 line cannot pass merely by being small. Where the prediction is identically zero
+    -- the c_j monomial on its own multipole (c0:l0, c2:l2, c4:l4), where ps's -2 c_j f^{j/2} mu_t^j k_t^2 P_IR
+    and clax's 2 cs_j Pctr_j are the same expression on the same P_IR, the exactly mapped a0 rows, and two
+    rows that coincide only without AP (list below) -- there is no model difference to test, so the rule is
+    not applied and the line stays under the threshold gate.
+    "Identically zero" is a test, not a tunable: max|predicted| <= PRED_IDENTICALLY_ZERO = 1e-12 of the gate
+    denominator, i.e. zero to round-off (the two expressions differ only in the order of the operations).
+    The ratio is logged on every line either way.
+  * ps_1loop runs at nfft = PS_NFFT_CTR_CLOSURE = 512 in this closure, the derivative gate's setting
+    (tests/test_ps1loop_gradients.py PS_NFFT_GATE): at ps's default 256, c4:l2 -- a line with a real model
+    difference -- closes to only 0.58-0.79 of its measured difference in 5 files (k = 0.191 h/Mpc, job
+    25326); at nfft 512 to 0.155-0.182 in the same files (job 25482), at nfft 1024 with a 201-node mu grid to
+    0.07-0.09 (job 25328): ps's own resolution, not the closed form, set that residual. At nfft 512 all 613
+    rule-bearing line x file checks pass (worst ratio 0.199, c0:l4 omega_cdm_low z = 0.8; job 25482). Both
+    decisions concern this closure only; the 13-line closure, the reproduction test and the IR-off map
+    exactness below keep ps's default nfft = 256.
+  The lines with an identically zero prediction are, by the test, c0:l0, c2:l2, c4:l4, a0:l0 and a0:l4 in every
+  file and, without AP (z = 0), a0:l2 and cfog*b1*b1:l4 (max|predicted| <= 2.9e-14 of the denominator there,
+  >= 3.0e-4 on every other line; job 25482).
+Finding recorded with the exemption (docs/ps1loop-findings.md, finding 9): on the diagonal lines the measured
+ps - clax is 0.10-0.18% of the coefficient's scale at k ~ 0.18-0.24 h/Mpc in 25 of 28 AP files and <= 6e-7 at
+z = 0 (no AP) at ps's default resolution (job 25326). At nfft 512 it is <= 0.055% (median 0.037% on c0:l0;
+job 25482); at nfft 1024 with a 201-node mu grid it shrinks a median 3.4x (13-16x near the fiducial geometry,
+2-3x at large AP offsets), leaving 0.04-0.075% (job 25328): partly ps's AP-table interpolation (finding 3),
+partly a piece that grows with the AP offset and is not isolated.
+Logged per line: measured, predicted, residual, ratio, whether the rule applied.
 
 Omitted projections (user decisions Oct 8 and Oct 10, 2026; spec §4.2 items 4-5): the 13
 br.CLOSURE_LINES -- six F_G2 (C1) lines, the l = 2, 4 moments of the isotropic loops b2*b2,
@@ -21,7 +51,7 @@ clax's P_nw, Sigma^2 and AP geometry. Three checks guard it:
     denominator, the closure residual must be <= 0.5 x the measured difference, so a line cannot
     pass the gate merely by being small. Lines measured at <= 1e-3 (0.1% of the coefficient's
     scale, e.g. the l = 4 isotropic loops) are physically negligible and held to the gate only.
-ps_1loop runs at its default nfft = 256 (locked decision). The closure remainder is non-smooth in k and
+The 13-line closure runs ps at its default nfft = 256 (locked decision). Its remainder is non-smooth in k and
 on the 1% gate worst for b1*bG2:l2, 0.56% of its max|clax| at z = 0; the candidate is ps
 interpolating its loops in k on its 256-point grid (not O(P_w^2), which cancels, nor AP, since that
 worst case has none).
@@ -43,6 +73,13 @@ from tests import ept_campaign_utils as cu
 from tests import ps1loop_bridge as br
 
 REPRO_TOL = 1e-10      # rebuilt vs clax's own projections / coefficients, fraction of their scale
+# ps_1loop's FFTLog sampling for the counterterm / fingers-of-god / a0 closure (USER DECISION Oct 14, 2026; module
+# docstring): the derivative gate's setting. At ps's default 256 its resolution, not the closed form, sets the c4:l2
+# residual (ratio 0.58-0.79 in 5 files, job 25326; 0.155-0.182 at 512, job 25482).
+PS_NFFT_CTR_CLOSURE = 512
+# A predicted difference is identically zero when max|predicted| <= this fraction of the gate denominator: zero to
+# round-off, where the two codes' models are the same expression. A test of the algebra, not a tolerance to tune.
+PRED_IDENTICALLY_ZERO = 1e-12
 
 
 def pytest_generate_tests(metafunc):
@@ -56,22 +93,52 @@ def pytest_generate_tests(metafunc):
 
 
 def test_model_difference_closes(case_z):
+    """Counterterm / fingers-of-god / a0 closure (module docstring): threshold gate on every line; the
+    discrimination rule where the predicted difference is not identically zero; ps at PS_NFFT_CTR_CLOSURE."""
     case, z = case_z
     inp = br.shared_inputs(cu.require_reference(case, z))
-    res, kw = br.coefficient_triplet(inp, br.MODEL_DIFF_MONOMIALS)
-    pred = br.coefficients(br.model_difference_factory(br.ps_model(inp["rbao"]), inp, kw),
-                           br.MODEL_DIFF_MONOMIALS)
+    res, kw = br.coefficient_triplet(inp, br.MODEL_DIFF_MONOMIALS, nfft=PS_NFFT_CTR_CLOSURE)
+    model = br.ps_model(inp["rbao"], do_irres=True, nfft=PS_NFFT_CTR_CLOSURE)   # the instance res["ps"] used
+    pred = br.coefficients(br.model_difference_factory(model, inp, kw), br.MODEL_DIFF_MONOMIALS)
     # gate(clax + measured - predicted vs clax) == max|measured - predicted| / |clax coefficient|
     closure = {"ps": {lab: res["clax"][lab] + (res["ps"][lab] - res["clax"][lab]) - pred[lab]
                       for lab in res["clax"]},
                "clax": res["clax"], "classpt": {}}
     errs, lines = br.gate(closure, kw)
+    measured, _ = br.gate(res, kw)                 # the direct ps - clax difference, same denominators
     size = {lab: float(np.max(np.abs(pred[lab])) / max(np.max(np.abs(res["clax"][lab])), 1e-300))
             for lab in pred}
+    per_line, ratios, exempt = {}, {}, {}
+    for n in errs:
+        lab, ch = n.split(":")
+        i = br.CHANNELS.index(ch)
+        scale = float(np.max(np.abs(res["clax"][lab])))
+        # max|predicted| over the gate denominator (the same metric as measured and residual)
+        p = br.coef_error(res["clax"][lab][i] + pred[lab][i], res["clax"][lab][i], kw, scale=scale)["err"]
+        m, r = measured[n]["err"], errs[n]["err"]
+        zero = bool(p <= PRED_IDENTICALLY_ZERO)
+        per_line[n] = {"measured": m, "predicted": p, "residual": r, "k_residual": errs[n]["k"],
+                       "rule": "not applied: prediction identically zero" if zero else "applied"}
+        if m > br.DISCRIM_MIN:
+            per_line[n]["ratio"] = r / m
+            if zero:
+                exempt[n] = m
+            else:
+                ratios[n] = r / m
+                if not ratios[n] <= br.DISCRIM_RATIO:
+                    lines.append(f"ERROR discrimination {n}: closure residual {100 * r:.3f}% > {br.DISCRIM_RATIO} x "
+                                 f"measured {100 * m:.3f}% (ratio {ratios[n]:.3f}) at k={errs[n]['k']:.3f}")
     br.log_record(layer="closure", case=case, z=z, preset="model-difference", errors=errs,
-                  extra={"model_difference_size": size})
-    print(f"{case} z={z:.2f} [closure] {br.worst(errs)}; largest model difference "
-          f"{max(size, key=size.get)} {100 * max(size.values()):.2f}%")
+                  extra={"model_difference_size": size, "lines": per_line, "ps_nfft": PS_NFFT_CTR_CLOSURE,
+                         "pred_identically_zero": PRED_IDENTICALLY_ZERO})
+    wr = max(ratios, key=ratios.get) if ratios else None
+    we = max(exempt, key=exempt.get) if exempt else None
+    print(f"{case} z={z:.2f} [closure, ps nfft {PS_NFFT_CTR_CLOSURE}] {br.worst(errs)}; largest model difference "
+          f"{max(size, key=size.get)} {100 * max(size.values()):.2f}%; worst ratio "
+          + (f"{wr} {100 * per_line[wr]['measured']:.3f}->{100 * per_line[wr]['residual']:.3f}% "
+             f"r={ratios[wr]:.3f} (of {len(ratios)} lines > {br.DISCRIM_MIN:.0e})" if wr else "n/a")
+          + "; zero-prediction lines above 1e-3 (rule not applied): "
+          + (f"{len(exempt)}, largest {we} {100 * exempt[we]:.3f}%" if we else "none"))
     assert not lines, f"{case} z={z:.2f}:\n" + "\n".join(lines)
 
 

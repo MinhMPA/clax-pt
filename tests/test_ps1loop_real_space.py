@@ -11,7 +11,12 @@ CLASS-PT, and clax-pt mirroring it, store the isotropic loops Id2d2, Id2G2, IG2G
 1, 4, 5) as the AP-folded l = 0 moment of the mu-loop and reuse them in pk_gg_real, so an AP file's
 real-space b2*b2, b2*bG2, bG2*bG2 rows carry AP; that is a CLASS-PT convention, recorded as a
 finding and never gated here. The CLASS-PT tie-breaker uses only the IR-off files, which are no-AP
-(asserted in the bridge)."""
+(asserted in the bridge).
+
+Not gated against ps_1loop here: the P_gg and P_gm counterterm maps (both codes run with their P_gg / P_gm
+counterterms off, br._ps_real_jit and br.clax_real_batch, because the two parameterise them differently) and
+ps's scale-dependent stochastic term a0 (k/k_nl)^2 (a0 = 0 in REAL_MONOMIALS). Only the P_mm counterterm
+shape (c0) is compared."""
 from __future__ import annotations
 
 import json

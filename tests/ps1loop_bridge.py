@@ -306,11 +306,15 @@ def coefficients(F, monomials) -> dict[str, np.ndarray]:
     return {lab: sum(w * vals[j] for j, w in terms) for lab, terms in plan.items()}
 
 
-def coefficient_triplet(inp, monomials, *, ir=True, ndens=NDENS_PROBE):
+def coefficient_triplet(inp, monomials, *, ir=True, ndens=NDENS_PROBE, nfft=256):
+    """{"ps", "clax", "classpt"} coefficient spectra of `monomials` on the window, and the window kw. nfft =
+    ps_1loop's FFTLog sampling (default 256, ps's own default and what the coefficient gate and the 13-line
+    closure run; the counterterm / fingers-of-god / a0 closure passes 512, USER DECISION Oct 14, 2026)."""
     mask = cu.window(inp["k_h"])
     kw = inp["k_h"][mask]
     e = clax_ept(inp, ir=ir)
-    res = {"ps": coefficients(ps_batch(ps_model(inp["rbao"], do_irres=ir), inp, kw, ndens=ndens), monomials),
+    res = {"ps": coefficients(ps_batch(ps_model(inp["rbao"], do_irres=ir, nfft=nfft), inp, kw, ndens=ndens),
+                              monomials),
            "clax": coefficients(clax_batch(e, inp, mask, ndens=ndens), monomials),
            "classpt": {}}
     tb = [m for m in monomials if not set(m) & NO_TIEBREAK]

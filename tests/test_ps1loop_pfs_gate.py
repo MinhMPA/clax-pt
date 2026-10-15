@@ -27,7 +27,10 @@ Delta chi^2 below is an exact quadratic form in the nuisance amplitudes):
   - the marginalised Delta chi^2: ps_1loop refits its OWN (c, cfog), shared by the seven slices,
     to clax-pt held at the gate point (flat priors). This says whether PFS could tell the codes
     apart once the nuisance amplitudes float; the shifts of the best fit from (C_REF, CFOG_REF)
-    say what that costs."""
+    say what that costs.
+
+Carried as xfail(strict=True) on all five cosmologies (PFS_GATE_DECISION below; CHANGELOG Oct 13 and Oct 14,
+2026, docs/ps1loop-findings.md "Test status"); the assertion itself is unchanged."""
 from __future__ import annotations
 
 import numpy as np
@@ -50,6 +53,16 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("case", ["lcdm_fiducial"] if fast else list(vc.PFS_CASES))
 
 
+# How the red-by-decision gate travels (USER DECISION Oct 14, 2026): a strict xfail, so the suite stays green
+# while the gate fails as decided, and turns red the moment any cosmology passes (XPASS(strict)) -- the sign
+# that the decision's removal condition may be met.
+PFS_GATE_DECISION = (
+    "USER DECISION Oct 12, 2026: fixed-nuisance gate kept red as the finding (AP treatment of the k^4 "
+    "fingers-of-god term; Delta chi^2 1.55-40.6 at cfog = 500); remove when one code's FoG AP treatment is "
+    "changed to match the other's or the user changes the gate's nuisance treatment")
+
+
+@pytest.mark.xfail(strict=True, reason=PFS_GATE_DECISION)
 def test_pfs_error_bar_gate(case):
     parts_c, parts_cfog, parts_marg, per_slice, sig_max = [], [], [], [], 0.0
     for sl in pfs.load_slices():
