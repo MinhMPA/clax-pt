@@ -92,8 +92,11 @@ Pd2d2_0 is each code's own (clax-pt: `EPTComponents.Pd2d2_0`; CLASS-PT: the file
 
 ### 4.2 Model differences (what the map cannot remove)
 
-These are differences of *model*, not numerics. Each has a closed form, and §5.2 tests that the
-measured difference equals it. Items 1-3 are evaluated on ps_1loop's own P_IR(k,μ). Items 4-6 use
+These are differences of *model*, not numerics. Each has a closed form. §5.2 tests coefficient by coefficient
+that the measured difference equals it for items 1-4 and for item 5 on the item-4 lines; items 5 (on the kept
+rows) and 6 are tested on the total multipoles through D (§5.5: the primal guard and the derivative closure),
+and at coefficient level only in scratch (jobs 24970 / 24971). Items 1-3 are evaluated on ps_1loop's own
+P_IR(k,μ). Items 4-6 use
 clax's μ-loop inputs and clax's P_nw, which ps_1loop 0.5.0's P_nw matches to 1.4e-5 of P.
 
 1. **k² counterterms** — clax-pt projects each cs_ℓ term onto its own ℓ only
@@ -150,6 +153,13 @@ finite stencil on {−1, 0, 1} per parameter (no truncation error; P_ℓ has deg
 per parameter). Monomials: 1, b1, b1², b2, b1b2, b2², bG2, b1bG2, bG2², b2bG2,
 bGamma3, b1bGamma3, P_shot, a2 (exact set); c0, c2, c4, cfog, cfog·b1, cfog·b1², a0
 (model-difference set, §5.2).
+
+"Exact" refers to the parameter translation (§4.1), not to the model: the rows of b2, b1b2, b2², bG2², b2bG2,
+the six F_G2 kept rows and 1, b1, b1² also carry the §4.2 items 5-6 model difference, which this gate does not
+subtract. Their passes are therefore partly physics-limited: b2:ℓ2 uses 0.878% of its 1% gate (omega_cdm_low
+z = 0.38), b1b2:ℓ2 0.854% (omega_cdm_low z = 0), b2:ℓ4 1.316% of 2% (job 25493). At lcdm_fiducial z = 0.38 the
+scheme term explains b2:ℓ2 almost entirely (0.612% → 0.026%, scratch job 24970); at omega_cdm_low this was not
+measured. Thresholds unchanged.
 
 - Window: CLASS-PT grid points `[NSIDE:]` with k ≤ 0.3 h/Mpc (`cu.window`).
 - Metric: `max|ps − clax| / max|clax|` on the window (campaign metric). When clax-pt's

@@ -27,8 +27,8 @@ three effects:
 What they cost:
 - Comparing derivatives of the two codes (Fisher matrices, Laplace approximations, gradient cross-checks) without
   terms 1-2, the codes appear to differ by up to 1.5% of the l = 4 derivative along P_lin directions.
-- Along the stretch, terms 1 and 2 are each up to 0.75% of the derivative's scale (lcdm_fiducial l = 4: 0.748% and
-  0.614%, job 25321).
+- Along the stretch, terms 1 and 2 are each up to about 0.77% of the derivative's scale (l = 4; term 1: 0.748%
+  lcdm_fiducial, 0.774% w0wa_m07_m10; term 2: 0.614% lcdm_fiducial; job 25321).
 - At ps nfft 256, ps's resolution alone sets derivative errors of the same size. For derivatives, run ps at
   nfft >= 512.
 - A single-code analysis is unaffected. The spectra already agreed, and the primal remainder max|ps - clax - D| is
@@ -57,6 +57,18 @@ The PFS error-bar gate stays red by the user's decision of Oct 12, 2026, now as 
   applies where the predicted difference is not identically zero, and ps runs at nfft = 512. See below.
 - `tests/test_ps1loop_pfs_gate.py`: `xfail(strict=True)` with the decision text. `slurm/run-ps1loop-fast-suite.sh`:
   only the Rosenbrock deselect remains.
+
+**Downstream notes.**
+- The extended closed form D is test-side code, not a public API. It is NumPy-valued, built on a spy of clax-pt's
+  private `_gl_multipoles` and `_channels_at`, and differentiated by central differences only.
+- It was validated at one bias point, the PFS point at z = 0.38. The unexplained 0.03-0.07% remainder on the
+  pure-F_G2 kept rows is negligible there only because bG2 and bGamma3 are small; at bias points with large bG2 or
+  bGamma3 it would weigh more.
+- w0wa_m07_m10 stretch l = 4 sits at 1.445% of its 2% threshold, up from 1.353% with the restricted form; the
+  ratio is 0.16 because the direct difference is 8.8%. It is the line closest to its threshold.
+- The coefficient gate's "exact set" carries the same model difference unsubtracted: b2:l2 uses 0.878% of its 1%
+  gate, b1*b2:l2 0.854%, b2:l4 1.316% of 2% (job 25493). Those passes are partly physics-limited (spec §5.1,
+  findings, finding 4).
 
 **Evidence.**
 - RED checkpoint (job 25318): with D restricted to the 13 lines and ps at nfft 512, the stretch lines fail

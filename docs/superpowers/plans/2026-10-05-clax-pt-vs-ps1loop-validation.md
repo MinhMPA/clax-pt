@@ -2138,7 +2138,8 @@ Then ask the user whether to push `feat/ps1loop-cross-validation` and open a PR 
 
 Added after the final whole-branch review, by the user's decisions of Oct 14, 2026. Requirements, commit sequence,
 runs and evidence: `.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/task-11-brief.md` (with
-`final-fix-brief.md` §A). This plan stays the document of record; in short:
+`final-fix-brief.md` §A; SDD ledger, not committed; the decisions are restated in CHANGELOG Oct 14, 2026). This
+plan stays the document of record; in short:
 
 - Commit 1 (RED): the derivative gate runs ps at nfft 512 (`PS_NFFT_GATE`) with the restricted closed form; the
   stretch discrimination lines fail (job 25318).

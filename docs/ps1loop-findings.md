@@ -45,16 +45,16 @@ Every measured number below carries the igpu SLURM job that produced it. Logs ar
 
 | # | finding | code | cost to a PFS analysis if ignored | recommended setting or fix |
 |---|---|---|---|---|
-| 1 | default nfft = 256 under-resolves the BAO wiggles in the one-loop terms | ps_1loop | 0.1-0.6% of single bias-coefficient tables; a slice Delta chi^2 moves by <= 15% | nfft = 512 (nfft >= 1024 with AP, finding 3) |
+| 1 | default nfft = 256 under-resolves the BAO wiggles in the one-loop terms | ps_1loop | 0.1-0.6% of single bias-coefficient tables; a slice Delta chi^2 moves by <= 15% | nfft = 512; with AP, nfft >= 1024 with a 201-node mu grid (finding 3) |
 | 2 | derivatives along a k-stretch of P_lin differed by 0.25-1.5% of the derivative's scale beyond the model difference as first documented | attributed (Oct 14, 2026): ps's IR scheme on the kept bias rows and in the matter loops (finding 4), plus ps's nfft = 256 resolution (finding 1) | none once the extended model difference is used and ps runs at nfft >= 512; without it, derivatives along P_lin appear to differ by up to 1.5% at l = 4 | compare with the extended closed form, ps at nfft >= 512 (all derivative lines close, job 25321) |
 | 3 | AP branch discontinuous with the no-AP branch at zero AP offset | ps_1loop | a 0.15 sigma step at alpha = 1, or the same error as an offset inside the AP branch | nfft >= 1024 with a 201-node mu grid (reduces 13-25x, does not remove) |
-| 4 | IR-resummation scheme differs from CLASS-PT's, on every bias row and in the matter loops at second order in P_w | model difference | none once documented; it is part of the Delta chi^2 0.07-0.13 left with c = cfog = 0 in both codes, and up to 0.75% of the derivative's scale along a k-stretch | document; use the closed form when comparing codes |
+| 4 | IR-resummation scheme differs from CLASS-PT's, on every bias row and in the matter loops at second order in P_w | model difference | per-coefficient tables differ by up to ~0.9% of a coefficient's scale for model reasons (b2:l2 at 0.878% of its 1% gate), so the code-accuracy passes on those rows have only ~12% of their margin left for numerics; ~0.77% of the derivative's scale along a k-stretch; part of the Delta chi^2 0.07-0.13 left with c = cfog = 0 | document; use the closed form when comparing codes |
 | 4b | nfft = 2048 gives non-finite PT matrices | ps_1loop | the FFTLog plateau beyond 1024 cannot be checked | raise on non-finite PT matrices; evaluate the Gamma ratio in log space (untested) |
 | 5 | 13 projections computed but never added | CLASS-PT, clax-pt | six F_G2 lines: survey Delta chi^2 <= 2.2e-4 at the coevolution bias point; the other seven bounded at coefficient level only (closed residual <= 0.024%; before closure the omission was <= 1.07% of the coefficient's scale) | keep the CLASS-PT convention (user decision); optional flag in clax-pt |
 | 6 | AP treatment of the k^4 fingers-of-god term | CLASS-PT, clax-pt vs ps_1loop | fixed-nuisance Delta chi^2 1.55-40.6 at cfog = 500; absorbed (0.12-0.78) by refitting cfog, which then shifts by up to +20% | prefer the exact treatment for PFS; optional exact-AP FoG term in clax-pt |
 | 7 | RSD-basis gradient freeze | clax-pt | AD gradients of P_0,2,4 along P_lin wrong at order unity | fixed (MinhMPA/clax-pt#9) |
 | 8 | real-space bias loops carry AP; items filed as smsharma/clax#42-44 | CLASS-PT, clax-pt | real-space P_gg at an AP setting off by up to 12.4% in the b2^2, b2 bG2, bG2^2 terms | evaluate real space at hratio = Dratio = 1 |
-| 9 | AP-only ps - clax difference on the counterterm lines both codes model identically (c0:l0, c2:l2, c4:l4) | open: partly ps_1loop (finding 3), partly not isolated | 0.10-0.18% of the coefficient's scale at nfft 256, <= 0.055% at nfft 512; below the gates | ps nfft >= 512 for AP-on comparisons |
+| 9 | AP-only ps - clax difference on the counterterm lines both codes model identically (c0:l0, c2:l2, c4:l4) | open: partly ps_1loop (finding 3), partly not isolated | 0.10-0.18% of the coefficient's scale at nfft 256, <= 0.055% at nfft 512; below the gates | with AP, nfft >= 1024 with a 201-node mu grid (finding 3); not monotonic in the setting (massive_nu_015_omega_cdm_low z = 0.8: 0.055% at nfft 512, 0.075% at "best") |
 
 ---
 
@@ -114,7 +114,8 @@ term, then splines the result to the output k (interpax cubic). At 256 points De
 **Recommended setting.**
 - nfft = 512 for one-loop accuracy. The ps fix branch kept the default at 256 to limit HMC cost, which grows as
   nfft^2 for the 22-type PT matrices.
-- nfft >= 1024 whenever the AP branch is used (finding 3).
+- nfft >= 1024 with a 201-node mu grid whenever the AP branch is used (finding 3; the document's one AP-on
+  setting).
 - Convergence beyond 1024 cannot be checked (finding 4b).
 
 ### 2. Along a k-stretch of the linear spectrum, the derivative difference came from three identified effects, and it now closes
@@ -279,6 +280,12 @@ term by term, and either scheme can be chosen knowingly.
 - Not confined to the omitted projections (Oct 14, 2026). The same difference sits on every bias row clax keeps
   that is built from those channels or from F_G2: 14 rows, b2 l0/2/4, b1 b2 l0/2, b2^2 l0, bG2^2 l0, b2 bG2 l0 and
   the six F_G2 kept rows (`ps_scheme_all_rows`).
+- Keeping all six F_G2 kept rows is a physics judgement, not a fit. F_G2 is one integrand, so its model difference
+  cannot depend on the multipole it is projected on, and its l = 4 and b1 bG2 l = 2 projections already carry the
+  term in the Task 5 closure. The numbers (ps nfft 512, jobs 24970, 24971):
+  - four rows close slightly worse with the term, by 0.002-0.008 points of the coefficient's scale (b1 bG2 l0,
+    bGamma3 l0 and l2, b1 bGamma3 l0); bG2 l0 and l2 close better;
+  - on the totals at the PFS bias point, the six rows move no derivative line by more than 0.001%.
 - Matter loops (Oct 14, 2026). ps resums the vv, vd and dd loops exactly in P_w, with L[X] = L22[X, X] + X I13[X]
   (`ps_1loop.py:464-494`). CLASS-PT and clax-pt linearise in P_w (`clax/ept.py:1178-1193`). The difference,
   e^{-x(mu)} (L22[P_w, P_w] + P_w I13[P_w]), sits on the monomials 1, b1, b1^2 (`matter_scheme_term`).
@@ -312,6 +319,17 @@ term by term, and either scheme can be chosen knowingly.
 that reason (job 23244). Its PFS weight was not isolated. With c = 0 and cfog = 0 in both codes, the total
 remaining difference over the 7 slices is Delta chi^2 0.07-0.13 (job 24860), and that includes the scheme term.
 This is not a bound: pieces of a quadratic form can cancel.
+- **Per-coefficient tables.** The coefficient gate's "exact set" is exact in its parameter translation, not in its
+  model. The rows of b2, b1 b2, b2^2, bG2^2, b2 bG2, the F_G2 kept rows and 1, b1, b1^2 carry this difference, and
+  that gate does not subtract it. So their passes are partly physics-limited (job 25493):
+  - b2 l2 uses 0.878% of its 1% gate (omega_cdm_low z = 0.38);
+  - b1 b2 l2 uses 0.854% (omega_cdm_low z = 0);
+  - b2 l4 uses 1.316% of its 2% gate (massive_nu_015_omega_cdm_low z = 0).
+  At lcdm_fiducial z = 0.38 the scheme term explains b2 l2 almost entirely (0.612% -> 0.026%, scratch job 24970);
+  at omega_cdm_low this was not measured. Emulators or Fisher terms built per coefficient from either code inherit
+  differences of up to ~0.9% of a coefficient's scale for model reasons.
+- **Derivatives.** Without this difference, derivatives along a k-stretch differ by ~0.77% of the derivative's
+  scale (kept rows, l = 4: 0.748% lcdm_fiducial, 0.774% w0wa_m07_m10; job 25321); see finding 2.
 
 **Recommended.**
 - Document the scheme in ps_1loop.
@@ -563,9 +581,24 @@ P_l by c times this coefficient.
   job 25482).
 
 **Recommended.**
-- Run ps at nfft >= 512 for AP-on comparisons.
+- For AP-on comparisons, use finding 3's setting: nfft >= 1024 with a 201-node mu grid. Caveat: this difference
+  is not monotonic in the setting (massive_nu_015_omega_cdm_low z = 0.8: 0.055% at nfft 512, 0.075% at "best"),
+  and the closure test itself runs at nfft 512.
 - Next step, untested: ladder the AP remap (mu grid, k refinement) at the large-offset cosmologies, to separate
   the interpolation part from the rest.
+
+---
+
+## Optional follow-ups (not started)
+
+- Coefficient-level closure of the 14 kept bias rows (finding 4) over the 42 files at ps nfft 512, so that the
+  coefficient gate's physics-limited passes are closed term by term, not only on the total (Task 5 does this for
+  the 13 omitted lines).
+- Ladder ps's AP remap (mu grid, k refinement) at the large-offset cosmologies, to separate finding 9's
+  interpolation part from the rest.
+- clax-pt: an optional flag that projects the full mu-dependent integrand on every l (finding 5), and an optional
+  exact-AP fingers-of-god term (finding 6).
+- ps_1loop: raise on non-finite PT matrices and evaluate the Gamma ratio in log space (finding 4b).
 
 ---
 
