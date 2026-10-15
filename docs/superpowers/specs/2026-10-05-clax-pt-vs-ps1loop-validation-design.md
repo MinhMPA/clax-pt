@@ -4,7 +4,9 @@
 **Glossary:** `CONTEXT.md` (oracle, second oracle, tie-breaker, code-accuracy gate,
 error-bar gate, shared-input comparison, coefficient spectrum, basis translation,
 counterterm map, counterterm model difference, counterterm headroom, PFS slice)
-**Second oracle:** `~/ps_1loop_jax-for-pfs` (fork MinhMPA/ps_1loop_jax-for-pfs, v0.4.0, `270b2b5`)
+**Second oracle:** `~/ps_1loop_jax-for-pfs` (fork MinhMPA/ps_1loop_jax-for-pfs): ps_1loop_jax 0.5.0, fork main `576ec09`.
+The campaign started at 0.4.0 (`270b2b5`) and paused while the defects it found were fixed in
+MinhMPA/ps_1loop_jax-for-pfs#6.
 
 ## 1. Purpose
 
@@ -91,7 +93,7 @@ Pd2d2_0 is each code's own (clax-pt: `EPTComponents.Pd2d2_0`; CLASS-PT: the file
 ### 4.2 Model differences (what the map cannot remove)
 
 These are differences of *model*, not numerics. Each has a closed form, and §5.2 tests that the
-measured difference equals it. Items 1-3 are evaluated on ps_1loop's own P_IR(k,μ). Items 4-5 use
+measured difference equals it. Items 1-3 are evaluated on ps_1loop's own P_IR(k,μ). Items 4-6 use
 clax's μ-loop inputs and clax's P_nw, which ps_1loop 0.5.0's P_nw matches to 1.4e-5 of P.
 
 1. **k² counterterms** — clax-pt projects each cs_ℓ term onto its own ℓ only
@@ -117,10 +119,27 @@ clax's μ-loop inputs and clax's P_nw, which ps_1loop 0.5.0's P_nw matches to 1.
    - CLASS-PT and clax-pt: an isotropically damped input P_nw + e^{−k²Σ²}P_w for the bias loops, plus
      p_lo(μ) = (P_nw + e^{−x(μ)}P_w)/P_res on F_G2 only.
 
-   The difference nearly cancels at ℓ = 0 and survives at ℓ = 2, 4, i.e. on the item-4 lines.
    Its closed form, X_ps = C[P_nw] + e^{−x(μ)}(C[P] − C[P_nw]), is built from clax's IR-off
-   channels C[·] on the shared P and on clax's P_nw, with clax's Σ², δΣ² and AP geometry. The
-   item-4 closure predicts ps − clax = ⟨X_ps⟩_ℓ − clax_ℓ.
+   channels C[·] on the shared P and on clax's P_nw, with clax's Σ², δΣ² and AP geometry, and
+   predicts ps − clax = ⟨X_ps⟩_ℓ − clax_ℓ. On the item-4 lines the difference is what survives at
+   ℓ = 2, 4 after nearly cancelling at ℓ = 0; the §5.2 closure asserts it there. It is **not**
+   confined to them (extended Oct 14, 2026, user decision; final-review Important 1): it sits on every
+   bias row clax keeps that is built from the same isotropically damped channels or from F_G2 — the 14
+   rows b2 ℓ0/2/4, b1·b2 ℓ0/2, b2² ℓ0, bG2² ℓ0, b2·bG2 ℓ0, bG2 ℓ0/2, b1·bG2 ℓ0, bGamma3 ℓ0/2,
+   b1·bGamma3 ℓ0 (`br.KEPT_SCHEME_ROWS`; the b2 row's integrand is ept.py:1239-1242). The derivative
+   gate's D carries it on all 27 rows (`br.ps_scheme_all_rows`, §5.5). The six F_G2 kept rows are kept
+   as one integrand with the item-4 F_G2 lines; at the PFS bias point they move no derivative line by
+   more than 0.001% (scratch jobs 24970/24971).
+6. **Matter-loop resummation at second order in P_w** (user decision Oct 14, 2026). ps_1loop resums the
+   vv, vd and dd loops exactly in P_w: with L[X] = L22[X, X] + X·I13[X] + UV it adds
+   e^{−x(μ)}(L[P] − L[P_nw]) (ps_1loop.py:464-494). CLASS-PT and clax-pt linearise in P_w: their μ-loop
+   adds e^{−x(μ)}(2L22[P_nw, P_w] + P_w I13[P_nw] + P_nw I13[P_w]) (ept.py:1178-1193; channels from
+   `qf_split`/`p13_split`, 1739-1768). The difference e^{−x(μ)}(L22[P_w, P_w] + P_w I13[P_w]) sits on
+   the monomials 1, b1, b1². Closed form (`br.matter_scheme_term`): one IR-off clax capture on P_w (FFTLog
+   is linear in its input), with the P13 UV term σ_v²[P_w] k² P_w removed, projected by clax's own
+   `_gl_multipoles`; rebuild pinned by P22 bilinearity (≤ 9.2e-14) and UV removal (≤ 8.6e-16), job 25321.
+   Left out: the UV-normalisation difference (σ̃²[P] − σ_v²[P_res]) k² P_res, of relative size 3e-6
+   (job 24970).
 
 ## 5. Gates
 
@@ -146,6 +165,19 @@ For each model-difference monomial: measured = coef_ps − coef_clax(translated)
 predicted = closed form of §4.2 on ps_1loop's P_IR. Gate: `max|measured − predicted|`
 normalised as in §5.1, same thresholds. The size of each model difference is logged.
 
+User decisions of Oct 14, 2026 for items 1-3 (`test_model_difference_closes`):
+- The discrimination rule of the item-4 closure (closed ≤ 0.5 × measured wherever measured > 1e-3)
+  applies on every line whose predicted difference is not identically zero. Where it is identically
+  zero (max|predicted| ≤ 1e-12 of the gate denominator: the c_j monomial on its own multipole, c0:ℓ0,
+  c2:ℓ2, c4:ℓ4, where the two codes' expressions coincide; a0:ℓ0 and a0:ℓ4; without AP also a0:ℓ2 and
+  cfog·b1²:ℓ4; ≤ 2.9e-14 there against ≥ 3.0e-4 on every other line, job 25482) the rule is not applied and
+  the line stays under the threshold gate; the ratio is logged.
+- ps_1loop runs at nfft = 512 in this closure (the derivative gate's setting): at its default 256,
+  ps's resolution sets the c4:ℓ2 residual (ratio 0.58-0.79 in 5 files, job 25326; 0.155-0.182 at 512).
+  At 512 all 613 rule-bearing checks pass, worst ratio 0.199 (job 25482).
+- The diagonal lines' AP-only ps − clax difference (0.10-0.18% of the coefficient's scale at ps's
+  default resolution, job 25326) is a recorded finding (docs/ps1loop-findings.md, finding 9).
+
 ### 5.3 Counterterm-map exactness with IR off
 
 At z = 0 (no AP), ps_1loop `do_irres=False` and clax-pt `ir_resummation=False`: the
@@ -167,18 +199,24 @@ for z = 0.38: forward-mode tangents of P_ℓ along f, α⊥, α∥, a k-stretch
 t = P·dlnP/dlnk and the amplitude t = P.
 
 Cross-code gate (derivative closure, user decision Oct 10, 2026):
-- D(x), x = (f, α⊥, α∥, P_lin), is the predicted ps − clax on the total P_ℓ at the bias point.
-  It is the counterterm/FoG/a0 map (§4.2 items 1-3) plus the 13 closure lines (items 4-5), each
-  monomial times its bias-point value (`br.predicted_total_difference`).
+- D(x), x = (f, α⊥, α∥, P_lin), is the predicted ps − clax on the total P_ℓ at the bias point, each monomial
+  times its bias-point value (`br.predicted_total_difference`). Since Oct 14, 2026 (user decision, Task 11)
+  it has four parts: the counterterm/FoG/a0 map (§4.2 items 1-3), the 13 closure lines (items 4-5), ps's
+  IR scheme on the 14 kept bias rows (item 5 extended) and the matter loops' O(P_w²) term (item 6). Until
+  then D held only the first two.
 - dD/dt is a central difference of D at x0 ± 1e-4·t along each tangent. D reads clax's μ-loop
   through a spy, so it cannot be differentiated with jax.
+- ps_1loop runs at nfft = 512 in this gate (`PS_NFFT_GATE`, Oct 14, 2026): at its default 256, ps's own
+  FFTLog resolution spikes at k ≈ 0.14 and 0.25 h/Mpc set the stretch remainder's maximum, and no closed
+  form passes the stretch lines there (scratch jobs 24968/24970/24971).
 - Gate: rel(jvp_ps − dD/dt, jvp_clax) ≤ the §5.1 thresholds, per tangent and ℓ.
 - Discrimination rule: where the direct rel(jvp_ps, jvp_clax) > 1e-3, the closed residual must be
   ≤ 0.5 × direct.
 - Primal guard: ps − D vs clax at x0, with the same thresholds and discrimination rule.
 - The direct ps-vs-clax numbers are logged and printed but not asserted.
-- User ruling (Oct 12, 2026): the discrimination rule stays on all five tangents, and the
-  stretch/amplitude lines fail it until their remainder is isolated (Task 9).
+- User ruling (Oct 12, 2026): the discrimination rule stays on all five tangents. With the two-part D the
+  stretch lines (and amplitude ℓ = 4 in lcdm_fiducial) failed it; with the four-part D and ps at nfft 512
+  every line passes in all three cosmologies (job 25321: worst stretch ratio 0.42, worst f/AP ratio 0.13).
 
 ps_1loop's own AD vs central differences (step 1e-4): 1e-4. This is tightened from the 1%
 CLAUDE.md gradient target: the measured worst is 1.4e-6 and the central-difference floor is ~1e-8.
@@ -200,6 +238,14 @@ clax-pt's own AD-vs-FD tests already exist.
 - **Pass:** Σ_slices Σ_k ΔPᵀC⁻¹ΔP < 1, for each of the 5 cosmologies.
 - Reported, not gated: Δχ² per slice; max |ΔP_ℓ|/σ_ℓ per bin; **counterterm
   headroom** c* (all three c_j = c), from Δ(c) = Δ(0) + c·D (exact: linear in c).
+- Reported, not gated (user decision Oct 12, 2026): the **marginalised Δχ²**, where ps_1loop refits its
+  own (c, cfog), shared by the seven slices, to clax-pt held at the gate point (flat priors), with the
+  shifts of the best fit; and the **crossing cfog**, the fingers-of-god amplitude at which the
+  fixed-nuisance Δχ² reaches 1 (both codes at the same cfog, c = C_REF).
+- Decision (Oct 12, 2026): the fixed-nuisance gate is kept red as the finding — the AP treatment of the
+  k⁴ fingers-of-god term (§4.2 item 2) gives Δχ² 1.55-40.6 at cfog = 500. Since Oct 14, 2026 it is carried
+  as `xfail(strict=True)` with that decision text; the mark is removed when one code's FoG AP treatment
+  is changed to match the other's or the user changes the gate's nuisance treatment.
 
 ## 6. Tie-breaker protocol
 
@@ -225,12 +271,24 @@ convention is right. Known oracle caveat: classy's `pk_gg_l4` omits `pk_mult` ro
 
 ## 7. Convergence ladder (diagnostic, Q10)
 
-Gates run at ps_1loop's defaults (what PFS users run). At `lcdm_fiducial` and
-`w0wa_m07_m10`, z = 2.2, one setting changed at a time:
-`nfft` 256→512; Simpson `num` 256→1024; AP μ grid 51→201 (test-only override of
-`self._mu` before the first jitted call); wiggle-removal cuts 140–210 → CLASS-PT's
-120–240; `rbao` = 110 (ps_1loop's default) instead of r_s·h. Each rung logs the
-ps-vs-clax error per ℓ and the slice Δχ². Not a gate.
+Gates run at ps_1loop's defaults (what PFS users run), with two exceptions decided on Oct 14, 2026: the
+derivative gate (§5.5) and the items-1-3 closure (§5.2) run ps at nfft 512. The ladder
+(`scripts/ps1loop_convergence_ladder.py`, ps_1loop 0.5.0) changes one setting at a time:
+- `default` (nfft 256, μ grid 51, Simpson num 256, DST cuts 120-240, rbao = r_s·h);
+- `nfft512`, `nfft1024` (FFTLog sampling; nfft512 is the derivative gate's setting);
+- `simpson1024` (Simpson num of the final μ projection);
+- `mugrid201` (AP μ grid, test-only override of `self._mu` before the first jitted call);
+- `best` (nfft 1024 + μ grid 201 + Simpson num 1024);
+- `dewiggle_legacy` (0.4.0's DST cuts 140-210; 0.5.0 already ships CLASS-PT's 120-240);
+- `rbao110` (ps_1loop's default BAO scale instead of r_s·h).
+Points: lcdm_fiducial and w0wa_m07_m10 at z = 2.2 (ps-vs-clax error per ℓ and the slice Δχ²), and
+lcdm_fiducial at z = 0.38 for the two figures of merit:
+1. the **stretch remainder** — the primal ps − clax − D and the derivative closure along the k-stretch,
+   with D rebuilt per rung (the nfft512 rung reproduces the derivative gate to rel 1e-10, asserted);
+2. the **AP zero-offset jump** of ps's AP branch against its no-AP branch at offsets × 0.001, the same at
+   unit α (pure interpolation error), and clax's physical change; plus the PFS-slice AP floor per rung.
+Not laddered: kmin_fft / kmax_fft and ks (not exposed); nfft 2048 (non-finite PT matrices in ps 0.5.0).
+Not a gate.
 
 ## 8. Infrastructure (Q11)
 

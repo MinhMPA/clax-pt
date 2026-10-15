@@ -8,6 +8,153 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 14, 2026: derivative closure completed — ps's IR scheme on all kept bias rows and the matter loops' O(P_w^2) term; gate at ps nfft 512; strict xfails
+
+**What it means for a PFS analysis.** Derivatives of the galaxy multipoles P_0, P_2, P_4 now agree between clax-pt
+and ps_1loop_jax 0.5.0 along every direction tested: f, alpha_perp, alpha_para, and a k-stretch and the amplitude
+of P_lin, at l = 0, 2, 4, in three cosmologies (lcdm_fiducial, massive_nu_030, w0wa_m07_m10, z = 0.38). This holds
+once the documented model difference is removed and ps runs at nfft 512 (job 25321).
+
+The k-stretch remainder that stayed unexplained in the Oct 13 entry (0.25-1.5% of the derivative's scale) came from
+three effects:
+1. **ps's IR-resummation scheme on the 14 bias rows clax keeps** (b2 l0/2/4, b1 b2 l0/2, b2^2 l0, bG2^2 l0,
+   b2 bG2 l0 and six F_G2 rows). ps damps its whole one-loop sum with e^{-x(mu)}; clax-pt feeds the bias loops the
+   isotropically damped spectrum.
+2. **The matter loops' second-order term in the wiggle spectrum**, e^{-x(mu)} (L22(P_w, P_w) + P_w I13(P_w)) on
+   the monomials 1, b1, b1^2. ps resums the vv, vd and dd loops exactly in P_w; CLASS-PT and clax-pt linearise.
+3. **ps's own FFTLog resolution at its default nfft = 256**: spikes at k ~ 0.14 and 0.25 h/Mpc.
+
+What they cost:
+- Comparing derivatives of the two codes (Fisher matrices, Laplace approximations, gradient cross-checks) without
+  terms 1-2, the codes appear to differ by up to 1.5% of the l = 4 derivative along P_lin directions.
+- Along the stretch, terms 1 and 2 are each up to 0.75% of the derivative's scale (lcdm_fiducial l = 4: 0.748% and
+  0.614%, job 25321).
+- At ps nfft 256, ps's resolution alone sets derivative errors of the same size. For derivatives, run ps at
+  nfft >= 512.
+- A single-code analysis is unaffected. The spectra already agreed, and the primal remainder max|ps - clax - D| is
+  now 0.002 / 0.005 / 0.025% of max|clax P_l| (lcdm_fiducial, job 25321).
+
+The PFS error-bar gate stays red by the user's decision of Oct 12, 2026, now as a strict xfail.
+
+**What changed.**
+- `tests/ps1loop_bridge.py`: the closed form D (`predicted_total_difference`) has four parts:
+  - the counterterm / fingers-of-god / a0 map;
+  - the 13 omitted lines (unchanged; equal to `ps_scheme_predicted` bit for bit);
+  - ps's scheme term on the 14 kept rows (`ps_scheme_all_rows`);
+  - the matter term (`matter_scheme_term`).
+  Spec §4.2 items 5 (extended) and 6. Each term is traced to `clax/ept.py` and ps_1loop lines. The six F_G2 kept
+  rows are kept by decision: one integrand with the omitted F_G2 lines, and no derivative line moves by more than
+  0.001% with or without them.
+- `tests/test_ps1loop_gradients.py`: ps at nfft = `PS_NFFT_GATE` = 512.
+- `tests/test_ps1loop_bridge.py`: two new tests.
+  - The 14-row bookkeeping.
+  - The rebuild checks, at 3 cosmologies: P22 bilinearity <= 9.2e-14, P13 UV removal <= 8.6e-16, rebuilt kept
+    coefficients vs clax-pt's accessors <= 2.4e-15 on all 27 rows, and the 13-line restriction equal to
+    `ps_scheme_predicted` (0.0).
+- `tests/test_ps1loop_ladder.py`: the remainder smoke test checks the ladder's nfft512 rung against the derivative
+  gate itself, to rel 1e-10, instead of golden numbers from jobs 24864 / 24845.
+- `tests/test_ps1loop_model_difference.py` (counterterm / fingers-of-god / a0 closure): the discrimination rule
+  applies where the predicted difference is not identically zero, and ps runs at nfft = 512. See below.
+- `tests/test_ps1loop_pfs_gate.py`: `xfail(strict=True)` with the decision text. `slurm/run-ps1loop-fast-suite.sh`:
+  only the Rosenbrock deselect remains.
+
+**Evidence.**
+- RED checkpoint (job 25318): with D restricted to the 13 lines and ps at nfft 512, the stretch lines fail
+  discrimination. Ratios: lcdm_fiducial 1.017 / 0.848 / 0.570, massive_nu_030 0.998 / 0.807 (l = 0, 2),
+  w0wa_m07_m10 0.665 (l = 0).
+- GREEN (job 25321): all 45 derivative lines pass threshold and discrimination.
+  - Stretch, closed % of the derivative's scale (ratio):
+    - lcdm_fiducial 0.058 / 0.176 / 0.648 (0.37 / 0.35 / 0.42);
+    - massive_nu_030 0.048 / 0.137 / 0.500 (0.33 / 0.30 / 0.29);
+    - w0wa_m07_m10 0.110 / 0.356 / 1.445 (0.38 / 0.30 / 0.16).
+  - Worst amplitude ratio 0.17; worst f / alpha_perp / alpha_para ratio 0.13.
+  - The numbers equal the scratch experiment's to the printed digit (scratch report
+    `/lustre/work/n2minh/std/clax/ps1loop/scratch-final/d-full-report.md`, jobs 24968 / 24970 / 24971).
+- Convergence ladder (job 25324), lcdm_fiducial stretch ratios:
+  - 0.79 / 0.72 / 0.76 at nfft 256;
+  - 0.37 / 0.35 / 0.42 at nfft 512;
+  - 0.13 / 0.17 / 0.24 at nfft 1024;
+  - the "best" rung equals nfft 1024 to the printed digit;
+  - z = 2.2 lines, AP fields and PFS floor as in job 24919.
+  The like-for-like amplification (stretch over primal remainder) is retired as a figure of merit: it rises as the
+  primal remainder shrinks.
+
+**Counterterm-closure discrimination (user decisions of Oct 14, 2026).**
+- **First run.** The rule applied as on the 13 lines, ps at nfft 256 (job 25326): 35 of 643 line x file checks red,
+  in 25 of 42 files. No threshold failed. The red checks:
+  - c0:l0 x25, c2:l2 x4 and c4:l4 x1, ratio 1.000;
+  - c4:l2 x5, ratios 0.58-0.79.
+- **Why the diagonal lines are red.** On c0:l0, c2:l2 and c4:l4 the two codes' expressions coincide, so the closed
+  form predicts exactly zero, and the rule degenerates into a 0.1% bound on numerics.
+- **Diagnostic at ps "best"** (nfft 1024, 201-node mu grid, Simpson num 1024; job 25328): 0 of 613 red.
+- **Decision.** The rule applies only where the prediction is not identically zero. "Identically zero" is a test,
+  not a tunable: max|predicted| <= 1e-12 of the gate denominator, measured <= 2.9e-14 on those lines against
+  >= 3.0e-4 on every other. The closure runs ps at nfft 512.
+- **Result (job 25482):** 42 / 42 files pass; 613 rule-bearing checks, 0 red; worst ratio 0.199 (c0:l4
+  omega_cdm_low z = 0.8). c4:l2 closes to 0.155-0.182 in the five files that were red at nfft 256.
+- **The diagonal lines' AP-only difference is recorded as finding 9.**
+  - 0.10-0.18% of the coefficient's scale at nfft 256, at k ~ 0.18-0.24 h/Mpc;
+  - <= 0.055% at nfft 512;
+  - at "best" it shrinks a median 3.4x: 13-16x near the fiducial geometry, but only 2-3x at large AP offsets,
+    leaving 0.04-0.075%.
+  - Part of it is ps's AP-table interpolation (finding 3); the part that grows with the AP offset is not isolated.
+- The coefficient gate (Task 4), the 13-line closure, the reproduction test and the IR-off map exactness keep ps's
+  default nfft = 256.
+
+**Test status.**
+- `tests/test_ps1loop_pfs_gate.py::test_pfs_error_bar_gate`: `xfail(strict=True)`, 5 cosmologies.
+  - Reason: user decision of Oct 12, 2026, fixed-nuisance gate kept red as the finding (AP treatment of the k^4
+    fingers-of-god term; Delta chi^2 1.55-40.6 at cfog = 500).
+  - Remove the mark when one code's fingers-of-god AP treatment is changed to match the other's, or the user changes
+    the gate's nuisance treatment.
+  - The strict mark turns red by itself if the gate starts passing.
+- `tests/test_ps1loop_gradients.py::test_cross_code_tangents`: green on all five directions in all three cosmologies.
+  The deselect-removal condition of the Oct 13 entry is met, and the deselects are gone.
+- `tests/test_ps1loop_model_difference.py::test_model_difference_closes`: green, with the rule above.
+
+**Pass rates.**
+- The nine campaign test files, full mode (job 25493): 297 passed, 5 xfailed of 302, in 40 min 9 s.
+  - Per file: test_pfs_survey 17, test_classpt_pfs_references 9, test_ps1loop_bridge 17,
+    test_ps1loop_coefficients 42, test_ps1loop_model_difference 140, test_ps1loop_real_space 45,
+    test_ps1loop_gradients 24 and test_ps1loop_ladder 3 pass.
+  - test_ps1loop_pfs_gate: 5 xfailed, by decision.
+- Fast suite through the wrapper `slurm/run-ps1loop-fast-suite.sh` (job 25494, 1 h 37 min): PASS, counted from
+  the progress line.
+  - 524 passed, 174 skipped, 1 xfailed (the PFS gate's lcdm case), 0 failed.
+  - Before, 520 passed. The difference: the lcdm stretch and amplitude tangents, and the two new bridge tests.
+- Both runs used the committed test tree; the documentation commit changes no file that a test reads.
+- Also: job 25321 (bridge + gradients, 41 passed), job 25325 (ladder smoke tests, 3 passed), job 25324 (full
+  ladder), job 25482 (counterterm closure at nfft 512, 42 passed).
+
+**Final-review fix items done in this wave** (final whole-branch review of Oct 13, 2026).
+- A1: `slurm/classpt-refgen-pfs.sbatch` passes the w0wa no-PPF `--skipped` note to the manifest writer, as
+  `slurm/classpt-refgen.sbatch` does. Not run.
+- A2: the two clax-pt user caveats are added to the Oct 13 entry and to the findings.
+- A3: committed files point to this CHANGELOG and to the findings' "Test status" instead of the uncommitted SDD
+  ledger.
+- A4: the wrapper comment names the decision and its removal condition.
+- A5: the spec's version line, §5.6 (decision, marginalised Delta chi^2, crossing cfog, strict xfail) and §7 (0.5.0
+  rungs, the two figures of merit); §4.2 item 5 is corrected and item 6 added.
+- A6: `CONTEXT.md` defines the counterterm headroom on the total residual, fingers-of-god included, with
+  c0 = c2 = c4 varied.
+- A7: the real-space test's docstring says the P_gg / P_gm counterterm maps and ps's a0 (k/k_nl)^2 are not gated.
+- A8, A12: finding wordings. Maxima do not add; "comparable to"; the dewiggle_legacy rung measures the de-wiggling
+  difference itself; the unit-alpha vs zero-offset statement; the closed-residual wording for finding 5; 0.96-1.54x;
+  "raise on non-finite PT matrices"; jobs 24867-24871 cited.
+- A9: the ladder pin's provenance (job 24871, reproduced in job 24919) and "regenerate when numerics change on
+  purpose".
+- A10: the job headers read ps_1loop's commit from `ps_1loop_jax.__file__`.
+- A11: `scripts/write_classpt_manifest.py` states that the Patches line is a union (`classpt_d1_dump.patch` is in 38
+  of 86 files). `reference_data/classpt/MANIFEST.md` was regenerated with numpy; the only change is that sentence.
+
+**Failed approaches and dead ends (do not retry).**
+- ps's scheme term on the kept rows alone, without the matter term, fixes the stretch lines at no nfft (scratch
+  jobs 24968, 24970).
+- At ps nfft 256 no form of the closed form passes the stretch lines: ps's resolution spikes set the maximum
+  (job 25324).
+- The discrimination rule on lines whose prediction is identically zero is a numerics bound, not a closure test
+  (job 25326).
+
 ### Oct 13, 2026: clax-pt vs ps_1loop_jax second-oracle validation (feat/ps1loop-cross-validation)
 
 **What it means for a PFS analysis.** Both codes were given the same linear input: CLASS-PT's P_cb, growth rate f,
@@ -27,13 +174,23 @@ Two differences show at PFS precision (Takada et al. 2014: 7 slices, k <= 0.2 h/
 
 Derivatives agree along f, alpha_perp and alpha_para once the derivative of the model difference is removed
 (<= 0.44% of the derivative's scale). Along a k-stretch of P_lin, a remainder of 0.25-1.5% of the derivative's
-scale stays unexplained (jobs 24864, 24919). The findings, with their cost to a PFS analysis and the recommended
-settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
+scale stayed unexplained here (jobs 24864, 24919); the Oct 14, 2026 entry above attributes it to three effects and
+closes it. The findings, with their cost to a PFS analysis and the recommended settings, are in
+`docs/ps1loop-findings.md`, a draft that has not been posted.
+
+Two caveats for clax-pt users:
+- `pk_gg_real` evaluated on EPTComponents built with hratio or Dratio != 1 returns b2^2, b2 bG2 and bG2^2 terms
+  off by up to 12.4%, because it reads the AP-folded Pk_Id2d2 / IG2G2 / Id2G2 (`clax/ept.py:2302-2306`; scratch
+  job 24143). It is a silent wrong answer from a public function. Build the components at hratio = Dratio = 1 for
+  real space (docs/ps1loop-findings.md, finding 8).
+- The nuisance parameters are not the same parameters across the codes. clax-pt's cs_l mixes ps's c_j with f, and
+  its Pshot carries the AP volume V and a -0.25 b2^2 Pd2d2_0 shift. Translate priors with spec §4.1 /
+  `tests/ps1loop_bridge.py` `to_clax`: a flat prior in one basis is not flat in the other (findings, finding 6).
 
 **Setup.**
 - Spec `docs/superpowers/specs/2026-10-05-clax-pt-vs-ps1loop-validation-design.md`; plan
-  `docs/superpowers/plans/2026-10-05-clax-pt-vs-ps1loop-validation.md`; decisions in the SDD ledger
-  `.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/progress.md`.
+  `docs/superpowers/plans/2026-10-05-clax-pt-vs-ps1loop-validation.md`; the user decisions are restated in this
+  entry, in the Oct 14, 2026 entry above and in `docs/ps1loop-findings.md` ("Test status").
 - ps_1loop_jax 0.5.0 (fork main 576ec09). The campaign started at 0.4.0 (270b2b5), then paused while the ps defects
   it found were fixed in MinhMPA/ps_1loop_jax-for-pfs#6.
 - clax-pt includes the RSD-basis gradient fix (Oct 10 entry, merged as 74222a6). CLASS-PT breaks ties.
@@ -73,11 +230,14 @@ settings, are in `docs/ps1loop-findings.md`, a draft that has not been posted.
   - Rungs that move a z = 2.2 slice Delta chi^2 by more than 10%: lcdm_fiducial nfft512 0.3500 -> 0.3050
     (-12.9%), nfft1024 0.3022 (-13.7%), best 0.3009 (-14.0%). For w0wa_m07_m10 the largest move is +6.6%.
     Resolution does not remove the gate excess.
-  - Stretch remainder: no setting ps exposes closes it.
+  - Stretch remainder: no setting ps exposes closes it (with the extended model difference of Oct 14, 2026, nfft
+    >= 512 does; see the entry above).
   - AP jump at zero offset: nfft 1024 + 201 mu nodes reduces it 13-25x.
   - nfft 2048: non-finite PT matrices in ps 0.5.0 (job 24917).
 
-**Two tests are red by the user's decision; the fast-suite wrapper deselects them.**
+**Two tests are red by the user's decision; the fast-suite wrapper deselects them.** (Superseded on Oct 14, 2026,
+see the entry above: the derivative closure passes on every line, the PFS gate is carried as a strict xfail, and
+the wrapper deselects only the Rosenbrock test.)
 - **`tests/test_ps1loop_gradients.py::test_cross_code_tangents`, the stretch and amplitude parametrizations**
   (pytest ids `<case>-stretch` and `<case>-amplitude` for lcdm_fiducial, massive_nu_030, w0wa_m07_m10).
   - Why red: the derivative closure fails the discrimination rule, i.e. the closed residual exceeds 0.5 x the

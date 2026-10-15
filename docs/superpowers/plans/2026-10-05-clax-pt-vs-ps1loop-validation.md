@@ -2133,3 +2133,22 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 Then ask the user whether to push `feat/ps1loop-cross-validation` and open a PR on MinhMPA/clax-pt. Pushing is outward-facing; do not push without approval.
+
+### Task 11 (added Oct 14, 2026 by user decision)
+
+Added after the final whole-branch review, by the user's decisions of Oct 14, 2026. Requirements, commit sequence,
+runs and evidence: `.superpowers/sdd/2026-10-05-clax-pt-vs-ps1loop-validation/task-11-brief.md` (with
+`final-fix-brief.md` §A). This plan stays the document of record; in short:
+
+- Commit 1 (RED): the derivative gate runs ps at nfft 512 (`PS_NFFT_GATE`) with the restricted closed form; the
+  stretch discrimination lines fail (job 25318).
+- Commit 2 (GREEN): the closed form D carries ps's IR scheme on every bias row clax keeps and the matter loops'
+  second-order-in-P_w scheme term (spec §4.2 items 5-6); all 45 derivative lines pass in 3 cosmologies (job 25321).
+- Commit 3: the ladder's remainder smoke test checks the nfft512 rung against the derivative gate itself
+  (rel 1e-10) instead of golden numbers; full ladder rerun (job 25324).
+- Commit 4: the PFS error-bar gate is carried as `xfail(strict=True)` with the decision text; the fast-suite wrapper
+  keeps only the Rosenbrock deselect; the counterterm / fingers-of-god / a0 closure gets the discrimination rule
+  where its prediction is not identically zero, and runs ps at nfft 512 (user decision of Oct 14, 2026, after the
+  read-only diagnostic job 25328).
+- Commit 5: spec, findings (finding 2 attributed; new finding 9), CHANGELOG `### Oct 14, 2026` entry, this section,
+  and the final-review fix items; final runs: the nine campaign files in full and the fast suite through the wrapper.

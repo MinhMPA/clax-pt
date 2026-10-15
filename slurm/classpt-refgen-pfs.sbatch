@@ -35,6 +35,10 @@ for c in $(python -c "$VC; print(' '.join(vc.IRNO_CASES))"); do
   $GEN --cosmology "$c" --z-list 0.38 --ap no --tag irno \
        --class-extra '{"IR resummation": "No"}' || FAILED+=("$c:irno")
 done
-python scripts/write_classpt_manifest.py || FAILED+=("manifest")
+# Keep the skipped w0wa no-PPF reference that slurm/classpt-refgen.sbatch records in MANIFEST.md, so that a
+# regeneration from this script does not drop its "## Skipped" note.
+python scripts/write_classpt_manifest.py \
+  --skipped "w0wa_m07_m10/z0.380_ap_omfid0.31_cb_noppf.npz: use_ppf=no rejected or failed (see job log)" \
+  || FAILED+=("manifest")
 echo "FAILED: ${FAILED[*]:-none}"
 [ ${#FAILED[@]} -eq 0 ]

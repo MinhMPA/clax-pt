@@ -6,6 +6,8 @@ Every campaign file is one `--z-list <z>` CLASS-PT run (Ruling 19); `z_pk` in ea
 
 Patches: `classpt_d1_dump.patch` `f2686d4073e1a57d`, `classy_ap_ratios.patch` `72930d34aff49bf9`, `classy_kh_units.patch` `d8f4f5c944824b17`
 
+The Patches line is the union over the files: `classpt_d1_dump.patch` is listed by 38 of the 86 files (those generated after it was applied to the installed build); inert unless `$CLAXPT_D1_DUMP` names an output path; it changes no computed value (see the internals-dumps section below).
+
 | file | sha256[:16] | CLASS-PT | z_pk | hratio | Dratio | f | params sha[:12] | invocation |
 |---|---|---|---|---|---|---|---|---|
 | `h_high/z0.000_ap_omfid0.31_cb.npz` | `41a31b8831ff52e6` | `09d5531a` | 0 | 1.000000 | 1.000000 | 0.472102 | `e1a6d71341fa` | `--cosmology h_high --z-list 0 --ap yes --cb yes` |

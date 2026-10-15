@@ -34,8 +34,12 @@ covariance with ℓ-ℓ′ blocks, Δk = 0.01 on 0.01 ≤ k ≤ 0.2 h/Mpc; passe
 Δχ² < 1 for the full seven-**PFS slice** survey.
 
 **Counterterm headroom**:
-The k² counterterm amplitude c at which the **counterterm model difference**
-alone would bring the **error-bar gate** to Δχ² = 1.
+The common k² counterterm amplitude c = c0 = c2 = c4 (cfog held at its reference
+500 (Mpc/h)⁴) at which the **error-bar gate**'s TOTAL Δχ² reaches 1. The total
+holds every residual, the fingers-of-god model difference at cfog = 500
+included, so the headroom is 0 whenever the total already reaches 1 at c = 0, as
+it does in every cosmology of the campaign; it does not say which term causes
+the excess.
 
 **Shared-input comparison**:
 A comparison in which both codes receive the identical linear P_cb(k,z) table,

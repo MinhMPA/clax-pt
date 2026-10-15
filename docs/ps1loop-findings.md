@@ -1,8 +1,10 @@
-# clax-pt vs ps_1loop_jax: findings for both codes (draft, Oct 13, 2026)
+# clax-pt vs ps_1loop_jax: findings for both codes (draft, Oct 13, 2026; updated Oct 14, 2026)
 
 **Status: draft for the user. Nothing here has been posted.** Findings 1-4b concern ps_1loop_jax and are
 candidates for issues on MinhMPA/ps_1loop_jax-for-pfs. Findings 5-8 concern CLASS-PT and clax-pt; some may
-become upstream issues, like smsharma/clax#42-44.
+become upstream issues, like smsharma/clax#42-44. Finding 9 is an open cross-code item, partly ps_1loop's
+(finding 3). The Oct 14, 2026 update (Task 11) attributes and closes finding 2, extends finding 4, and adds
+finding 9; the decisions are restated in CHANGELOG.md (Oct 13 and Oct 14, 2026) and in "Test status" below.
 
 They come from the second-oracle validation on branch `feat/ps1loop-cross-validation`:
 - spec `docs/superpowers/specs/2026-10-05-clax-pt-vs-ps1loop-validation-design.md`;
@@ -44,14 +46,15 @@ Every measured number below carries the igpu SLURM job that produced it. Logs ar
 | # | finding | code | cost to a PFS analysis if ignored | recommended setting or fix |
 |---|---|---|---|---|
 | 1 | default nfft = 256 under-resolves the BAO wiggles in the one-loop terms | ps_1loop | 0.1-0.6% of single bias-coefficient tables; a slice Delta chi^2 moves by <= 15% | nfft = 512 (nfft >= 1024 with AP, finding 3) |
-| 2 | derivatives along a k-stretch of P_lin differ by 0.25-1.5% of the derivative's scale beyond the documented model difference | open, not attributed | Fisher or Laplace derivatives along P_lin directions differ between codes by up to 1.5% at l = 4 | open; nfft >= 512 removes up to 41% of it at l = 4 |
+| 2 | derivatives along a k-stretch of P_lin differed by 0.25-1.5% of the derivative's scale beyond the model difference as first documented | attributed (Oct 14, 2026): ps's IR scheme on the kept bias rows and in the matter loops (finding 4), plus ps's nfft = 256 resolution (finding 1) | none once the extended model difference is used and ps runs at nfft >= 512; without it, derivatives along P_lin appear to differ by up to 1.5% at l = 4 | compare with the extended closed form, ps at nfft >= 512 (all derivative lines close, job 25321) |
 | 3 | AP branch discontinuous with the no-AP branch at zero AP offset | ps_1loop | a 0.15 sigma step at alpha = 1, or the same error as an offset inside the AP branch | nfft >= 1024 with a 201-node mu grid (reduces 13-25x, does not remove) |
-| 4 | IR-resummation scheme differs from CLASS-PT's | model difference | none once documented; it is part of the Delta chi^2 0.07-0.13 left with c = cfog = 0 in both codes | document; use the closed form when comparing codes |
-| 4b | nfft = 2048 gives non-finite PT matrices | ps_1loop | the FFTLog plateau beyond 1024 cannot be checked | evaluate the Gamma ratio in log space (untested) |
-| 5 | 13 projections computed but never added | CLASS-PT, clax-pt | six F_G2 lines: survey Delta chi^2 <= 2.2e-4 at the coevolution bias point; the other seven bounded at coefficient level only | keep the CLASS-PT convention (user decision); optional flag in clax-pt |
+| 4 | IR-resummation scheme differs from CLASS-PT's, on every bias row and in the matter loops at second order in P_w | model difference | none once documented; it is part of the Delta chi^2 0.07-0.13 left with c = cfog = 0 in both codes, and up to 0.75% of the derivative's scale along a k-stretch | document; use the closed form when comparing codes |
+| 4b | nfft = 2048 gives non-finite PT matrices | ps_1loop | the FFTLog plateau beyond 1024 cannot be checked | raise on non-finite PT matrices; evaluate the Gamma ratio in log space (untested) |
+| 5 | 13 projections computed but never added | CLASS-PT, clax-pt | six F_G2 lines: survey Delta chi^2 <= 2.2e-4 at the coevolution bias point; the other seven bounded at coefficient level only (closed residual <= 0.024%; before closure the omission was <= 1.07% of the coefficient's scale) | keep the CLASS-PT convention (user decision); optional flag in clax-pt |
 | 6 | AP treatment of the k^4 fingers-of-god term | CLASS-PT, clax-pt vs ps_1loop | fixed-nuisance Delta chi^2 1.55-40.6 at cfog = 500; absorbed (0.12-0.78) by refitting cfog, which then shifts by up to +20% | prefer the exact treatment for PFS; optional exact-AP FoG term in clax-pt |
 | 7 | RSD-basis gradient freeze | clax-pt | AD gradients of P_0,2,4 along P_lin wrong at order unity | fixed (MinhMPA/clax-pt#9) |
 | 8 | real-space bias loops carry AP; items filed as smsharma/clax#42-44 | CLASS-PT, clax-pt | real-space P_gg at an AP setting off by up to 12.4% in the b2^2, b2 bG2, bG2^2 terms | evaluate real space at hratio = Dratio = 1 |
+| 9 | AP-only ps - clax difference on the counterterm lines both codes model identically (c0:l0, c2:l2, c4:l4) | open: partly ps_1loop (finding 3), partly not isolated | 0.10-0.18% of the coefficient's scale at nfft 256, <= 0.055% at nfft 512; below the gates | ps nfft >= 512 for AP-on comparisons |
 
 ---
 
@@ -84,16 +87,18 @@ term, then splines the result to the output k (interpax cubic). At 256 points De
   - With the IR scheme included, the remainder falls 0.52% -> 0.145% at nfft = 512 (omega_cdm_low) and
     0.33% -> 0.052% (lcdm_fiducial). On bG2 l = 4 it falls 0.46% -> 0.19% (omega_cdm_low).
   - The Task 9 ladder did not re-measure these per-coefficient lines.
-- **Convergence ladder** (job 24919, lcdm_fiducial z = 0.38). The total-spectrum remainder max|ps - clax - D|
-  (D = documented model difference, findings 4-6), as % of max|clax P_l| at l = 0 / 2 / 4:
+- **Convergence ladder** (job 25324, lcdm_fiducial z = 0.38). The total-spectrum remainder max|ps - clax - D|
+  (D = the documented model difference with the Oct 14, 2026 extension, findings 4-6), as % of max|clax P_l| at
+  l = 0 / 2 / 4:
 
   | nfft | l = 0 | l = 2 | l = 4 |
   |---|---|---|---|
-  | 256 | 0.014 | 0.024 | 0.048 |
-  | 512 | 0.010 | 0.021 | 0.047 |
-  | 1024 | 0.010 | 0.022 | 0.047 |
+  | 256 | 0.008 | 0.008 | 0.037 |
+  | 512 | 0.002 | 0.005 | 0.025 |
+  | 1024 | 0.001 | 0.003 | 0.025 |
 
-  512 already gives the full improvement at this point.
+  512 gives most of the improvement at this point; 1024 adds a little at l = 0, 2. (With D restricted to the 13
+  omitted lines, job 24919: 0.014 / 0.024 / 0.048, 0.010 / 0.021 / 0.047 and 0.010 / 0.022 / 0.047.)
 - **PFS slice z = 2.2** (jobs 24899, 24919). Delta chi^2(ps - clax) for nfft 256 -> 512 -> 1024:
   - lcdm_fiducial 0.350 -> 0.305 -> 0.302;
   - w0wa_m07_m10 0.656 -> 0.694 -> 0.697.
@@ -101,8 +106,10 @@ term, then splines the result to the output k (interpax cubic). At 256 points De
 **Cost if ignored.**
 - Fits to the total P_0,2,4: one slice's Delta chi^2 moves by 0.04-0.05, which is negligible.
 - Per-coefficient tables (emulator training, per-bias-parameter Fisher terms): 0.1-0.6% of a coefficient's scale.
-- Derivatives along a k-stretch of P_lin: nfft 256 -> 512 shrinks finding 2's l = 4 remainder by 41%
-  (1.493 -> 0.881% of the derivative's scale).
+- Derivatives along a k-stretch of P_lin: at nfft 256, ps's resolution spikes (k ~ 0.14, 0.25 h/Mpc) set the
+  remainder of finding 2 even with the full model difference. nfft 256 -> 512 takes the lcdm_fiducial stretch
+  residual from 0.241 / 0.385 / 1.502 to 0.058 / 0.176 / 0.648% of the derivative's scale (job 25324), which is why
+  the derivative gate runs ps at nfft 512.
 
 **Recommended setting.**
 - nfft = 512 for one-loop accuracy. The ps fix branch kept the default at 256 to limit HMC cost, which grows as
@@ -110,84 +117,96 @@ term, then splines the result to the output k (interpax cubic). At 256 points De
 - nfft >= 1024 whenever the AP branch is used (finding 3).
 - Convergence beyond 1024 cannot be checked (finding 4b).
 
-### 2. Open: along a k-stretch of the linear spectrum, the two codes' derivatives differ by 0.25-1.5% of the derivative's scale beyond the documented model difference
+### 2. Along a k-stretch of the linear spectrum, the derivative difference came from three identified effects, and it now closes
 
-**Consequence.** Consider the direction that stretches P_lin in k, t = P dlnP/dlnk. Every parameter that moves
-the BAO scale or reshapes the broadband (omega_b, omega_cdm, h, n_s) acts on P_lin partly along it. Along t,
-d(P_0, P_2, P_4)/dt differs between ps_1loop and clax-pt by 0.25-1.5% of the derivative's scale. That is after
-the derivative of the documented model difference D (findings 4-6) has been removed. Which code is closer to the
-truth is not established.
+**Consequence.** Take the direction t = P dlnP/dlnk, which stretches P_lin in k. Every parameter that moves the BAO
+scale or reshapes the broadband (omega_b, omega_cdm, h, n_s) acts on P_lin partly along it.
+- **Before (Task 7).** The documented model difference D carried ps's IR scheme on the 13 omitted lines only. With
+  that D, d(P_0, P_2, P_4)/dt differed between the codes by 0.25-1.5% of the derivative's scale beyond D, and the
+  discrimination rule failed on every stretch line.
+- **Now.** That remainder is attributed to three effects: two documented model differences (finding 4) and one ps
+  resolution setting (finding 1). With all three handled, every derivative line closes in all three cosmologies
+  (job 25321).
+- **What it means.** Derivatives from the two codes along P_lin directions agree to the closure's precision once
+  the model difference is included and ps runs at nfft >= 512. Before, they differed by up to 1.5% of the l = 4
+  derivative, which looked like a defect in one of the codes.
 
-The spectra themselves agree after D to <= 0.064% of max|clax P_l| (primal check, three cosmologies at
-z = 0.38, job 24864). So a likelihood built from either code is unaffected; only the derivatives differ.
+**The three effects.** Sources: the scratch experiment (`/lustre/work/n2minh/std/clax/ps1loop/scratch-final/d-full-report.md`,
+jobs 24968, 24970, 24971) and the committed jobs 25318, 25321 and 25324. All at z = 0.38, at the PFS bias point.
+1. **ps's IR-resummation scheme on the 14 bias rows clax keeps** (finding 4, extended).
+   - ps resums its whole one-loop sum with the mu-dependent damping e^{-x(mu)}. clax-pt feeds its bias loops the
+     isotropically damped spectrum.
+   - The scheme term therefore also sits on b2 l0/2/4, b1 b2 l0/2, b2^2 l0, bG2^2 l0, b2 bG2 l0 and the six F_G2
+     kept rows.
+   - At coefficient level it closes ps - clax on every b2-type row 5-54x at nfft 256, and 16-350x at nfft 1024
+     (job 24970).
+   - Along the stretch its derivative is 0.130 / 0.331 / 0.748% of the derivative's scale at l = 0 / 2 / 4
+     (lcdm_fiducial, job 25321).
+2. **The matter loops' second-order-in-P_w scheme term** (finding 4).
+   - ps resums the vv, vd and dd loops exactly in the wiggle spectrum P_w. CLASS-PT and clax-pt linearise in P_w.
+   - The difference is e^{-x(mu)} (L22[P_w, P_w] + P_w I13[P_w]) on the monomials 1, b1, b1^2.
+   - Along the stretch its derivative is 0.143 / 0.261 / 0.614% of the derivative's scale (lcdm_fiducial, job
+     25321).
+   - It replaces this finding's earlier candidate "O(P_w^2) terms that D leaves out" with a measured term.
+3. **ps's FFTLog resolution at nfft = 256** (finding 1).
+   - At 256, isolated resolution spikes at k ~ 0.14 and 0.25 h/Mpc set the remainder's maximum.
+   - No closed form passes the stretch lines there: with both terms above, lcdm_fiducial still gives ratios 0.79 /
+     0.72 / 0.76 at nfft 256 (job 25324).
+   - The derivative gate therefore runs ps at nfft 512.
 
-**Evidence** (Task 7, jobs 24844 and 24864, identical to the printed digit; z = 0.38).
+**Evidence: stretch closed residual** (% of the derivative's scale; closed / direct in brackets; l = 0 / 2 / 4).
+- Column A: Task 7 (D on the 13 lines, ps nfft 256; jobs 24864 and 24844, ratios from the scratch report).
+- Column B: the same D with ps at nfft 512 (job 25318).
+- Column C: the extended D with ps at nfft 512 (job 25321).
 
-- **Closed residual**, d(ps - clax)/dt - dD/dt, as % of the derivative's scale:
+| cosmology | A | B | C |
+|---|---|---|---|
+| lcdm_fiducial | 0.283 / 0.458 / 1.493 (0.93 / 0.86 / 0.76) | 0.158 / 0.422 / 0.881 (1.02 / 0.85 / 0.57) | 0.058 / 0.176 / 0.648 (0.37 / 0.35 / 0.42) |
+| massive_nu_030 | 0.245 / 0.441 / 1.266 (0.90 / 0.83 / 0.59) | 0.146 / 0.366 / 0.801 (1.00 / 0.81 / 0.46) | 0.048 / 0.137 / 0.500 (0.33 / 0.30 / 0.29) |
+| w0wa_m07_m10 | 0.307 / 0.425 / 1.320 (0.89 / 0.28 / 0.13) | 0.192 / 0.395 / 1.353 (0.66 / 0.34 / 0.15) | 0.110 / 0.356 / 1.445 (0.38 / 0.30 / 0.16) |
 
-  | cosmology | l = 0 | l = 2 | l = 4 |
-  |---|---|---|---|
-  | lcdm_fiducial | 0.283 | 0.458 | 1.493 |
-  | massive_nu_030 | 0.245 | 0.441 | 1.266 |
-  | w0wa_m07_m10 | 0.307 | 0.425 | 1.320 |
-
-- **D explains little of it.** The closed residual is up to 0.93 of the direct difference. The test therefore
-  applies the discrimination rule: where the direct difference exceeds 0.1% of the scale, the closed residual must
-  be <= 0.5 x the direct one. It fails on:
-  - stretch l = 0 in 3 of 3 cosmologies;
-  - stretch l = 2 and l = 4 in 2 of 3;
-  - amplitude (t = P) l = 4 in lcdm_fiducial (closed 0.098% vs direct 0.185%).
-- **The same closure works along the other inputs.** Along f, alpha_perp and alpha_para the closed residual is
-  <= 0.44%, from direct differences of up to 10.4%.
-- **Shape.** The residual is non-smooth in k: 97 / 99 / 97% of its rms survives a quartic fit in k. That metric
-  cannot tell an oscillation from a hump. The residual peaks at k = 0.13-0.25 h/Mpc (scratch job 24845).
-- **Size relative to the spectra, like for like** (both over the derivative's scale; job 24919, lcdm_fiducial).
-  - The primal remainder max|ps - clax - D| is 0.025 / 0.043 / 0.106% of the derivative's scale. As a fraction of
-    max|clax P_l| the same remainder is 0.014 / 0.024 / 0.048%.
-  - The stretch residual is therefore 11.3 / 10.6 / 14.1x the primal remainder at nfft 256, and 8.4-11.2x on the
-    nfft 512, nfft 1024 and nfft 1024 + 201-node mu grid ("best") settings.
-  - On the rungs with nfft >= 512 it peaks at k ~ 0.129 h/Mpc (l = 0, 2) and 0.097 h/Mpc (l = 4), i.e.
-    k r_s ~ 13 / 10 with r_s h = 99.08 Mpc/h (at nfft 256 the peaks are at 0.144 / 0.129 / 0.254 h/Mpc). That is the
-    amplification expected if a small primal leftover that oscillates with the BAO phase is differentiated along
-    the stretch. This is an interpretation, not a measurement.
+- **The other directions.** The amplitude line that was red (lcdm_fiducial l = 4) goes 0.53 (A) -> 0.49 (B) ->
+  0.15 (C). With C, the worst ratio along f, alpha_perp and alpha_para is 0.13 (w0wa_m07_m10 alpha_perp l = 4,
+  job 25321).
+- **The primal remainder.** max|ps - clax - D| at the bias point is 0.010 / 0.021 / 0.047% of max|clax P_l| with
+  B, and 0.002 / 0.005 / 0.025% with C (lcdm_fiducial, jobs 25318 and 25321).
+- **The ladder** (job 25324, lcdm_fiducial, extended D).
+  - Stretch ratios are below 0.5 from nfft 512 up: 0.371 / 0.354 / 0.419 at 512, 0.129 / 0.166 / 0.241 at 1024,
+    0.129 / 0.166 / 0.242 at "best".
+  - Every nfft-256 rung (default, simpson1024, mugrid201, rbao110) stays at 0.72-0.79.
+  - The ladder's nfft512 rung reproduces the derivative gate to rel 1e-10 (asserted, job 25325).
 - **Not the wiggle/no-wiggle split** (scratch job 24845). Along the stretch, the two codes' responses agree to
-  8.7e-5 for P_nw and 2.4e-4 for P_w. Sigma^2_BAO and dSigma^2_BAO agree to 4e-6.
-- **No setting ps exposes closes it** (job 24919). Closed residual, % of the derivative's scale:
+  8.7e-5 for P_nw and 2.4e-4 for P_w, and Sigma^2_BAO and dSigma^2_BAO agree to 4e-6.
+- **ps 0.4.0's de-wiggling cuts** (DST band 140-210). With them the residual is 1.734 / 5.012 / 24.206% (ratios
+  0.97-0.99; job 25324). That rung changes ps's own de-wiggling while D assumes clax's P_nw, so it measures the
+  de-wiggling difference itself. The conclusion is unchanged: for derivatives, the 0.5.0 de-wiggling fix matters
+  more than any sampling setting.
+- **The amplification ratio is retired.** Stretch residual over primal remainder, both over the derivative's scale,
+  was 11-14x with D on the 13 lines. It now rises as the primal remainder shrinks (16.1 / 27.6 / 18.3x at nfft 256
+  and 19.7 / 19.0 / 11.8x at nfft 512, job 25324), so it is no longer a useful figure of merit.
 
-  | l | nfft 256 | nfft 512 | nfft 1024 |
-  |---|---|---|---|
-  | 0 | 0.283 | 0.158 | 0.196 |
-  | 2 | 0.458 | 0.422 | 0.437 |
-  | 4 | 1.493 | 0.881 | 0.869 |
-
-  - nfft moves l = 0 and l = 4; l = 2 is insensitive.
-  - At nfft 1024 the l = 4 ratio closed/direct falls to 0.478 (0.474 at "best"). That is because the direct
-    difference rises (1.546 -> 1.817%) while the closed residual stays flat (0.881 -> 0.869%), not because the
-    closure improves.
-  - The number of mu points in ps's final Simpson-rule projection onto Legendre multipoles ("Simpson num"), the
-    mu grid and rbao change the closed residual by <= 0.017 percentage points.
-- **ps 0.4.0's de-wiggling cuts** (DST band 140-210) multiply the residual 6-17x (l = 4: 24.8%, ratio ~ 1;
-  job 24919). For derivatives, the 0.5.0 de-wiggling fix matters more than any sampling setting.
+**What remains.** None of it fails a gate.
+- The three pure-F_G2 kept rows (bGamma3 l0, l2; b1 bGamma3 l0) keep a 0.03-0.07% remainder of the coefficient's
+  scale at nfft 512 that is not the scheme term (jobs 24970, 24971). It is negligible at the PFS bias point.
+- At nfft 512 the stretch residual peaks at the window edge, k = 0.285 h/Mpc, in lcdm_fiducial (job 25321; the
+  window ends at 0.3 h/Mpc).
+- A low-k l = 4 primal remainder of 0.025% of max|clax P_4| at k ~ 0.015 h/Mpc stays at every nfft >= 512
+  (job 25324). It sits on the "1" monomial (0.0056% of that coefficient, job 24970) and was not investigated.
+- The matter term leaves out a UV-normalisation difference of relative size 3e-6 (job 24970).
 
 **Cost if ignored.**
-- Fisher forecasts or Laplace approximations built from one code's derivatives differ from the other code's by up
-  to 1.5% of the l = 4 derivative (0.3-0.5% at l = 0, 2) along P_lin directions.
-- HMC or NUTS sampling stays exact with either code, because the Metropolis step uses the likelihood value; the
-  gradient accuracy only changes the acceptance rate.
+- Comparing derivatives with D restricted to the 13 lines: the two codes appear to disagree by up to 1.5% of the
+  l = 4 derivative along P_lin directions.
+- With the extended D and ps at nfft >= 512: the closed residual is <= 0.65% of the l = 4 derivative's scale in
+  lcdm_fiducial and massive_nu_030, and 1.45% in w0wa_m07_m10, where the direct difference is 8.8% (ratio 0.16).
+- HMC or NUTS sampling stays exact with either code, because the Metropolis step uses the likelihood value.
 
-**Remaining candidates** (the ladder does not vary them):
-- ps's spline of the input P_lin (`get_pk` on the extrapolated 1e-5..1e3 h/Mpc grid) against clax-pt's spline of
-  its loop channels at the true k (`_channels_at`);
-- O(P_w^2) terms that D's closed form for the IR-resummation scheme leaves out;
-- ps's FFTLog range kmin_fft / kmax_fft (`ps_1loop.py:29-30`), which the test bridge does not expose;
-- clax-pt numerics: its loop k grid, FFTLog and 40 Gauss-Legendre mu nodes.
-
-**Recommended next step.**
-- Ladder kmin_fft / kmax_fft and clax-pt's mu nodes and k grid.
-- Add the O(P_w^2) terms to D.
-- Until then: run ps at nfft >= 512, and do not mix derivatives from the two codes in one analysis.
-- `tests/test_ps1loop_gradients.py::test_cross_code_tangents[<case>-stretch]` and `[<case>-amplitude]` stay red,
-  by the user's decision of Oct 12, 2026.
+**Recommended.**
+- Compare derivatives with the extended closed form (`tests/ps1loop_bridge.py`, `predicted_total_difference`)
+  and ps at nfft >= 512.
+- Within one PFS analysis, choosing one IR scheme makes both model-difference terms moot.
+- `tests/test_ps1loop_gradients.py::test_cross_code_tangents` passes on all five directions in all three
+  cosmologies (job 25321).
 
 ### 3. The AP branch is discontinuous with the no-AP branch at zero AP offset
 
@@ -227,10 +246,12 @@ cfog = 500, not the 0.014 seen with AP off.
     - the unit-alpha interpolation error 15.2 / 12.8 / 30.4x, from 1.43e-4 / 1.12e-4 / 2.83e-4 to 9.4e-6 /
       8.8e-6 / 9.3e-6 (same k).
   - The residual at "best" is still interpolation error. Compared with clax-pt's physical change: the
-    unit-alpha error is 1.0-1.5x clax-pt's maximum, which sits at k ~ 0.01-0.03 h/Mpc, and on the PFS slices the
+    unit-alpha error is 0.96-1.54x clax-pt's maximum, which sits at k ~ 0.01-0.03 h/Mpc, and on the PFS slices the
     remaining ps jump is 0.006 sigma against clax-pt's own 0.002 sigma (about 3x).
-  - The 201-node mu grid alone does nothing. nfft 1024 alone brings l = 0 and l = 2 to the "best" level (still
-    ~1e-5). The low-k l = 4 piece (k ~ 0.015 h/Mpc) also needs the mu grid.
+  - The 201-node mu grid alone does nothing. nfft 1024 alone brings the unit-alpha interpolation error at l = 0
+    and l = 2 to about the "best" level (9.7e-6 / 1.05e-5, against 9.4e-6 / 8.8e-6); the zero-offset jump at l = 2
+    it leaves at 1.68e-5, against 8.9e-6 at "best" (jobs 24919, 25324). The low-k l = 4 piece (k ~ 0.015 h/Mpc)
+    also needs the mu grid.
   - PFS floor: ps's jump goes from Delta chi^2 0.150 (0.151 sigma) to 4.7e-4 (0.006 sigma) at "best", and to
     4.9e-4 (0.0059 sigma) with nfft 1024 alone. clax-pt's own jump is 7.6e-5 (0.002 sigma).
 
@@ -255,6 +276,12 @@ term by term, and either scheme can be chosen knowingly.
   damping (`_get_pk_irres_rsd`, `ps_1loop.py:550`).
 - CLASS-PT and clax-pt feed the isotropically damped P_nw + e^{-k^2 Sigma^2} P_w into the bias loops, and apply
   the mu-dependent damping p_lo(mu) only to the F_G2 term.
+- Not confined to the omitted projections (Oct 14, 2026). The same difference sits on every bias row clax keeps
+  that is built from those channels or from F_G2: 14 rows, b2 l0/2/4, b1 b2 l0/2, b2^2 l0, bG2^2 l0, b2 bG2 l0 and
+  the six F_G2 kept rows (`ps_scheme_all_rows`).
+- Matter loops (Oct 14, 2026). ps resums the vv, vd and dd loops exactly in P_w, with L[X] = L22[X, X] + X I13[X]
+  (`ps_1loop.py:464-494`). CLASS-PT and clax-pt linearise in P_w (`clax/ept.py:1178-1193`). The difference,
+  e^{-x(mu)} (L22[P_w, P_w] + P_w I13[P_w]), sits on the monomials 1, b1, b1^2 (`matter_scheme_term`).
 - The closed form ("option (a)", user decision of Oct 10, 2026, `tests/ps1loop_bridge.py`
   `ps_scheme_predicted`):
   - predicted ps - clax = <X_ps>_l - clax_l, with X_ps = C[P_nw] + e^{-x(k_t, mu_t)}(C[P] - C[P_nw]), where
@@ -265,11 +292,18 @@ term by term, and either scheme can be chosen knowingly.
 
 **Evidence.**
 - **b1 bG2 l = 2, omega_cdm_low z = 0.38.** ps - clax is measured at 8.49% and predicted at 8.42%. The prediction
-  is the omitted projection (finding 5), 8.76%, plus a scheme term of 0.77% of opposite sign. Without the scheme
-  term, the residual (1.015%, job 23244) is 89% scheme-shaped (template fit, scratch job 23253).
+  is the omitted projection (finding 5), 8.76%, plus a scheme term of 0.77% of opposite sign. These are maxima over
+  k of each curve, so they do not add. Without the scheme term, the residual (1.015%, job 23244) is 89%
+  scheme-shaped (template fit, scratch job 23253).
 - **All 13 omitted-projection lines close at all 42 files with the closed form** (job 24110).
   - Worst: b1 bG2 l = 2 at 0.560% (1% gate) and bG2 l = 4 at 0.705% (2% gate).
   - On every line whose measured difference exceeds 0.5%, the residual is <= 0.069 of it.
+- **Kept rows and matter loops** (scratch jobs 24970, 24971).
+  - On the kept b2-type rows the scheme term closes ps - clax 5-54x at nfft 256 and 16-350x at nfft 1024.
+  - On the matter rows the O(P_w^2) term closes ps - clax 4.6-9x at l = 0, 2 once ps is resolved (nfft 1024).
+  - In the derivative gate the two terms close the stretch remainder of finding 2 (job 25321).
+  - The closed-form rebuild is pinned by P22 bilinearity (<= 9.2e-14) and UV removal (<= 8.6e-16), and the
+    rebuilt coefficients equal clax-pt's accessors to <= 2.4e-15 on all 27 rows (job 25321).
 - **elf** (17d131d, the successor of ps_1loop) uses ps's scheme. The closed form closes all 13 lines for elf fed
   clax-pt's P_nw to <= 0.16% (<= 0.011% at fiducial; job 24077). It is the right closed form for the ps/elf family,
   not a ps-only patch.
@@ -358,7 +392,8 @@ After the fixes, ps's P_nw equals CLASS-PT's to 1.4e-5 (ledger entry of Oct 8, 2
 ### 5. CLASS-PT, and clax-pt with it, omit 13 projections that their own mu-loop computes
 
 **Consequence.** At the PFS bias point the six omitted F_G2 projections, the only ones measured at PFS level,
-are negligible. The other seven lines are bounded at coefficient level only (<= 0.024% after closure).
+are negligible. The other seven lines are bounded at coefficient level only (closed residual <= 0.024%; before
+closure the omission was <= 1.07% of the coefficient's scale).
 - The six F_G2 projections cost a survey Delta chi^2 of 0.8-2.2e-4 over the 7 slices at k <= 0.2 h/Mpc. That is
   <= 2.3e-5 of the l = 2 scale and <= 1.3e-4 of the l = 4 scale, and <= 0.4% of sigma in any bin (jobs 22659,
   22660, 22662).
@@ -398,7 +433,7 @@ CLASS-PT parity.
 **Consequence.** Both codes run at cfog = 500 (Mpc/h)^4 with fixed nuisance parameters. Their multipoles then
 differ by Delta chi^2 = 1.55 / 40.6 / 2.53 / 4.45 / 3.15 over the 7 PFS slices (lcdm_fiducial / omega_cdm_low /
 massive_nu_015 / massive_nu_030 / w0wa_m07_m10; job 24884). The excess above the 0.05-0.13 floor comes from the AP
-mapping of the k^4 term. That floor includes ps's 0.128 AP-branch floor at default resolution (finding 3).
+mapping of the k^4 term. That floor is comparable to ps's 0.128 AP-branch floor at default resolution (finding 3).
 
 If ps_1loop refits its own (c, cfog), shared by the 7 slices, the difference falls to Delta chi^2 = 0.120 /
 0.689 / 0.126 / 0.137 / 0.782, all below 1. The price is a shift in the fitted cfog of -2.1% / +19.9% / -2.9% /
@@ -417,7 +452,7 @@ the prescription: by up to +20% in a cosmology whose geometry is several percent
   z = 0.7 ... 2.2. The difference grows with z. An interpretation: the growth follows the signal-to-noise on the
   k^4 term. That is not established, because in lcdm_fiducial the AP offsets also grow with z. The w0wa_m07_m10
   z = 0.7 slice, which has large offsets and a small Delta chi^2, has the smallest anisotropic offset of the
-  w0wa slices.
+  w0wa slices (scratch jobs 24867-24871).
 - **Which term** (job 24860, at c = 0). With c = 0 and cfog = 0 in both codes, Delta chi^2 is 0.07-0.13 in all
   five cosmologies; at the gate's c = 2 with cfog = 0 it is 0.05-0.09 (scratch, jobs 24867-24868). b2, bG2 and
   bGamma3 change it by < 5%.
@@ -437,11 +472,18 @@ the prescription: by up to +20% in a cosmology whose geometry is several percent
 **Cost if ignored.** With cfog fixed or tightly bounded, a Delta chi^2 of 1.6 (fiducial) to 41 (omega_cdm 20% low)
 between two codes that are otherwise equivalent. With cfog free, a cfog posterior shifted by up to 20%.
 
+The nuisance parameters are also not the same parameters across the codes (spec §4.1, `tests/ps1loop_bridge.py`
+`to_clax`):
+- clax-pt's cs_l mixes ps's c_j with f (cs0 = c0 + f c2/3 + f^2 c4/5, cs2 = c2 + 6 f c4/7);
+- clax-pt's Pshot carries the AP volume V and a -0.25 b2^2 Pd2d2_0 shift.
+Translate priors through that map: a flat prior in one basis is not flat in the other.
+
 **Recommended.**
 - For PFS, prefer the exact treatment, or give cfog a prior wide enough to absorb the difference.
 - For clax-pt, candidate upstream item: an optional exact-AP fingers-of-god term.
-- `tests/test_ps1loop_pfs_gate.py::test_pfs_error_bar_gate` stays red by the user's decision of Oct 12, 2026. The
-  marginalised Delta chi^2 and the crossing cfog are reported, not asserted.
+- `tests/test_ps1loop_pfs_gate.py::test_pfs_error_bar_gate` stays red by the user's decision of Oct 12, 2026, carried
+  as `xfail(strict=True)` since Oct 14, 2026. The marginalised Delta chi^2 and the crossing cfog are reported, not
+  asserted.
 
 ### 7. clax-pt's RSD one-loop basis was not differentiable along P_lin (fixed)
 
@@ -468,20 +510,72 @@ CHANGELOG.md, "Oct 10, 2026".
     AP-folded l = 0 moment of its mu-loop, and classy's `pk_gg_real` reuses them.
   - Size: 0.680 / 0.575 / 0.584% at lcdm_fiducial z = 0.38 (numpy on the stored rows), up to 12.4% at
     w0wa_m07_m10 z = 0.38 (scratch job 24143). Above 1% at 25 of 28 AP files.
-  - clax-pt mirrors this.
-  - Recommended: evaluate real space at hratio = Dratio = 1, as this campaign does (Task 6).
+  - clax-pt mirrors this. In clax-pt it is a silent wrong answer from a public function: `pk_gg_real` evaluated on
+    EPTComponents built with hratio or Dratio != 1 reads the AP-folded `Pk_Id2d2`, `Pk_IG2G2` and `Pk_Id2G2`
+    (`clax/ept.py:2302-2306`), so its b2^2, b2 bG2 and bG2^2 terms are off by up to 12.4% (scratch job 24143).
+  - Recommended: build the components at hratio = Dratio = 1 for real space, as this campaign does (Task 6).
 - **Already filed upstream** (cited, not restated): smsharma/clax#42 (P_cb and the z = 0 endpoint; part 2 is the
   oscillation at k > 0.2), #43 (PPF dark energy, which CLASS-PT lacks; the w0wa reference that needs it is
   skipped), #44 (the r_s fitting formula).
 
 ---
 
-## Test status on the branch (two red tests, by the user's decision)
+### 9. Open: an AP-only ps - clax difference on the counterterm lines that both codes model identically
 
-| test | status | reason | condition for removing the fast-suite deselect |
+**Consequence.** On three counterterm lines, the two codes' models are the same expression: c0 on l = 0, c2 on
+l = 2 and c4 on l = 4. On those lines ps's -2 c_j f^{j/2} mu_t^j k_t^2 P_IR and clax's 2 cs_j Pctr_j coincide on
+the same P_IR, so the closed form predicts exactly zero. Even so, ps and clax-pt differ there, and only with AP:
+- 0.10-0.18% of the coefficient's scale at ps's default nfft = 256, at k ~ 0.18-0.24 h/Mpc, in 25 of the 28 AP
+  files (z = 0.38, 0.8);
+- <= 6e-7 at z = 0, where there is no AP (job 25326).
+
+This is far below the 1% / 1% / 2% gates, and these lines pass them. But it is a code difference that no model
+difference explains. It is part of the remaining AP-on floor of the comparison: a counterterm amplitude c moves
+P_l by c times this coefficient.
+
+**What it is, measured.** The difference shrinks with ps's resolution, but not uniformly.
+- **At nfft 512** (job 25482) it is <= 0.055% (median 0.037% on c0:l0; largest c0:l0, massive_nu_015_omega_cdm_low
+  z = 0.8, k = 0.227 h/Mpc).
+- **At nfft 1024 with a 201-node mu grid** ("best", job 25328), the default-to-best shrink factors are:
+  - c0:l0: median 3.4x (range 1.7-16.0);
+  - c2:l2: median 3.7x (1.2-13.0);
+  - c4:l4: median 2.6x (1.2-5.5).
+- Near the fiducial geometry (lcdm_fiducial, ns_high, massive_nu_015 at z = 0.38) the shrink reaches 13-16x, the
+  factor finding 3 measured for ps's AP-table interpolation.
+- The cosmologies with large AP offsets shrink only 2-3x and keep 0.04-0.075% at "best": omega_cdm_low,
+  massive_nu_015_omega_cdm_low, h_high, massive_nu_015_h_high, and w0wa at z = 0.8. Their peaks move out to
+  k = 0.21-0.29 h/Mpc.
+- The difference is not monotonic in the setting: on c0:l0 of massive_nu_015_omega_cdm_low z = 0.8 it is 0.055%
+  at nfft 512 and 0.075% at "best".
+
+**Attribution.**
+- Part of it is ps's AP-branch interpolation of its tabulated P(k, mu) (finding 3): resolution removes most of it
+  near the fiducial geometry.
+- The rest grows with the AP offset and is **not isolated**. Candidates: the remaining k / mu interpolation of
+  ps's AP remap at large offsets, or a genuine difference in how the two codes map k_t^2 P_IR under AP. Not
+  measured.
+
+**How the test treats it** (user decision of Oct 14, 2026, `tests/test_ps1loop_model_difference.py`).
+- The discrimination rule is not applied on lines whose prediction is identically zero (max|predicted| <= 1e-12
+  of the gate denominator: c0:l0, c2:l2, c4:l4, a0:l0, a0:l4, and without AP also a0:l2 and cfog b1^2:l4). Those
+  lines stay under the threshold gate, and their ratio is logged.
+- The closure runs ps at nfft 512. There the rule passes on all 613 checks where it applies (worst ratio 0.199,
+  job 25482).
+
+**Recommended.**
+- Run ps at nfft >= 512 for AP-on comparisons.
+- Next step, untested: ladder the AP remap (mu grid, k refinement) at the large-offset cosmologies, to separate
+  the interpolation part from the rest.
+
+---
+
+## Test status on the branch (Oct 14, 2026)
+
+| test | status | reason | condition for removing the mark |
 |---|---|---|---|
-| `tests/test_ps1loop_gradients.py::test_cross_code_tangents[<case>-stretch]`, `[<case>-amplitude]` | red: discrimination rule fails (finding 2). Stretch is red in all 3 cases; amplitude only for lcdm_fiducial (l = 4: 0.098% closed vs 0.185% direct). massive_nu_030 and w0wa_m07_m10 pass amplitude (job 24898). The wrapper deselects all six parametrizations | user decision of Oct 12, 2026: keep the rule on all five directions until the remainder is isolated | the stretch/amplitude remainder is attributed and closed (closed <= 0.5 x direct on every line), or the user revises the rule |
-| `tests/test_ps1loop_pfs_gate.py::test_pfs_error_bar_gate` (5 cosmologies) | red: fixed-nuisance Delta chi^2 1.55-40.6 >= 1 (finding 6) | user decision of Oct 12, 2026: keep the spec's fixed-nuisance gate red as the finding; report the marginalised Delta chi^2 and the crossing cfog | the fingers-of-god AP treatments are reconciled in one of the codes, or the user changes the gate's nuisance treatment (for example a PFS-motivated cfog or the marginalised Delta chi^2) |
+| `tests/test_ps1loop_pfs_gate.py::test_pfs_error_bar_gate` (5 cosmologies) | `xfail(strict=True)`: fixed-nuisance Delta chi^2 1.55-40.6 >= 1 (finding 6) | user decision of Oct 12, 2026: keep the spec's fixed-nuisance gate red as the finding, and report the marginalised Delta chi^2 and the crossing cfog. User decision of Oct 14, 2026: carry it as a strict xfail with that decision text | one code's fingers-of-god AP treatment is changed to match the other's, or the user changes the gate's nuisance treatment (for example a PFS-motivated cfog or the marginalised Delta chi^2). A strict xfail turns red by itself if the gate starts passing |
+| `tests/test_ps1loop_gradients.py::test_cross_code_tangents` (5 directions x 3 cosmologies) | passes, ps at nfft 512 (finding 2) | red until Oct 14, 2026 on the stretch and amplitude lines; closed by the extended model difference (finding 4) and ps at nfft 512 | none |
+| `tests/test_ps1loop_model_difference.py::test_model_difference_closes` (42 files) | passes, ps at nfft 512 | user decision of Oct 14, 2026: discrimination rule where the predicted difference is not identically zero; the zero-prediction lines' AP-only difference is finding 9 | none |
 
-The fast-suite wrapper `slurm/run-ps1loop-fast-suite.sh` deselects exactly these, plus the older
-Rosenbrock max-steps failure (CHANGELOG Oct 7, 2026).
+The fast-suite wrapper `slurm/run-ps1loop-fast-suite.sh` deselects only the older Rosenbrock max-steps failure
+(CHANGELOG Oct 7, 2026). No campaign test is deselected.
