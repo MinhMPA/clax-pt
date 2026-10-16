@@ -142,7 +142,7 @@ remaining residual is from photon-hierarchy and IC corrections at next order.
 | Module | Accuracy | Notes |
 |--------|----------|-------|
 | Background (H, D_A, r_s) | < 0.01% | 6+ significant digits |
-| Thermodynamics (x_e) | 0.25% at z_star | RECFAST with Heun stepping |
+| Thermodynamics (x_e) | 0.25% at z_star | RECFAST with CLASS's Saha -> ODE staging, advanced by an L-stable ROS2 step |
 | Visibility function g(tau) | **0.04%** | Bisection reionization, corrected kappa |
 | Perturbation ODE (Phi, Psi) | 0.01-0.25% | Gauge-corrected at recombination |
 | AD gradients (dP(k)/d(params)) | 0.03% | vs finite differences |
@@ -254,7 +254,7 @@ CosmoParams --> background --> thermodynamics --> perturbations --> primordial
 - Backend-aware batching over k-modes for GPU/CPU perturbation solves.
 - `RecursiveCheckpointAdjoint` for memory-efficient reverse-mode AD through the ODE solve.
 - Synchronous gauge throughout (matching CLASS default).
-- RECFAST recombination matching CLASS `wrap_recfast.c` (Peebles C with fudge, Gaussian K correction, Heun stepping).
+- RECFAST recombination matching CLASS `wrap_recfast.c` (Peebles C with fudge, Gaussian K correction, CLASS's Saha -> ODE staging advanced by an L-stable second-order ROS2 step).
 - Source-interpolated C_l integration: source functions S(k,tau) interpolated to fine k-grid (10000 points) before line-of-sight integration, resolving the oscillatory T_l(k) transfer function robustly.
 - JIT-compiled: all solve functions + per-l harmonic functions cached for 2x speedup on repeated calls.
 

@@ -752,6 +752,16 @@ def test_grad_h_end_to_end_from_cosmoparams_matches_fd(fast_mode):
     CPU reverse-mode value, +0.24%. A GPU run of an unpinned copy of this test
     itself (job 22431) gave rel_err=1.3211e-02, under the 0.03 bar.
 
+    UPDATE (Oct 11, 2026, smsharma/clax#48): every reading above was taken on
+    the unfixed recombination (clipped explicit helium/hydrogen steps whose
+    chatter made derivatives depend on step placement). With the Saha -> ODE
+    staging fix (ADR 0003) this test on CPU (job 24318) reads AD=4.022097e6,
+    FD=4.022357e6, rel_err=6.4640e-05, against +0.24% before; the FD value moves
+    by only 0.02% (4.021530e6 -> 4.022357e6). The GPU reverse and the CPU/GPU
+    forward readings were not repeated, so this test alone does not show whether
+    the +1.32% and +3.18% spreads were that chatter. The bar (0.03) is
+    unchanged.
+
     History on the C_l solve (``perturbations_solve``, not the matter solve):
     GPU-allocated job 14146 (actual JAX platform unverified: this file's
     import-time CPU pin) gave rel_err=1.3831e-02 (AD=4.046783e6,

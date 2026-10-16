@@ -267,7 +267,10 @@ class PrecisionParams:
         k_max=1.0 covers l~2500 with margin. 60 k/decade is sufficient
         when using source-interpolated C_l (compute_cl_tt_interp).
         l_max=50, 5000 tau points, tight ODE tolerance.
-        th_n_points=100000 for converged RECFAST stepping (Heun 2nd order).
+        th_n_points=100000 was chosen for the former explicit Heun stepping and is not
+        re-tuned for the CLASS Saha -> ODE staging (#48): there x_e at 20000 points is
+        within 1.1e-4 of 100000 over z 200-8000 (largest at z = 200), both 2.0e-4
+        from CLASS (the HeIII-era offset near z ~ 5900); the C_l effect is unmeasured.
         ~300 k-modes total. Use with compute_cls_all_interp.
         """
         return PrecisionParams(
