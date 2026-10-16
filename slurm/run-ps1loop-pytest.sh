@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 OUT=/lustre/work/n2minh/std/clax/ps1loop
 mkdir -p "$OUT"
 argfile=$(mktemp "$OUT/ps1loop-args.XXXXXX")
+trap 'rm -f "$argfile"' EXIT   # safe: sbatch --wait returns only after the job has read the file
 printf '%s\n' "$@" > "$argfile"
 jid=$(sbatch --parsable --wait --export=ALL,CLAX_REPO="$PWD",PYTEST_ARGS_FILE="$argfile" slurm/ps1loop-tests.sbatch)
 rc=$?
