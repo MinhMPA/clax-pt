@@ -460,7 +460,8 @@ If ps_1loop refits its own (c, cfog), shared by the 7 slices, the difference fal
 the prescription: by up to +20% in a cosmology whose geometry is several percent off the fiducial.
 
 **Mechanism.**
-- clax-pt (`clax/ept.py:2441-2446, 2500-2505, 2549-2554`) and CLASS-PT take the l = 4 projection `Pk_ctr4` of
+- clax-pt (`clax/ept.py:2441-2446, 2500-2505, 2549-2554`) and CLASS-PT (`python/classy.pyx:4912, 4923, 4932`,
+  `fz**2*b4*kh**2*(...)*(35/8)*pk_mult[13]`, checked at the source on Oct 17, 2026) take the l = 4 projection `Pk_ctr4` of
   k^2 P_lin f^2 mu^4 (`ept.py:1214`), multiply it by an isotropic factor, and add it to every multipole in observed
   k^2.
 - ps_1loop multiplies the full mu-dependent IR-resummed P(k, mu) by -cfog f^4 mu^4 (b1 + f mu^2)^2 k^4 in true

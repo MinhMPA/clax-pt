@@ -104,7 +104,8 @@ clax's μ-loop inputs and clax's P_nw, which ps_1loop 0.5.0's P_nw matches to 1.
    polynomial. The μ-dependent BAO damping e^{−k²Σ²_tot(μ)} (wiggle part) and, at
    z > 0, the AP mapping k_t(μ) leak c_j into other multipoles in ps_1loop only.
 2. **k⁴ fingers-of-god** — clax-pt uses the ℓ = 4 projection `Pk_ctr4` times the
-   isotropic factor for every ℓ, in observed k² (ept.py pk_gg_l0/l2/l4 `P_b4`);
+   isotropic factor for every ℓ, in observed k² (CLASS-PT classy.pyx:4912, 4923, 4932 — `fz**2*b4*kh**2*(...)*(35/8)*pk_mult[13]`;
+   mirrored by ept.py pk_gg_l0/l2/l4 `P_b4`);
    ps_1loop multiplies the full μ-dependent P_IR in true coordinates.
 3. **a0 under AP** — ps_1loop's k_t² carries μ² dependence; clax-pt adds a0 to ℓ = 0
    in observed k. Leak: Δ₂ = (2/3)·V·a0/ndens·(hratio² − 1/Dratio²)·(k/k_nl)².
