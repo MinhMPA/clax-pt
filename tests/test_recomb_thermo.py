@@ -322,3 +322,74 @@ def test_vmap_over_h_matches_loop(recomb_cosmology):
     d = float(np.max(np.abs(batched - looped)))
     print(f"{name}: max |vmap - loop| = {d:.3e}")
     assert d < 1e-12, f"ERROR vmap vs loop differ by {d:.3e} ({name})"
+
+
+# ---- One helium-to-hydrogen number ratio, CLASS's _not4_ ----
+
+@pytest.mark.parametrize("n", GRIDS)
+def test_fully_ionised_xe_uses_class_helium_mass_ratio(recomb_cosmology, n):
+    """x_e at z = 2e4 (H, He fully ionised) = 1 + 2 f_He with f_He = Y/(3.9715 (1-Y)),
+    CLASS thermodynamics.h:707 (_not4_). At z = 2e4 only the final x_e sum is
+    sensitive to the helium ratio, so this guards that sum alone: it fails if the
+    sum uses exactly 4 instead of 3.9715, a 1.2e-3 offset in x_e. The other
+    number-ratio sites are guarded by test_helium_ratio_guard_xe_windows below, which
+    lists the ones that stay unguarded. Parametrised over GRIDS: the value is
+    grid-independent, so the 3000-point case runs routinely under --fast."""
+    name, p = recomb_cosmology
+    prec = thermo_prec(n)
+    q = as_traced(p)
+    th = thermodynamics_solve(q, prec, background_solve(q, prec))
+    xe = float(th.xe_of_loga.evaluate(jnp.log(1.0 / 2.0001e4)))
+    y = float(p.Y_He)
+    expect = 1.0 + 2.0 * y / (3.9715 * (1.0 - y))
+    print(f"{name} n={n}: x_e(z=2e4) = {xe:.8f}, expected {expect:.8f}, diff {xe - expect:+.3e}")
+    assert abs(xe - expect) < 1e-6, f"ERROR fully ionised x_e {xe:.8f} vs {expect:.8f} ({name}, n={n})"
+
+
+# Tight x_e-vs-CLASS windows that guard the helium ratio at every site they can see.
+# Bar per (window, grid) = 2 x the worst |x_e/x_e,CLASS - 1| the code measures over
+# the 10 recomb_cosmology points, rounded up to 2 significant figures (measured
+# worst, 20000 / 3000 points: 2.35e-4 / 2.35e-4; 1.35e-6 / 1.35e-6; 1.16e-8 / 2.22e-8;
+# 1.85e-7 / 4.42e-7; 8.02e-7 / 1.33e-6, in the order below). Re-derived Oct 16, 2026
+# after the PR #53 review fixes lowered the error at z 1650-5000.
+HE_RATIO_GUARD_BARS = {
+    (5000.0, 8000.0): {20000: 4.8e-4, 3000: 4.8e-4},   # HeIII -> HeII Saha, x_e sum
+    (2870.0, 5000.0): {20000: 2.8e-6, 3000: 2.8e-6},   # HeII -> HeI Saha, x_e sum
+    (2870.0, 3500.0): {20000: 2.4e-8, 3000: 4.5e-8},   # HeII Saha quadratic (clax = CLASS to ~1e-8)
+    (2000.0, 2400.0): {20000: 3.7e-7, 3000: 8.9e-7},   # helium Peebles rate and x_e sum
+    (1650.0, 2870.0): {20000: 1.7e-6, 3000: 2.7e-6},   # whole helium ODE window
+}
+
+
+@pytest.mark.parametrize("n", GRIDS)
+@pytest.mark.parametrize("window", list(HE_RATIO_GUARD_BARS), ids=lambda w: f"z{w[0]:g}-{w[1]:g}")
+def test_helium_ratio_guard_xe_windows(recomb_cosmology, n, window):
+    """x_e against CLASS RECFAST (Heswitch=1) in five z windows, with bars of 2 x the
+    worst error the code has at the 10 cosmologies (HE_RATIO_GUARD_BARS): 2 to 4e4
+    times tighter than the 1e-3 gates above. It guards the CLASS He/H number ratio
+    f_He = Y/(3.9715 (1-Y)) at every site these windows can see. Reverting one such
+    site to exactly 4 pushes x_e past its bar at fiducial (mutant error / bar, 3000
+    points): HeII Saha quadratic 4.0 (z 2870-3500); helium Peebles x_e sum 6.3 and
+    helium Peebles rate 77 (both z 2000-2400); final x_e sum 2.1 to 1.2e4 (every window).
+
+    Not guarded, in two kinds. (1) The reversion moves x_e by less than the error the
+    code already has against CLASS in the same z range, so no bar can pass the current
+    code with a 2x margin and fail the reversion. Best window searched, mutant error
+    over 2 x worst current error (fiducial and Y_He = 0.28, both grids, 8 windows from
+    z 800 to 8000): the HeIII Saha constant in `_ionHe` 0.53 (shift 1.9e-5 against a
+    2.0e-4 offset from CLASS at z 5500-6500), the f_He in the hydrogen Peebles x_e sum
+    0.68 and in the hydrogen Saha correction 0.49. (2) The site acts outside the
+    references' z in [200, 8000]: the initial x_e
+    of the scan, which sets the table only above z = 5e4, and `_reionization_xe`
+    (z <~ 8); each shifts x_e by up to 1.0e-3 there. The four `1 - 0.75 Y_He`
+    mean-molecular-weight sites keep exactly 4 by design (ADR 0003, D4) and are not
+    guarded. Parametrised over GRIDS: the 3000-point fiducial case runs under --fast."""
+    name, p = recomb_cosmology
+    prim, _ = _prim_tan(name, p, n)
+    ref = load_ref(name)
+    sel = (ref["z"] >= window[0]) & (ref["z"] <= window[1])
+    rel = np.abs(xe_on_ref_grid(prim, ref["z"][sel]) / ref["x_e"][sel] - 1.0)
+    i = int(np.argmax(rel))
+    bar = HE_RATIO_GUARD_BARS[window][n]
+    print(f"{name} n={n}: x_e vs CLASS z {window} max {rel[i]:.3e} at z={ref['z'][sel][i]:.1f} (bar {bar:.1e})")
+    assert rel[i] <= bar, f"ERROR x_e helium-ratio guard {window} {rel[i]:.3e} > {bar:.1e} ({name}, n={n})"

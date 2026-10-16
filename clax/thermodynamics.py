@@ -34,6 +34,12 @@ derivatives with respect to h, omega_b, omega_cdm, Y_He, N_eff and T_cmb are smo
       |h J| reached, 2.35 on the 3000-point grid and 4.0 on 1500 points (measured,
       ADR 0003). The stage-switch redshifts are fixed numbers,
       as in CLASS, so no derivative passes through a switch location.
+    - He/H number ratio: every number-ratio site uses
+      f_He = Y_He / (3.9715 (1 - Y_He)), CLASS's _not4_ (thermodynamics.h:707), via
+      _f_He. The four "1 - 0.75 Y_He" mean-molecular-weight sites (c_s^2 prefactor
+      x3, T_b Compton-coupling fraction x1) still use exactly 4; they belong to the
+      c_s^2-versus-CLASS-c_b^2 follow-up and leave c_s^2 2.6e-4 to 5.4e-4 (relative)
+      from CLASS's form.
 Why: the earlier explicit steps (Heun for helium, RK4 for hydrogen, both clipped,
 plus a hard x_He > 0.999 switch and Saha/ODE sigmoids) ran through the ranges
 where CLASS uses Saha. x_e looked fine (0.35% wiggles), but d ln x_e / d theta
@@ -158,7 +164,7 @@ _Lambda_He = 51.3              # He 2s→1s transition rate [s^{-1}]
 _A2P_s_He = 1.798287e9        # He 2^1P singlet radiative rate [s^{-1}]
 _sigma_He_2Ps = 1.436289e-22  # cross section for 2^1P He singlet [m^2] → [cm^2] = 1.436289e-18
 _sigma_He_2Ps_cgs = 1.436289e-22 * 1e4  # [cm^2]
-_not4 = 3.9715               # mHe / mH (not exactly 4)
+_NOT4 = 3.9715               # mHe / mH (not exactly 4), CLASS _not4_ (thermodynamics.h:707); used only via _f_He
 _RECFAST_FUDGE_He = 0.86     # helium fudge factor (CLASS default)
 # Verner & Ferland (1996) He case-B: convert from SI (m^3/s) to CGS (cm^3/s)
 # CLASS: _a_VF_ = 10^{-16.744} [m^3/s]; CGS = SI * 1e6
@@ -517,14 +523,11 @@ def _ionHe(tempb, a, x0, x1, x2, Y_He, H0, Omega_b):
 # Reionization (tanh model)
 # ---------------------------------------------------------------------------
 
-_NOT4 = 3.9715  # He-4/H mass ratio, cf. CLASS thermodynamics.h:707
-
-
 def _f_He(Y_He):
-    """Helium-to-hydrogen number ratio n_He/n_H = Y/(4 (1-Y)): exactly 4 for the
-    mass ratio, the value every recombination-era site used before
-    smsharma/clax#48. The reionization model below uses CLASS's _not4_ (_NOT4)."""
-    return 0.25 * Y_He / (1.0 - Y_He)
+    """Helium-to-hydrogen number ratio n_He/n_H = Y/(_not4_ (1-Y)), CLASS
+    thermodynamics.h:707. The one definition used by every x_e sum and helium
+    rate in this module (smsharma/clax#48)."""
+    return Y_He / (_NOT4 * (1.0 - Y_He))
 
 
 def _reionization_xe_fraction(z, z_reio):
@@ -555,7 +558,7 @@ def _reionization_xe(z, z_reio, Y_He, xe_before=0.0):
     """
     # fHe = n_He/n_H; CLASS uses _not4_=3.9715 instead of exactly 4
     # cf. CLASS thermodynamics.c:1207
-    fHe = Y_He / (_NOT4 * (1.0 - Y_He))
+    fHe = _f_He(Y_He)
     xe_after = 1.0 + fHe  # H + singly-ionized He
 
     # Hydrogen reionization (CLASS reio_camb)
@@ -744,7 +747,7 @@ def thermodynamics_solve(
         dlna_main = new_loga - lna0
         lnH0 = jnp.log(adot / a**2)          # a' = a^2 H -> H at the step start
         lnH1 = jnp.log(new_H)
-        fHe = _f_He(Y_He)  # n_He/n_H: every x_e sum and the helium rate below
+        fHe = _f_He(Y_He)  # n_He/n_H with CLASS's _not4_: every x_e sum and the helium rate below
 
         def sub_env(s):
             a_s = jnp.exp(lna0 + s * dlna_main)
