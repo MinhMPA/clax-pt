@@ -50,9 +50,17 @@ def test_production_reverse_matches_forward(recomb_downstream_cosmology):
 
 
 def test_dfdh_smooth_along_h(recomb_downstream_cosmology):
+    """df/dh along h = 0.62-0.72 has no kinks: residual of a cubic fit < 3e-4 of the
+    median (unfixed code 5.5e-2 at fiducial). The matter solve runs at rtol = atol =
+    3e-5, not FWD's 1e-4: at 1e-4 a GPU, where 62 k-modes share one adaptive step,
+    adds step-placement noise of 3.2e-4 / 3.6e-4 (fiducial / Y_He = 0.28, V100), above
+    the bar; at 3e-5 the worst over the 3 cosmologies is 1.4e-4 on the V100 and
+    2.2e-4 on CPU (fiducial), for +16% per evaluation. Below ~3e-5 the residual stops
+    falling: part of it, up to ~2e-4, does not depend on the solver tolerance (CPU
+    fiducial 5.5e-5 at 1e-4, 2.2e-4 at 3e-5, 8.4e-5 at 1e-5; source untested)."""
     name, base = recomb_downstream_cosmology
     hs = np.linspace(0.62, 0.72, 11)
-    f = dm_functional(FWD, base)
+    f = dm_functional(replace(FWD, pt_ode_rtol=3e-5, pt_ode_atol=3e-5), base)
     g = jax.jit(lambda h: jax.jvp(f, (h,), (jnp.asarray(1.0),))[1])
     d = np.array([float(g(jnp.asarray(h))) for h in hs])
     resid = d - np.polyval(np.polyfit(hs, d, 3), hs)

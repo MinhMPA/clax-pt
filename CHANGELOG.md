@@ -93,7 +93,7 @@ Y_He = 0.28, `fast_cl`, Rodas5, rtol = atol = 1e-4).
 | df/dh spread over k-chunk 8 vs 62, jit vs no-jit (3e-4) | 0.192 / 3.0e-4 / 5.9e-4 | 8.7e-5 / 1.5e-5 / 9.6e-5 (V100) |
 | native reverse vs forward df/dh (3e-4) | 3.1e-2 / 6.0e-6 / 5.0e-5 | 1.4e-11 / 1.2e-10 / 4.5e-11 (V100) |
 | production reverse (ADR 0001 path) vs forward df/dh (3e-4) | 1.16 / 3.1e-5 / 5.9e-4 | 1.4e-11 / 1.2e-10 / 4.5e-11 (V100) |
-| df/dh smoothness along h = 0.62-0.72, cubic-fit residual (3e-4) | 5.5e-2 / 3.1e-3 / 3.0e-4 (CPU) | CPU 5.5e-5 (fiducial); V100 3.2e-4 / 3.8e-5 / 3.6e-4, see below |
+| df/dh smoothness along h = 0.62-0.72, cubic-fit residual (3e-4) | 5.5e-2 / 3.1e-3 / 3.0e-4 (CPU) | matter solve at rtol = atol = 3e-5: V100 1.4e-4 / 1.3e-4 / 2.1e-5, CPU 2.2e-4 / 1.3e-4 / 2.8e-5; see below |
 
 Jobs (cluster logs, not in the repo; more in ADR 0003): unfixed 24095-24097, 24122-24126,
 24169-24171, 24226-24230, 24275; fixed, after the Oct 16, 2026 review fixes: CPU 26273, 26314
@@ -109,13 +109,17 @@ Jobs (cluster logs, not in the repo; more in ADR 0003): unfixed 24095-24097, 241
   3000 / 20000 / 100000 points; fixed 0.20 / 2.19, 1.89 / 2.55, 9.8 / 13.6, 46.4 / 65.2 s
   (jobs 26220, 26244). `fit_cl`'s own benchmark has its thermodynamics 12-18% slower than
   unfixed. The 8 s is not the 34 s in the status banner above; that figure was not reproduced.
-- **df/dh smoothness on a GPU:** `test_dfdh_smooth_along_h` fails on a V100 at fiducial
-  (3.22e-4, identical on the first version of this PR, job 26402) and Y_He = 0.28 (3.55e-4;
-  first version 2.84e-4) against its 3e-4 bar; it passes on CPU (5.5e-5). The residual is the
-  matter solver's step-placement noise, not a kink: on CPU each review fix alone moves it from
-  7.8e-6 to ~2e-5, the `lax.cond` not at all (jobs 26426-26428); with 62 k-modes sharing one
-  adaptive step on the GPU its floor is about 3-4e-4. Bar or solver tolerance for GPU runs:
-  undecided.
+- **df/dh smoothness on a GPU** (Oct 17, 2026): at the matter solve's rtol = atol = 1e-4,
+  `test_dfdh_smooth_along_h` failed on a V100 at fiducial (3.22e-4, identical on the first
+  version of this PR, job 26402) and Y_He = 0.28 (3.55e-4; first version 2.84e-4) against its
+  3e-4 bar, passing on CPU (5.5e-5). Not a kink: on CPU each review fix alone moves the
+  residual from 7.8e-6 to ~2e-5, the `lax.cond` not at all (jobs 26426-26428); with 62 k-modes
+  sharing one adaptive step on the GPU, step-placement noise reaches 3-4e-4. Tolerance pilot
+  (V100, jobs 26535-26537, worst of 3 cosmologies): 3.55e-4 at 1e-4, 1.36e-4 at 3e-5 (+16% per
+  evaluation), 1.10e-4 at 1e-5 (+31%); below ~3e-5 part of the residual, up to ~2e-4, does not
+  depend on the tolerance (source untested). The test now solves at 3e-5 and passes on both
+  platforms (jobs 26541, 26542): V100 1.36e-4 / 1.28e-4 / 2.1e-5, CPU 2.19e-4 / 1.32e-4 /
+  2.8e-5 (fiducial / omega_b + 20% / Y_He = 0.28); tightest margin 1.4x, CPU fiducial.
 - **Direct C_l shift** (jobs 24328-24331), max |C_fixed/C_unfixed - 1| of unlensed
   `planck_cl` TT / EE: 0.0051% / 0.0037% for l <= 500, 0.0188% / 0.0255% for 500-1500,
   0.0518% / 0.0627% for 1500-2500. At `fit_cl` it is larger (TT 10.3% at l = 4, 1.7% at
@@ -136,8 +140,9 @@ Jobs (cluster logs, not in the repo; more in ADR 0003): unfixed 24095-24097, 241
 - Full mode, recombination modules (CPU, 10 cosmologies): final tree `test_recomb_thermo` 690
   of 690 (job 26314), reference + stiff step 17 of 17 (job 26273); staging commit 587 of 587
   (job 26276). `test_recomb_gpu` 9 of 9 on both (V100, jobs 26355, 26356);
-  `test_recomb_downstream` 10 of 12 on a V100 on both, the two failures being the GPU
-  smoothness cases above (jobs 26274, 26277).
+  `test_recomb_downstream` 10 of 12 on a V100 on both with the smoothness test at
+  rtol = atol = 1e-4 (jobs 26274, 26277); with it at 3e-5 its 3 cases pass on the V100 and on
+  CPU (jobs 26541, 26542).
 - First version of this PR, for the record: `--fast` 441 passed, 706 skipped, 1 failed (job
   24501).
 - Full mode (first version): `test_recomb_thermo` 570 of 570; thermodynamics + recomb reference + stiff step
