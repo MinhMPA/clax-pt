@@ -123,6 +123,25 @@ def _invocation(rel, z_pk_str: str, z_pk: float, ap: bool, omfid: float, cb: boo
     return " ".join(parts) + note, bias_fallback
 
 
+# Patches known to change no computed value (why a file without them is still comparable with one that has them).
+_INERT_PATCHES = {"classpt_d1_dump.patch": "inert unless `$CLAXPT_D1_DUMP` names an output path; it changes no "
+                                           "computed value (see the internals-dumps section below)"}
+
+
+def _patch_coverage(patches: dict, patch_files: dict, n_files: int) -> list[str]:
+    """[sentence, ""] when the Patches line is a union that not every file carries, else []: the file count per
+    such patch, so the line is not read as "every file was built with all of these"."""
+    partial = [name for name in patches if patch_files.get(name, 0) < n_files]
+    if not partial:
+        return []
+    parts = []
+    for name in partial:
+        note = f"; {_INERT_PATCHES[name]}" if name in _INERT_PATCHES else ""
+        parts.append(f"`{name}` is listed by {patch_files.get(name, 0)} of the {n_files} files (those generated "
+                     f"after it was applied to the installed build){note}")
+    return ["The Patches line is the union over the files: " + "; ".join(parts) + ".", ""]
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--skipped", nargs="*", default=[], help='"relative/path.npz: reason"')
@@ -130,6 +149,7 @@ def main(argv=None):
     rows = []
     commits: set[str] = set()
     patch_blobs: set[str] = set()
+    patch_files: dict[str, int] = {}     # patch name -> number of scanned files that list it
     bias_fallback_files = []
     for path in sorted(vc.REFERENCE_ROOT.rglob("*.npz")):
         if path.name.endswith("_internals.npz"):
@@ -141,6 +161,8 @@ def main(argv=None):
         psha = hashlib.sha256(str(d["params_json"]).encode()).hexdigest()[:12]
         commits.add(str(d["classpt_commit"]))
         patch_blobs.add(str(d["patches_sha256"]))
+        for name in json.loads(str(d["patches_sha256"])):
+            patch_files[name] = patch_files.get(name, 0) + 1
 
         z_pk_str = str(params["z_pk"])
         z_pk_parts = z_pk_str.split(",")
@@ -164,8 +186,14 @@ def main(argv=None):
 
     if rows:
         assert len(commits) == 1, f"multiple classpt_commit values across scanned files: {commits}"
-        assert len(patch_blobs) == 1, f"multiple patches_sha256 blobs across scanned files: {patch_blobs}"
-        patches = json.loads(next(iter(patch_blobs)))
+        # Files may differ in patch set: the installed CLASS-PT build also carries the inert
+        # classpt_d1_dump.patch (no-op unless $CLAXPT_D1_DUMP is set, changes no computed
+        # value), so files generated after it landed list it. Record the union; the same
+        # patch name must never map to two different hashes.
+        patches = {}
+        for blob in sorted(patch_blobs):
+            for name, h in json.loads(blob).items():
+                assert patches.setdefault(name, h) == h, f"patch {name} has two hashes across scanned files"
     else:
         patches = {}
 
@@ -176,6 +204,7 @@ def main(argv=None):
              "Every campaign file is one `--z-list <z>` CLASS-PT run (Ruling 19); "
              "`z_pk` in each file's `params_json` is a single value.", "",
              "Patches: " + ", ".join(f"`{k}` `{v[:16]}`" for k, v in patches.items()), "",
+             *_patch_coverage(patches, patch_files, len(rows)),
              "| file | sha256[:16] | CLASS-PT | z_pk | hratio | Dratio | f | params sha[:12] | invocation |",
              "|---|---|---|---|---|---|---|---|---|", *rows, ""]
     if bias_fallback_files:
