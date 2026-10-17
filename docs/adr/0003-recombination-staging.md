@@ -258,22 +258,33 @@ fiducial (job 26403). On a V100 the test fails at fiducial (3.22e-4) and at
 Y_He = 0.28 (3.55e-4), passing at omega_b + 20% (3.8e-5). The fiducial failure is
 identical on the first version of this PR (3.224e-4, job 26402), whose CPU value
 was 7.8e-6 and V100 values 6.0e-6 / 2.84e-4 at omega_b + 20% / Y_He = 0.28 (jobs
-26401, 26414). The residual is the matter solver's step-placement noise, not a
-kink: on CPU each review fix alone moves it from 7.8e-6 to 2.0e-5 (hydrogen
-step-end Saha) or 2.1e-5 (HeIII share, which only changes x_e near z ~ 5000), and
-the `lax.cond` not at all (jobs 26426-26428); on a GPU at rtol = atol = 1e-4, where
-62 k-modes share one adaptive step, it reaches 3-4e-4, at the bar. Earlier
-development trees gave 1.9e-5 to 6.1e-5 on CPU (jobs 24226-24231). A tolerance
-pilot on a V100 (jobs 26535-26537; worst of the three cosmologies) gave 3.55e-4 at
-1e-4, 1.36e-4 at 3e-5 (+16% per evaluation) and 1.10e-4 at 1e-5 (+31%): the GPU
-excess goes, but below ~3e-5 the residual stops falling, and part of it does not
-depend on the tolerance (CPU fiducial 5.5e-5 at 1e-4, 8.4e-5 at 1e-5; df/dh itself
-moves by up to 1.6e-4 between tolerances; source untested, a candidate being the
-fixed switch redshifts crossing grid points as h moves). The test now solves at
-rtol = atol = 3e-5 and passes on both platforms (jobs 26541 V100, 26542 CPU):
-1.36e-4 / 1.28e-4 / 2.1e-5 on the V100 and 2.19e-4 / 1.32e-4 / 2.8e-5 on CPU
-(fiducial / omega_b + 20% / Y_He = 0.28), so the tightest margin is 1.4x at CPU
-fiducial, set by the tolerance-independent part. The forward df/dh at fiducial itself
+26401, 26414). The residual is not a kink, and it does not come from
+thermodynamics: with omega_b and omega_cdm fixed, the thermodynamics tables carry
+<= 1e-11 of df/dh (V100, job 26548). It comes from the background tables, splines
+on `bg_n_points` = 800 points in ln a. h moves ln a(tau) at late times, so the
+times at which the matter solve crosses the splines' knots move with h, and the
+solver's long steps near today integrate that part of the tangent with an error
+that jumps whenever the step pattern changes. On fine h scans (41 points over
+0.665-0.675) df/dh is smooth between changes of the step count of the k batch that
+dominates f, and jumps by 2-4e-5 at each change (jobs 26558 CPU, 26560 V100). The
+part of df/dh carried by H and the densities at fixed ln a is smooth to 3.6e-6;
+the part carried by tau_0 and ln a(tau) is not (job 26548). Forcing 60-80 extra
+steps over z = 0.01-0.3 or 0.05-1 removes the roughness (5.5e-6 to 5.9e-6), over
+z = 0.3-1 it does not (2.1e-4; jobs 26568-26575). The residual does fall with the
+matter-solve tolerance, but only slowly between 1e-4 and 1e-5: V100 fiducial
+3.2e-4, 1.4e-4, 6.1e-5, 6.9e-6 and 6.1e-6 at rtol = atol = 1e-4, 3e-5, 1e-5, 1e-6
+and 1e-7 (CPU 6.5e-6 at 1e-6; jobs 26535-26537, 26553-26556). An earlier revision
+of this test ran at 3e-5 and read that slow fall as a tolerance-independent floor;
+there is none. About 6e-6 is the cubic fit's own error: the residual is then the
+smooth shape of a missing quartic term, and a quartic fit leaves 1.1e-6. The test
+now tabulates the background on 8000 points and keeps rtol = atol = 1e-4:
+6.1e-6 / 5.5e-6 / 5.7e-6 on the V100 and 5.6e-6 / 5.5e-6 / 5.5e-6 on CPU (fiducial /
+omega_b + 20% / Y_He = 0.28; jobs 26586, 26587), for +17% per evaluation (29.3 s
+against 24.8 s on the V100, job 26578). The unfixed code still fails it: 1.4e2 at
+fiducial on CPU, 5.0e-4 / 2.0 / 3.9e-4 on the V100 (jobs 26590, 26588). The
+800-point noise is pre-existing and reaches any
+production derivative with respect to a parameter that moves the late-time
+expansion at fixed omega; it is outside this PR. The forward df/dh at fiducial itself
 moves by 3.5% between the unfixed (-2.659e9) and the fixed (-2.756e9) code, and
 the unfixed value also changed with step placement. Finite differences of
 P(k) also become trustworthy: the spread of a central-difference
