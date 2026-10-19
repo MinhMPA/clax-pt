@@ -7,8 +7,18 @@ re-runs generate_class_reference.py's exact parameter set and z grid with whatev
 max |x_e_stock / x_e_ref - 1| and |T_b_stock / T_b_ref - 1| per cosmology, plus per
 z window into an optional JSON file.
 
-Measured Oct 16, 2026 (stock classy 3.3.4 from PyPI): x_e <= 7.1e-6 (largest at
-z 200-800), T_b <= 7.7e-7, z 2870-5000 <= 6.7e-12, at all 10 cosmologies.
+Exit status: 0 if every cosmology is within BAR in x_e and T_b; 1 if any is not;
+2 if every difference is exactly zero, which means the imported classy is the build
+that made the references (it reproduces them bit for bit), not an independent CLASS.
+The CLASS-PT build also reports v3.3.4, so the version cannot tell them apart; the
+import path is printed first.
+
+Measured Oct 19, 2026 (stock classy 3.3.4 from PyPI, references at
+tol_thermo_integration = 1e-10): x_e <= 2.9e-8 (largest at z ~ 1700-1770), T_b
+<= 2.1e-10, z 2870-5000 <= 6.5e-12, at all 11 cosmologies. On the earlier
+references at CLASS's default 1e-6 (Oct 16, 2026, 10 cosmologies) the same check
+gave x_e <= 7.1e-6 and T_b <= 7.7e-7, and 2.3e-4 at omega_b - 20%: the two builds'
+own integration error, which the tighter tolerance removes.
 
 Usage:  python scripts/crosscheck_recfast_hesw1_stock.py [out.json]
 """
@@ -21,6 +31,7 @@ import numpy as np
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 WINDOWS = [(200, 800), (800, 1550), (1550, 1650), (1650, 2870), (2870, 5000), (5000, 8000)]
+BAR = 1e-6  # ~30x the largest measured stock-vs-reference difference (2.9e-8)
 
 
 def main():
@@ -33,6 +44,8 @@ def main():
     from classy import Class
 
     res = {"classy_file": classy.__file__, "classy_version": getattr(classy, "__version__", "?")}
+    print(f"classy {res['classy_version']} from {res['classy_file']}", flush=True)
+    worst = []
     for name, overrides in gen.RECOMB_GRID.items():
         pars = dict(gen.RECFAST_HESW1_BASE)
         for k, v in overrides.items():
@@ -55,11 +68,20 @@ def main():
                                     for lo, hi in WINDOWS}}
         print(f"{name:16s} max|dxe/xe| {rx.max():.2e} at z={z[np.argmax(rx)]:.0f}  "
               f"max|dTb/Tb| {rt.max():.2e}", flush=True)
+        worst.append(max(rx.max(), rt.max()))
         c.struct_cleanup()
         c.empty()
     if len(sys.argv) > 1:
         with open(sys.argv[1], "w") as fh:
             json.dump(res, fh, indent=1)
+    if max(worst) == 0.0:
+        print("ERROR every difference is exactly 0: this classy is the build that made "
+              "the references, not an independent CLASS")
+        sys.exit(2)
+    if max(worst) > BAR:
+        print(f"ERROR stock vs reference {max(worst):.2e} > {BAR:.0e}")
+        sys.exit(1)
+    print(f"PASS: all {len(worst)} cosmologies within {BAR:.0e} (worst {max(worst):.2e})")
 
 
 if __name__ == "__main__":

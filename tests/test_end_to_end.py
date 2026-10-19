@@ -111,12 +111,14 @@ class TestComputePk:
         assert jax.numpy.all(result.pk_grid > 0), f"Non-positive values found in {result.pk_grid}"
 
     def test_pk_table_auto_batch_matches_full_vmap(self):
-        """Auto-batched and explicit full-``vmap`` table solves should agree on the returned ``P(k)`` grid."""
+        """Auto-batched and explicit full-``vmap`` table solves should agree on the returned ``P(k)`` grid.
+
+        k-batching numerics at one cosmology: exempt from the multi-cosmology rule."""
         k_eval = jax.numpy.geomspace(1e-3, 0.1, 4)
-        # smsharma/clax#48: at PREC_FAST's rtol=1e-2 the batched Rosenbrock solver shares one step size
-        # per batch, so auto-chunk and full-vmap differ at the 1e-3 level depending on incidental table
-        # details (7.2e-4 / 2.06e-3 / 1.09e-3 across thermodynamics grids and code versions). At fit_cl's
-        # rtol=1e-3 the floor is 1.8e-4, so a real batching bug still shows.
+        # smsharma/clax#48: at PREC_FAST's rtol=1e-2 (Kvaerno5 on the per-mode vmap path; PREC_FAST sets
+        # no solver) auto-chunk and full-vmap differ at the 1e-3 level depending on incidental table
+        # details (7.2e-4 / 2.06e-3 / 1.09e-3 across thermodynamics grids and code versions); the cause
+        # is not established. At fit_cl's rtol=1e-3 the floor is 1.8e-4, so a real batching bug still shows.
         auto_result = clax.compute_pk_table(CosmoParams(), dataclass_replace(PREC_FAST, pt_k_chunk_size=0, pt_ode_rtol=1e-3), k_eval=k_eval)
         full_result = clax.compute_pk_table(CosmoParams(), dataclass_replace(PREC_FAST, pt_k_chunk_size=-1, pt_ode_rtol=1e-3), k_eval=k_eval)
         rel_diff = jax.numpy.max(jax.numpy.abs(auto_result.pk_grid / full_result.pk_grid - 1.0))

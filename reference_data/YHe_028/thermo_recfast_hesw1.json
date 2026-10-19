@@ -13,9 +13,10 @@
   "YHe": 0.28,
   "recombination": "RECFAST",
   "recfast_Heswitch": 1,
-  "tol_background_integration": 1e-12
+  "tol_background_integration": 1e-12,
+  "tol_thermo_integration": 1e-10
  },
  "classy": "v3.3.4",
- "build": "CLASS-PT tree (CLASS v3.3.4 thermodynamics), classpt env",
+ "build": "classy imported from /home/n2minh/micromamba/envs/classpt/lib/python3.10/site-packages/classy",
  "grid": "4000 points, uniform in log(1+z), z in [200, 8000]"
 }

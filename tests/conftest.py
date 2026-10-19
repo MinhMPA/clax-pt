@@ -187,12 +187,16 @@ def _make_cosmology_fixture(grid):
 lcdm_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_LCDM)
 nulcdm_cosmology = _make_cosmology_fixture(COSMOLOGY_GRID_NULCDM)
 
-# Recombination staging (smsharma/clax#48): the 5 LCDM points plus helium,
-# N_eff and massive-neutrino extremes. Names match reference_data/<name>/
-# thermo_recfast_hesw1.npz (CLASS RECFAST, recfast_Heswitch=1).
+# Recombination staging (smsharma/clax#48): the 5 LCDM points plus low omega_b,
+# helium, N_eff and massive-neutrino extremes. Names match reference_data/<name>/
+# thermo_recfast_hesw1.npz (CLASS RECFAST, recfast_Heswitch=1). omega_b_low is the
+# one point whose Saha x_H at the hydrogen ODE start (z = 1600) is above 0.995, so
+# the ODE starts with the Peebles C = 1 and crosses that switch (thermodynamics.py
+# `_recfast_dxH_dlna`, wrap_recfast.c:164).
 NEFF_NCDM = (0.71611 / (4.0 / 11.0) ** (1.0 / 3.0)) ** 4  # 1.0132: one ncdm species' early N_eff
 COSMOLOGY_GRID_RECOMB = {
     **COSMOLOGY_GRID_LCDM,
+    "omega_b_low": {"omega_b": 0.02237 * 0.80},
     "YHe_022": {"Y_He": 0.22},
     "YHe_028": {"Y_He": 0.28},
     "Neff_2": {"N_ur": 2.0 - NEFF_NCDM},

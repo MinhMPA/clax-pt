@@ -1,7 +1,7 @@
 """S1 (smsharma/clax#48): thermodynamics tables and their forward tangents.
 Primary oracle: CLASS RECFAST recfast_Heswitch=1 (reference_data/<name>/
 thermo_recfast_hesw1.npz). Bars are the code-accuracy gates set for #48.
-Multi-cosmology: recomb_cosmology (10 points; fiducial only under --fast)."""
+Multi-cosmology: recomb_cosmology (11 points; fiducial only under --fast)."""
 from dataclasses import replace
 
 import jax
@@ -11,7 +11,7 @@ import pytest
 
 from clax.background import background_solve
 from clax.interpolation import CubicSpline
-from clax.thermodynamics import _f_He, thermodynamics_solve
+from clax.thermodynamics import thermodynamics_solve
 from tests.recomb_test_utils import (QS, THETAS, THERMO_GRIDS, as_traced, load_ref,
                                      spike_ratio, tables, tangent_tables, thermo_prec,
                                      xe_on_ref_grid, z_of)
@@ -151,10 +151,13 @@ def test_tangents_match_converged_fd_helium(recomb_cosmology, theta):
 # ---- Hydrogen: CLASS staging, Saha -> Peebles ODE at z = 1600 ----
 
 @pytest.mark.parametrize("n", GRIDS)
-@pytest.mark.parametrize("window", [(1590.0, 1650.0), (800.0, 1550.0), (1650.0, 2870.0)])
+@pytest.mark.parametrize("window", [(800.0, 1650.0), (1650.0, 2870.0)])
 def test_xe_hydrogen_windows_match_class(recomb_cosmology, n, window):
-    # (1650, 2870) is the helium ODE's x_e; helium staging alone could not pass it,
-    # because its error sits at the z ~ 1650 hydrogen edge, which only hydrogen staging fixes.
+    # (800, 1650) is the hydrogen stage with no gap: the f2 blend (z 1500-1600) and
+    # the Saha -> ODE hand-over included; the tighter per-window bars are in
+    # test_hydrogen_staging_guard_xe_windows. (1650, 2870) is the helium ODE's x_e;
+    # helium staging alone could not pass it, because its error sits at the
+    # z ~ 1650 hydrogen edge, which only hydrogen staging fixes.
     name, p = recomb_cosmology
     prim, _ = _prim_tan(name, p, n)
     ref = load_ref(name)
@@ -203,7 +206,8 @@ def test_values_smooth_full_range(recomb_cosmology, n):
     assert d2.max() < bar, f"ERROR x_e not smooth: {d2.max():.3e} ({name}, n={n})"
 
 
-ZS_H = np.array([1800., 1300., 1100., 800., 400.])
+# 1600 and 1550: the hydrogen Saha -> ODE hand-over and the middle of its f2 blend.
+ZS_H = np.array([1800., 1600., 1550., 1300., 1100., 800., 400.])
 
 
 @pytest.mark.slow
@@ -214,7 +218,10 @@ def test_tangents_match_converged_fd_hydrogen(recomb_cosmology, theta):
 
 # ---- Robustness checks: bounds, T_cmb, coarser grid, jit vs eager, vmap ----
 
-@pytest.mark.parametrize("n", GRIDS)
+# Also on the 1500-point grid of the coarse-grid spike test and PREC_FAST's 1200
+# points, where |h J| reaches ~4-5 and an overshoot of the unclipped step would show
+# first (the unstaged L-stable variant drove x_e to -988, ADR 0003).
+@pytest.mark.parametrize("n", GRIDS + [1500, 1200])
 def test_fractions_stay_physical_without_clips(recomb_cosmology, n):
     name, p = recomb_cosmology
     prim, _ = _prim_tan(name, p, n)
@@ -259,6 +266,9 @@ def test_helium_counted_once_z2870_5000(recomb_cosmology, n):
     sel = (ref["z"] >= 2870.0) & (ref["z"] <= 5000.0)
     z = ref["z"][sel]
     y = float(p.Y_He)
+    # Local import: the module then still collects on code without _f_He (the
+    # unfixed tree), and goes red here by assertion rather than at import.
+    from clax.thermodynamics import _f_He
     he_clax = (xe_on_ref_grid(prim, z) - 1.0) / float(_f_He(y))
     he_class = (ref["x_e"][sel] - 1.0) / (y / (3.9715 * (1.0 - y)))
     d = np.abs(he_clax - he_class)
@@ -348,16 +358,16 @@ def test_fully_ionised_xe_uses_class_helium_mass_ratio(recomb_cosmology, n):
 
 # Tight x_e-vs-CLASS windows that guard the helium ratio at every site they can see.
 # Bar per (window, grid) = 2 x the worst |x_e/x_e,CLASS - 1| the code measures over
-# the 10 recomb_cosmology points, rounded up to 2 significant figures (measured
-# worst, 20000 / 3000 points: 2.35e-4 / 2.35e-4; 1.35e-6 / 1.35e-6; 1.16e-8 / 2.22e-8;
-# 1.85e-7 / 4.42e-7; 8.02e-7 / 1.33e-6, in the order below). Re-derived Oct 16, 2026
-# after the PR #53 review fixes lowered the error at z 1650-5000.
+# the 11 recomb_cosmology points, rounded up to 2 significant figures (measured
+# worst, 20000 / 3000 points: 2.35e-4 / 2.35e-4; 1.39e-6 / 1.39e-6; 1.16e-8 / 2.22e-8;
+# 9.03e-8 / 3.21e-7; 3.86e-7 / 1.41e-6, in the order below). Re-derived Oct 19, 2026
+# on the references regenerated at tol_thermo_integration = 1e-10 (job 26861).
 HE_RATIO_GUARD_BARS = {
     (5000.0, 8000.0): {20000: 4.8e-4, 3000: 4.8e-4},   # HeIII -> HeII Saha, x_e sum
     (2870.0, 5000.0): {20000: 2.8e-6, 3000: 2.8e-6},   # HeII -> HeI Saha, x_e sum
     (2870.0, 3500.0): {20000: 2.4e-8, 3000: 4.5e-8},   # HeII Saha quadratic (clax = CLASS to ~1e-8)
-    (2000.0, 2400.0): {20000: 3.7e-7, 3000: 8.9e-7},   # helium Peebles rate and x_e sum
-    (1650.0, 2870.0): {20000: 1.7e-6, 3000: 2.7e-6},   # whole helium ODE window
+    (2000.0, 2400.0): {20000: 1.9e-7, 3000: 6.5e-7},   # helium Peebles rate and x_e sum
+    (1650.0, 2870.0): {20000: 7.8e-7, 3000: 2.9e-6},   # whole helium ODE window
 }
 
 
@@ -365,20 +375,22 @@ HE_RATIO_GUARD_BARS = {
 @pytest.mark.parametrize("window", list(HE_RATIO_GUARD_BARS), ids=lambda w: f"z{w[0]:g}-{w[1]:g}")
 def test_helium_ratio_guard_xe_windows(recomb_cosmology, n, window):
     """x_e against CLASS RECFAST (Heswitch=1) in five z windows, with bars of 2 x the
-    worst error the code has at the 10 cosmologies (HE_RATIO_GUARD_BARS): 2 to 4e4
+    worst error the code has at the 11 cosmologies (HE_RATIO_GUARD_BARS): 2 to 4e4
     times tighter than the 1e-3 gates above. It guards the CLASS He/H number ratio
     f_He = Y/(3.9715 (1-Y)) at every site these windows can see. Reverting one such
-    site to exactly 4 pushes x_e past its bar at fiducial (mutant error / bar, 3000
-    points): HeII Saha quadratic 4.0 (z 2870-3500); helium Peebles x_e sum 6.3 and
-    helium Peebles rate 77 (both z 2000-2400); final x_e sum 2.1 to 1.2e4 (every window).
+    site to exactly 4 pushes x_e past its bar (mutant error / bar, 20000 / 3000
+    points, the smaller of fiducial and Y_He = 0.28; job 26861): HeII Saha quadratic
+    7.8 / 4.0 (z 2870-3500); helium Peebles rate 360 / 105 and helium Peebles x_e
+    sum 28 / 8.7 (both z 2000-2400); final x_e sum 2.1 to 2.3e4 (every window).
 
     Not guarded, in two kinds. (1) The reversion moves x_e by less than the error the
     code already has against CLASS in the same z range, so no bar can pass the current
     code with a 2x margin and fail the reversion. Best window searched, mutant error
-    over 2 x worst current error (fiducial and Y_He = 0.28, both grids, 8 windows from
-    z 800 to 8000): the HeIII Saha constant in `_ionHe` 0.53 (shift 1.9e-5 against a
+    over its bar (fiducial and Y_He = 0.28, both grids, the 9 guard windows from
+    z 800 to 8000): the HeIII Saha constant in `_ionHe` 0.47 (shift 1.9e-5 against a
     2.0e-4 offset from CLASS at z 5500-6500), the f_He in the hydrogen Peebles x_e sum
-    0.68 and in the hydrogen Saha correction 0.49. (2) The site acts outside the
+    0.85 and in the hydrogen Saha correction 0.83 (both z 1500-1650, 20000 points).
+    (2) The site acts outside the
     references' z in [200, 8000]: the initial x_e
     of the scan, which sets the table only above z = 5e4, and `_reionization_xe`
     (z <~ 8); each shifts x_e by up to 1.0e-3 there. The four `1 - 0.75 Y_He`
@@ -393,3 +405,45 @@ def test_helium_ratio_guard_xe_windows(recomb_cosmology, n, window):
     bar = HE_RATIO_GUARD_BARS[window][n]
     print(f"{name} n={n}: x_e vs CLASS z {window} max {rel[i]:.3e} at z={ref['z'][sel][i]:.1f} (bar {bar:.1e})")
     assert rel[i] <= bar, f"ERROR x_e helium-ratio guard {window} {rel[i]:.3e} > {bar:.1e} ({name}, n={n})"
+
+
+# Hydrogen staging guard (PR #53 review, Oct 19, 2026): bars of 2 x the worst
+# |x_e/x_e,CLASS - 1| over the 11 recomb_cosmology points on the tol 1e-10
+# references, rounded up to 2 significant figures (measured worst, 20000 / 3000
+# points: 7.05e-7 / 2.18e-6; 8.04e-7 / 2.60e-5; 2.12e-6 / 5.69e-5; 1.98e-5 / 1.14e-4,
+# in the order below; job 26861).
+H_STAGING_GUARD_BARS = {
+    (1600.0, 1650.0): {20000: 1.5e-6, 3000: 4.4e-6},   # ODE start: the Saha value at the step end
+    (1550.0, 1650.0): {20000: 1.7e-6, 3000: 5.2e-5},   # hand-over, incl. the former z 1550-1590 gap
+    (1500.0, 1600.0): {20000: 4.3e-6, 3000: 1.2e-4},   # f2 blend window
+    (800.0, 1550.0): {20000: 4.0e-5, 3000: 2.3e-4},    # Peebles ODE down to z = 800
+}
+
+
+@pytest.mark.parametrize("n", GRIDS)
+@pytest.mark.parametrize("window", list(H_STAGING_GUARD_BARS), ids=lambda w: f"z{w[0]:g}-{w[1]:g}")
+def test_hydrogen_staging_guard_xe_windows(recomb_cosmology, n, window):
+    """x_e against CLASS RECFAST (Heswitch=1) over the hydrogen stage, z 800-1650, in
+    four windows with bars of 2 x the worst error at the 11 cosmologies
+    (H_STAGING_GUARD_BARS); the 1e-3 gate above cannot see the staging details. It
+    guards the hydrogen Saha value taken at the step end (ADR 0003, D3): with it
+    taken at the step start instead (the pre-review half-step lag), x_e exceeds its
+    bar by 47 / 102 (z 1600-1650), 68 / 14 (z 1550-1650), 27 / 6.2 (z 1500-1600) and
+    2.8 / 3.2 (z 800-1550) at 20000 / 3000 points, the smallest over fiducial,
+    Y_He = 0.28 and omega_b -+ 20% (job 26861); that mutant also fails the
+    helium-ratio guard's z 1650-2870 window by 31 / 54. The former gap between the
+    1e-3 windows, z 1550-1590, where fit_cl's x_e once collapsed to 0.035, lies
+    inside (1550, 1650). The references are CLASS at tol_thermo_integration = 1e-10:
+    at CLASS's default 1e-6 its own integration error in these windows is 2e-6
+    (2.3e-4 at omega_b - 20%, where the Peebles C = 1 switch fires inside the ODE),
+    i.e. the size of these bars. Parametrised over GRIDS: the 3000-point fiducial
+    case runs under --fast."""
+    name, p = recomb_cosmology
+    prim, _ = _prim_tan(name, p, n)
+    ref = load_ref(name)
+    sel = (ref["z"] >= window[0]) & (ref["z"] <= window[1])
+    rel = np.abs(xe_on_ref_grid(prim, ref["z"][sel]) / ref["x_e"][sel] - 1.0)
+    i = int(np.argmax(rel))
+    bar = H_STAGING_GUARD_BARS[window][n]
+    print(f"{name} n={n}: x_e vs CLASS z {window} max {rel[i]:.3e} at z={ref['z'][sel][i]:.1f} (bar {bar:.1e})")
+    assert rel[i] <= bar, f"ERROR x_e hydrogen-staging guard {window} {rel[i]:.3e} > {bar:.1e} ({name}, n={n})"

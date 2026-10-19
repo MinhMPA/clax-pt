@@ -375,6 +375,7 @@ RECOMB_GRID = {
     "omega_b_high": {"omega_b": 0.02237 * 1.20},
     "omega_cdm_low": {"omega_cdm": 0.1200 * 0.80},
     "ns_high": {"n_s": 0.9649 * 1.05},
+    "omega_b_low": {"omega_b": 0.02237 * 0.80},
     "YHe_022": {"Y_He": 0.22},
     "YHe_028": {"Y_He": 0.28},
     "Neff_2": {"N_ur": 2.0 - NEFF_NCDM},
@@ -387,6 +388,11 @@ RECFAST_HESW1_BASE = {
     'm_ncdm': 0.06, 'T_ncdm': 0.71611, 'YHe': 0.2454006,  # = clax CosmoParams default, never BBN
     'recombination': 'RECFAST', 'recfast_Heswitch': 1,
     'tol_background_integration': 1e-12,
+    # CLASS's default 1e-6 leaves 3-6e-6 of its own integration error in x_e
+    # (2.3e-4 at omega_b - 20%, where the Peebles C = 1 switch fires inside the
+    # hydrogen ODE), comparable to the bars the tests set; at 1e-10 the error is
+    # <= 3e-9 at all 11 cosmologies (vs 1e-12, measured Oct 19, 2026).
+    'tol_thermo_integration': 1e-10,
 }
 
 
@@ -421,9 +427,11 @@ def generate_recfast_hesw1_thermo(name, overrides, outdir_base):
              z=z_out, x_e=on_grid('x_e'), Tb=on_grid('Tb [K]'),
              g=on_grid('g [Mpc^-1]'), kappa_dot=on_grid("kappa' [Mpc^-1]"))
     with open(os.path.join(outdir, 'thermo_recfast_hesw1.json'), 'w') as fh:
+        # The 10 references of Oct 2026 came from the CLASS-PT tree's classy, which
+        # also reports v3.3.4, so record where classy was imported from.
         json.dump({"class_params": pars,
                    "classy": getattr(classy, '__version__', 'unknown'),
-                   "build": "CLASS-PT tree (CLASS v3.3.4 thermodynamics), classpt env",
+                   "build": f"classy imported from {os.path.dirname(classy.__file__)}",
                    "grid": "4000 points, uniform in log(1+z), z in [200, 8000]"}, fh, indent=1)
     c.struct_cleanup()
     c.empty()
@@ -433,8 +441,14 @@ def generate_recfast_hesw1_thermo(name, overrides, outdir_base):
 def main():
     outdir = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
     if '--recfast-hesw1-thermo' in sys.argv:
+        # Optional cosmology names after the flag restrict the run to those points.
+        only = [a for a in sys.argv[1:] if not a.startswith('--')]
+        unknown = sorted(set(only) - set(RECOMB_GRID))
+        if unknown:
+            sys.exit(f"ERROR unknown RECOMB_GRID names {unknown}")
         for name, overrides in RECOMB_GRID.items():
-            generate_recfast_hesw1_thermo(name, overrides, outdir)
+            if not only or name in only:
+                generate_recfast_hesw1_thermo(name, overrides, outdir)
         return
     generate_model(FIDUCIAL_PARAMS, 'lcdm_fiducial', outdir)
 
