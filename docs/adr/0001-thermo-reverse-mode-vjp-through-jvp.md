@@ -144,8 +144,12 @@ background + thermodynamics agree to 2.4e-16-4.6e-15 at the five LCDM grid point
 of `tests/test_multicosmo_consistency.py` (job 24321), and through the full matter
 solve (f = sum_k delta_m(k, tau_0)^2, `fast_cl`) to <= 3.1e-5 at three
 cosmologies on the production gradient entry, i.e. the path of this rule (jobs
-24227/24229/24231). On unmodified upstream the same production-path disagreement
-was 1.16 at fiducial (job 24226) and 1.13 in the diagnosis run.
+24227/24229/24231; the first version of the #48 fix, `fast_cl`'s Kvaerno5 at
+rtol 1e-3 on the 800-point background). On the final version of that fix,
+measured with Rodas5 at rtol = atol = 1e-4 on a V100, the same disagreement is
+<= 1.2e-10 (ADR 0003, Consequences). On unmodified upstream the same
+production-path disagreement was 1.16 at fiducial (job 24226) and 1.13 in the
+diagnosis run.
 
 On the smooth tables, native reverse mode and the production `custom_vjp` path
 coincide at fiducial: both give -2.75564438e9 against forward -2.75572953e9 (job

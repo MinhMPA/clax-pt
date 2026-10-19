@@ -11,9 +11,11 @@ differentiable in both modes.
 Recombination (smsharma/clax#48; docs/adr/0003-recombination-staging.md).
 Helium and hydrogen follow CLASS's RECFAST with recfast_Heswitch = 1 (singlet-only
 helium) and CLASS's approximation staging, so x_e agrees with that CLASS run to
-< 1e-3 for z in [800, 5000], the tested range, and, the reason for the design, its
-derivatives with respect to h, omega_b, omega_cdm, Y_He, N_eff and T_cmb are smooth:
-    - HeIII -> HeII: the MB95 Saha solve (_ionHe), unchanged. Above z ~ 5000 the
+< 1e-3 over z in [800, 5000] (gated contiguously in tests/test_recomb_thermo.py,
+with window bars of 2x the measured error down to 1e-8), and, the reason for the
+design, its derivatives with respect to h, omega_b, omega_cdm, Y_He, N_eff and
+T_cmb are smooth:
+    - HeIII -> HeII: the MB95 Saha solve (_ionHe), unchanged apart from D4's f_He. Above z ~ 5000 the
       same Saha solve also supplies x_HeII, sigmoid-blended into the staged
       HeII -> HeI value below.
     - HeII -> HeI: Saha equilibrium above z = 2870 (CLASS thermodynamics.c:4053-4067),
@@ -26,14 +28,12 @@ derivatives with respect to h, omega_b, omega_cdm, Y_He, N_eff and T_cmb are smo
     - Numerics: each Peebles equation is advanced by one L-stable, second-order
       linearly implicit step (ROS2, _ros2_advance; 10 sub-steps per grid step) and
       NO clip to [0, 1]. L-stable means a stiff relaxation lands on its equilibrium
-      without overshoot or oscillation, which is why no clip is used; that holds for
-      an exact Jacobian. J is a scalar forward-mode jvp of the rate with x_e held
-      fixed; wherever the step is stiff (|h J| > 0.5) it is within 0.5-1.2% of the
-      exact J (photoionisation dominates the hydrogen rate there), so the step's
-      one-step factor stays within 0.006 of the exact-J one up to the largest
-      |h J| reached, 2.35 on the 3000-point grid and 4.0 on 1500 points (measured,
-      ADR 0003). The stage-switch redshifts are fixed numbers,
-      as in CLASS, so no derivative passes through a switch location.
+      without overshoot or oscillation, which is why no clip is used. The Jacobian
+      holds x_e fixed; why that is accurate enough, with the measured one-step
+      factors, is in the _ros2_scalar_step docstring and ADR 0003 (D1). The
+      stage-switch redshifts are fixed numbers, as in CLASS, so no derivative
+      passes through a switch location (the one state-dependent switch kept,
+      RECFAST's C = 1 at x_H >= 0.995, is under Known limitations).
     - He/H number ratio: every number-ratio site uses
       f_He = Y_He / (3.9715 (1 - Y_He)), CLASS's _not4_ (thermodynamics.h:707), via
       _f_He. The four "1 - 0.75 Y_He" mean-molecular-weight sites (c_s^2 prefactor
@@ -50,14 +50,23 @@ fit_cl 3000-point grid x_e collapsed to 0.035 at z ~ 1559.
 Known limitations:
     - Heswitch = 1 helium only. CLASS's default (Heswitch = 6, Doppler and
       triplet terms) differs in x_e by 1.5% at z = 2000 and 4.2% at z ~ 1771.
-    - The T_b update has a hard Taylor switch at x_e < 1e-3 (spike ratio 20, i.e.
+    - RECFAST's Peebles C = 1 while x_H >= 0.995 (wrap_recfast.c:164) is kept, and
+      it depends on the state. Where the Saha x_H at the hydrogen ODE start
+      (z = 1600) exceeds 0.995 (omega_b <~ 0.020 at fiducial T_cmb, or
+      T_cmb >~ 2.735 K; 0.9954 at omega_b - 20%, 0.9943 at fiducial) the ODE starts
+      with C = 1 and crosses the switch a few grid steps later, at a point that
+      moves with the parameters. Measured at omega_b - 20% (ADR 0003): no visible
+      effect, because x_H sits at its equilibrium while C = 1, so the switch
+      rescales a rate that is already ~0.
+    - The T_b update has a hard Taylor switch at f_e < 1e-3, where f_e is the
+      Compton-coupling electron fraction (1 - Y_He) x_e / (1 - 0.75 Y_He + (1 - Y_He) x_e),
+      so x_e < ~1.08e-3 at fiducial Y_He (spike ratio 20, i.e.
       a derivative 20 times the median of its +-25 neighbours, at z ~ 624 on a
       1500-point grid), and c_s^2 is 1.3% from CLASS's c_b^2 at z ~ 632.
     - The kappa_dot, exp(-kappa) and g tables carry a stop_gradient with an
-      n_H_0 rescale (smsharma/clax#45). AD of P(k) with respect to omega_cdm sits
-      a steady +0.66% above converged finite differences (d ln P / d ln omega_cdm
-      bias 0.0092 at k = 0.1 Mpc^-1, fixed tree); the stop_gradient is a candidate
-      cause, untested, and probably not the only one.
+      n_H_0 rescale (smsharma/clax#45). The P(k) derivative biases it may cause
+      (+0.66% in omega_cdm, 4% in omega_b against converged finite differences)
+      are tracked in smsharma/clax#55.
     - Reverse mode through _ros2_advance needs a static Python-int sub-step count.
     - No test gates the C_l shift caused by this change; ADR 0003 records the
       measured planck_cl and fit_cl shifts against the unfixed code.
@@ -173,7 +182,7 @@ _b_VF_He = 0.711
 _T_0_He = 10.0**0.477121      # ≈ 3.0 K
 _T_1_He = 10.0**5.114         # ≈ 1.3e5 K
 # HeI ionization temperature, cf. wrap_recfast.c:78 and thermodynamics.c:823
-# (const_Tion_HeI = h c L_He1_ion / k_B), ~285,335 K.
+# (const_Tion_HeI = h c L_He1_ion / k_B), ~285,325 K.
 _CB1_He1 = _hP_SI * _c_SI * _L_He1_ion / _kB_SI
 # CLASS approximation-stage boundaries (smsharma/clax#48):
 # start of regime "H" (x_He evolved below it): precisions.h:201-202,
@@ -300,7 +309,12 @@ def _recfast_dxHII_dlna(xe, xHII, nH, Hz, z, TM, TR):
 def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     """Helium Peebles equation: dxHe/d(lna).
 
-    cf. CLASS wrap_recfast.c:198-349 (Heflag=0 mode, simplest K_He).
+    cf. CLASS wrap_recfast.c:198-349. K_He is the Sobolev form of CLASS's Heflag >= 1
+    branch (wrap_recfast.c:258-261), which Heswitch = 1 selects for x_He between the
+    small trigger and 0.995 at z >= 800 (wrap_recfast.c:243-248); outside that range
+    CLASS uses Heflag = 0, K_He = CK_He/Hz. clax uses the Sobolev form at every x_He:
+    the two agree to machine precision whenever tau_s >> 1, which holds in both
+    Heflag = 0 ranges (tau_s >~ 3e5 at x_He > 0.995).
     All inputs in CGS. Returns dxHe/dlna.
     """
     TM_safe = jnp.maximum(TM, 1e-30)
@@ -317,15 +331,15 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     Rup_He = 4.0 * Rdown_He * (_CR_CGS * TM_safe)**1.5 * jnp.exp(
         jnp.maximum(-_CDB_He / TM_safe, -500.0))
 
-    # K_He with Sobolev escape probability (Heflag>=2 in CLASS)
-    # cf. wrap_recfast.c:259-274
+    # K_He with Sobolev escape probability (Heflag >= 1 in CLASS)
+    # cf. wrap_recfast.c:258-261
     # Basic: K_He = CK_He / Hz
     # Sobolev: τ_s = A2P_s * CK_He * 3 * n_He * (1-xHe) / Hz
     #          p_s = (1 - exp(-τ_s)) / τ_s
     #          K_He = 1 / (A2P_s * p_s * 3 * n_He * (1-xHe))
     n_1s_He = jnp.maximum(n_He * (1.0 - xHe), 1e-30)
-    # K_He with Sobolev escape (CLASS Heflag=0)
-    # cf. wrap_recfast.c:254-260
+    # K_He with Sobolev escape (CLASS Heflag >= 1)
+    # cf. wrap_recfast.c:258-261
     tauHe_s = _A2P_s_He * _CK_He_CGS * 3.0 * n_1s_He / Hz_safe
     tauHe_s_safe = jnp.maximum(tauHe_s, 1e-30)
     # p_s = (1 - e^{-tau})/tau, wrap_recfast.c:260, cancellation-free (expm1),
@@ -348,8 +362,8 @@ def _recfast_dxHe_dlna(xe, xHe, nH, Hz, z, TM, TR, fHe):
     # CLASS has no C_He switch near x_He = 1: its x_He switches are the K_He form
     # (Heflag, wrap_recfast.c:243-244), and C_He is always wrap_recfast.c:346.
     # For x_He < 1e-15 CLASS sets dx_He/dz = 0 (wrap_recfast.c:328-329); clax
-    # instead keeps the C_He = 1 guard inherited from the design prototype here and still
-    # evaluates the rate.
+    # instead keeps the C_He = 1 guard from the pre-#48 code (where it was part of
+    # the deleted `(xHe < 1e-15) | (xHe > 0.999)` switch) and still evaluates the rate.
     # The effect on x_e is at most fHe * 1e-15 (x_He itself is below 1e-15).
     C_He = jnp.where(xHe < 1e-15, 1.0, C_He)
 
@@ -780,8 +794,12 @@ def thermodynamics_solve(
         # x_H*(x_H + xHeII)/(1 - x_H) = rhs, solved via quadratic formula.
         # rhs = (CR*Tmat)^{3/2} * exp(-CB1/Tmat) / nH_physical
         # where CB1 = hc*L_H_ion/kB ~ 157807 K (ground-state ionization temp).
-        # Evaluated at the step end, like the regime switch, the blend weight w_H
-        # and the helium Saha below: x_HII is the value at the new grid point.
+        # T_b and n_H are taken at the step end, like the regime switch, the blend
+        # weight w_H and the helium Saha below, so x_HII is the value at the new
+        # grid point. The x_HeII correction is the step-start value (the helium
+        # update needs x_HII first): a one-step lag in a term of ~0.2 f_He near
+        # z = 1600, estimated to move x_H by ~1e-6 on the 3000-point grid, not
+        # measured separately.
         T_saha = jnp.maximum(new_tb, 100.0)  # clamp to avoid exp(-huge)
         nH_saha = nH_new
         # Clamp exponent to avoid underflow producing 0*inf NaN in gradients

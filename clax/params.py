@@ -277,7 +277,7 @@ class PrecisionParams:
             pt_k_max_cl=1.0,         # covers l~2500 with margin
             pt_k_per_decade=60,      # sufficient with source interpolation
             pt_tau_n_points=5000,
-            th_n_points=100000,      # converged RECFAST stepping (was 20000)
+            th_n_points=100000,      # tuned for the former Heun stepping; not re-tuned for #48 (docstring)
             pt_l_max_g=50,
             pt_l_max_pol_g=50,
             pt_l_max_ur=50,
