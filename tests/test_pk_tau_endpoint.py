@@ -188,6 +188,14 @@ def test_omega_cdm_growth_gradient_through_matter_solve(lcdm_cosmology):
     pre-existing issue, not tested: tracked upstream: smsharma/clax#30 and
     smsharma/clax#45.
 
+    UPDATE (Oct 11, 2026, smsharma/clax#48): the figures above were measured on
+    the unfixed recombination (clipped explicit helium/hydrogen steps). With the
+    Saha -> ODE staging fix (ADR 0003) this test reads AD/FD - 1 = +3.128e-05 at
+    the fiducial (job 24325), -2.571e-06 / -2.923e-06 / -1.451e-05 / +2.987e-05
+    at h_high / omega_b_high / omega_cdm_low / ns_high (jobs 24414-24417), all
+    under the 1% bar. The absolute-f numbers (the ~3.3% gap and its ~65% / ~9% /
+    ~26% decomposition) were NOT re-measured on the fixed code.
+
     FD step PK_GRAD_PARAM_STEPS["omega_cdm"] = 2e-5, as in the absolute-f
     version. Convergence note from that version (FD of f(z=0); the 2e-5
     values are from jobs 21567/21568, the 1e-4 and 5e-4 values from jobs

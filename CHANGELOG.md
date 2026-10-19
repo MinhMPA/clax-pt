@@ -8,6 +8,256 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 11, 2026: Recombination follows CLASS's Saha -> ODE staging; thermodynamics gradients are smooth (#48)
+
+**Bug (smsharma/clax#48).** Gradients through the thermodynamics module carried a random
+error of per-mille to order unity with respect to h, omega_b, omega_cdm, Y_He, N_eff and
+T_cmb, while the values looked fine. On upstream 4d084b5, forward and reverse AD disagreed
+by up to 113% on the production gradient path; CPU and GPU derivatives differed by a factor
+of 21; df/dh (f = sum_k delta_m(k, tau_0)^2) jumped by 6% along a smooth line in h and by
+17% when the perturbation solver grouped k-modes differently; and on `fit_cl` (3000-point
+thermodynamics grid) x_e dropped to 0.035 at z ~ 1559, where it is ~1.0, a value error. For
+NUTS this costs efficiency (energy errors, smaller steps, divergences), not correctness, since
+accept/reject uses values; for Fisher forecasts, MAP/Laplace fits and emulators it is bias.
+
+**Cause.** The stiff HeII -> HeI (z ~ 3000-3500) and hydrogen Peebles (z ~ 1550-1750)
+equations were advanced with explicit steps clipped to [0, 1] (Heun for helium, RK4 for
+hydrogen, plus a hard `x_He > 0.999` switch), through exactly the ranges where CLASS uses
+Saha equilibrium instead. x_e wiggles by only 0.35%, but |d ln x_e/dh| spikes to ~5e12 at
+about ten grid points (smooth values 0.01-0.15); hydrogen runs outside RK4's stability
+interval (h*J = -3.2 vs [-2.79, 0]). The spikes enter c_s^2 k^2 delta_b in the baryon
+velocity equation, and whether an adaptive-solver stage lands on one depends on step
+placement (k-modes per batch, solver, jit vs no-jit), hence "random". Reverse mode inherits
+them, and Kvaerno5 shows the same corruption as Rodas5, so a stiffer solver is not the fix.
+
+**Fix (only `clax/thermodynamics.py` changes behaviour; detail in ADR 0003).**
+- D1, one stiff step: a shared L-stable, second-order linearly implicit step (ROS2), 10
+  sub-steps per grid step, Jacobian from a scalar forward-mode jvp with x_e held fixed, no
+  clip. Measured (Oct 16, 2026): wherever the step is stiff (|h J| > 0.5) that J is
+  0.988-0.995 of the exact one (photoionisation dominates), and |h J| <= 2.35 on the
+  3000-point grid (10 cosmologies), so the step's one-step factor stays within 0.006 of the
+  exact-J one, positive. The exact J was tried: against the code's own 100000-point solution
+  it doubles the 3000-point x_e error at z 800-1650 (1.3e-4 -> 2.3e-4), so it is not used.
+- D2, helium follows CLASS's staging: Saha equilibrium above z = 2870, the Peebles equation
+  below, joined by CLASS's smoothstep over z in [2770, 2870]; the HeI Saha root takes only the
+  helium not in HeIII, (1 - x_HeIII), so x_HeII + x_HeIII <= 1 across the z ~ 5000 hand-over
+  from the MB95 HeIII stage. D3, hydrogen the same way at z = 1600 (blend over [1500, 1600]),
+  replacing the clipped RK4 and the sigmoid, with its Saha value at the step end. Switch
+  redshifts are fixed numbers, as in CLASS.
+- Cost: above its switch each species' ROS2 advance would be discarded, so `jax.lax.cond`
+  skips it (identical output); the grid is uniform in ln tau, so the switch index moves with
+  the cosmology and the scan cannot be split at a fixed index. The 11 sub-step boundary
+  environments are built once per grid step and shared; one `_ionHe` call gives both helium
+  fractions.
+- D4, one helium-to-hydrogen number ratio, f_He = Y_He/(3.9715 (1 - Y_He)) (CLASS `_not4_`),
+  at every number-ratio site (HeIII Saha, initial x_e, the x_HeII term in hydrogen Saha, the
+  helium rate, every x_e sum). Fully ionised x_e at z = 2e4 moves from 1.16260 to
+  1.16377 = 1 + 2 f_He. **D4 does not cover the four `1 - 0.75 Y_He`
+  mean-molecular-weight sites** (the c_s^2 prefactor at three places, the Compton-coupling
+  fraction in the T_b update at one): they keep exactly 4 and belong to the out-of-scope
+  c_s^2-vs-CLASS-c_b^2 follow-up; until then c_s^2 sits 2.6e-4 to 5.4e-4 (relative) from
+  CLASS's form. D4 covers the number-ratio sites only.
+- D4 guard (added Oct 16, 2026, `test_helium_ratio_guard_xe_windows`): x_e against CLASS in five z
+  windows (5000-8000, 2870-5000, 2870-3500, 2000-2400, 1650-2870) with bars of 2 x the worst
+  error over the 11 cosmologies (4.8e-4 down to 2.4e-8 at 20000 points; 2 to 4e4 times tighter
+  than the 1e-3 gates; re-derived after the review fixes, and again on Oct 19, 2026 on the
+  tol 1e-10 references, job 26861). Reverting exactly one site to
+  exactly 4 fails it for the HeII Saha quadratic, the helium Peebles rate, the helium Peebles
+  x_e sum and the final x_e sum (scratch copies of the fixed code, CPU; first run on the PR
+  head, jobs 26063-26072). **Unguarded:** the HeIII Saha constant in `_ionHe`, the f_He in the
+  hydrogen Saha correction and in the hydrogen Peebles x_e sum (reverted, the worst error stays
+  below twice the current code's there, so no bar passes the current code with a 2x margin and
+  catches it), and
+  the initial x_e of the scan (table only above z = 5e4) and `_reionization_xe` (z <~ 8), which
+  lie outside the references' z in [200, 8000]. Table in ADR 0003.
+- Reference data: CLASS RECFAST (`recfast_Heswitch = 1`) at 11 cosmologies in
+  `reference_data/<name>/thermo_recfast_hesw1.{npz,json}` (job 24080; regenerated Oct 19, 2026
+  at `tol_thermo_integration = 1e-10` with omega_b - 20% added), from the CLASS-PT tree
+  (CLASS v3.3.4 thermodynamics). Stock CLASS 3.3.4 (PyPI `classy`) reproduces all 11 to
+  <= 2.9e-8 in x_e and <= 2.1e-10 in T_b (`scripts/crosscheck_recfast_hesw1_stock.py`, Oct 19,
+  2026; 7.1e-6 / 7.7e-7 on the earlier tol 1e-6 references, the builds' own integration
+  error); a test locks the generator's cosmology grid to `tests/conftest.py`'s. Before D4 the
+  tables agreed with the design prototype (throwaway, not in the repo) to 2.05e-12 in x_e (job
+  24182); D4 then moves x_e by design, as the prototype used exactly 4.
+
+**Measured, before -> after** (unfixed = 4d084b5; worst over 10 cosmologies; "a / b" =
+20000-point default grid / 3000-point `fit_cl` grid; df/dh rows: fiducial / omega_b + 20% /
+Y_He = 0.28, `fast_cl`, Rodas5, rtol = atol = 1e-4). The x_e rows are against the Oct 16, 2026
+references (CLASS at tol 1e-6); the values against the tol 1e-10 references at 11 cosmologies
+are in the Oct 19, 2026 review bullet below.
+
+| quantity (bar) | unfixed | fixed |
+|---|---|---|
+| x_e vs CLASS, z 2870-5000 (1e-3) | 6.3e-3 / 4.0e-2 | 1.4e-6 / 1.4e-6 |
+| x_e vs CLASS, z 1650-2870 (1e-3) | 6.4e-3 / 5.3e-3 | 8.0e-7 / 1.3e-6 |
+| x_e vs CLASS, z 1590-1650 (1e-3) | 0.198 / 0.659 | 1.0e-6 / 2.5e-6 |
+| x_e vs CLASS, z 800-1550 (1e-3) | 5.6e-4 / 0.776 | 2.0e-5 / 1.1e-4 |
+| `fit_cl` x_e collapse: max \|d2 x_e\|, z 1500-6000, in units of its bar | 9.2e2 | <= 0.23 |
+| derivative spike ratio (max of a derivative over the median of its +-25 neighbours; bar < 10) | 9.5e14 / 5.4e8 | <= 2.53 |
+| CPU vs GPU tangents, normwise, 3 cosmologies (1e-10) | 1.0 / 17.2 / 4.1e-7 | <= 2.2e-13 |
+| df/dh spread over k-chunk 8 vs 62, jit vs no-jit (3e-4) | 0.192 / 3.0e-4 / 5.9e-4 | 8.7e-5 / 1.5e-5 / 9.6e-5 (V100) |
+| native reverse vs forward df/dh (3e-4) | 3.1e-2 / 6.0e-6 / 5.0e-5 | 1.4e-11 / 1.2e-10 / 4.5e-11 (V100) |
+| production reverse (ADR 0001 path) vs forward df/dh (3e-4) | 1.16 / 3.1e-5 / 5.9e-4 | 1.4e-11 / 1.2e-10 / 4.5e-11 (V100) |
+| df/dh smoothness along h = 0.62-0.72, cubic-fit residual (3e-4) | 800-point background: 5.5e-2 / 3.1e-3 / 3.0e-4 (CPU); 8000-point: 1.4e2 (CPU, fiducial), 5.0e-4 / 2.0 / 3.9e-4 (V100) | 8000-point background: V100 6.1e-6 / 5.5e-6 / 5.7e-6, CPU 5.6e-6 / 5.5e-6 / 5.5e-6; see below |
+
+Jobs (cluster logs, not in the repo; more in ADR 0003): unfixed 24095-24097, 24122-24126,
+24169-24171, 24226-24230, 24275; fixed, after the Oct 16, 2026 review fixes: CPU 26273, 26314
+(recombination modules), 26403; V100 26274, 26355; x_e windows measured on CPU outside SLURM.
+
+- **Finite differences become trustworthy:** the spread of a central-difference
+  dP(k = 0.1 Mpc^-1)/d omega_cdm over steps 1e-4 to 2e-3 falls from 1.06% to 0.02% (CPU
+  jobs 24515 -> 24514; GPU 1.02% -> 0.02%, jobs 24517 -> 24516).
+- **Speed** (`fit_cl`, one V100, job 26226, order unfixed / fixed / unfixed / fixed): total
+  8.19, 8.04, 7.75, 8.04 s, no change within the unfixed code's 5% scatter (the first version
+  of this PR measured 0.917, job 24327). Thermodynamics alone, primal / jvp: unfixed 0.63 /
+  1.79 s on CPU at 20000 points and 2.09 / 2.27, 11.0 / 11.6, 47.9 / 54.6 s on a V100 at
+  3000 / 20000 / 100000 points; fixed 0.20 / 2.19, 1.89 / 2.55, 9.8 / 13.6, 46.4 / 65.2 s
+  (jobs 26220, 26244). `fit_cl`'s own benchmark has its thermodynamics 12-18% slower than
+  unfixed. The 8 s is not the 34 s in the status banner above; that figure was not reproduced.
+- **df/dh smoothness on a GPU** (Oct 17, 2026): at the matter solve's rtol = atol = 1e-4,
+  `test_dfdh_smooth_along_h` failed on a V100 at fiducial (3.22e-4, identical on the first
+  version of this PR, job 26402) and Y_He = 0.28 (3.55e-4; first version 2.84e-4) against its
+  3e-4 bar, passing on CPU (5.5e-5). Not a kink, and not thermodynamics: at fixed omega_b and
+  omega_cdm the thermodynamics tables carry <= 1e-11 of df/dh (job 26548). The source is the
+  background tables (`bg_n_points` = 800 splines in ln a): h moves ln a(tau) at late times, so
+  the times at which the matter solve crosses their knots move with h, and the solver's long
+  steps near today integrate that part of the tangent with an error that jumps at every
+  step-pattern change (fine h scans, jobs 26558, 26560; forcing extra steps at z < 0.3 removes
+  it, at z = 0.3-1 it does not, jobs 26568-26575). It falls with the matter-solve tolerance,
+  slowly between 1e-4 and 1e-5 (V100 fiducial 3.2e-4, 1.4e-4, 6.1e-5, 6.9e-6, 6.1e-6 at 1e-4,
+  3e-5, 1e-5, 1e-6, 1e-7; jobs 26535-26537, 26553-26556). A first fix (commit 837aa69) ran the
+  test at 3e-5 and read that slow fall as a tolerance-independent floor of ~2e-4; there is
+  none. The test now tabulates the background on 8000 points at rtol = atol = 1e-4: 6.1e-6 /
+  5.5e-6 / 5.7e-6 on the V100 and 5.6e-6 / 5.5e-6 / 5.5e-6 on CPU (fiducial / omega_b + 20% /
+  Y_He = 0.28; jobs 26586, 26587), i.e. the cubic fit's own error (a quartic fit leaves
+  1.1e-6); +17% per evaluation (job 26578). The unfixed code still fails it: CPU fiducial
+  1.4e2, V100 5.0e-4 / 2.0 / 3.9e-4 (jobs 26590, 26588). The 800-point noise is pre-existing
+  and reaches production derivatives with respect to any parameter that moves the late-time
+  expansion at fixed omega; it is reported upstream as its own issue.
+- **Review round** (Oct 19, 2026; four reviewers on 2717b5c: physics against CLASS, tests,
+  docs, silent failures; no defect in `clax/thermodynamics.py`). Changes:
+  - **Hydrogen hand-over was effectively untested.** The 1e-3 windows skipped z 1550-1590 (inside
+    the f2 blend, where `fit_cl`'s x_e had collapsed), and reverting the step-end Saha value of D3
+    left 4.2e-4 / 5.6e-4 on 3000 points, under 1e-3. New `test_hydrogen_staging_guard_xe_windows`:
+    four windows (1600-1650, 1550-1650, 1500-1600, 800-1550), bars 2 x the worst over 11
+    cosmologies (20000 / 3000 points: 1.5e-6 / 4.4e-6, 1.7e-6 / 5.2e-5, 4.3e-6 / 1.2e-4,
+    4.0e-5 / 2.3e-4); the step-start mutant exceeds them by 47 / 102, 68 / 14, 27 / 6.2 and
+    2.8 / 3.2 (job 26861). The 1e-3 hydrogen gate is one window, z 800-1650; FD samples at
+    z = 1600 and 1550 added; the bounds test also runs on 1500 and 1200 points.
+  - **References regenerated at `tol_thermo_integration = 1e-10`.** At CLASS's default 1e-6 the
+    tables carried 3-6e-6 of CLASS's own integration error (2.3e-4 at omega_b - 20%), the size of
+    the bars; at 1e-10 it is <= 3e-9 (vs 1e-12). Worst x_e error of the fixed code, 11
+    cosmologies, 20000 / 3000 points: z 2870-5000 1.4e-6 / 1.4e-6; z 1650-2870 3.9e-7 / 1.4e-6;
+    z 1600-1650 7.0e-7 / 2.2e-6; z 1550-1650 8.0e-7 / 2.6e-5; z 1500-1600 2.1e-6 / 5.7e-5;
+    z 800-1550 2.0e-5 / 1.1e-4. All helium-guard bars re-derived (2000-2400: 1.9e-7 / 6.5e-7;
+    1650-2870: 7.8e-7 / 2.9e-6; the rest unchanged); mutant/bar now HeII Saha quadratic 7.8 / 4.0,
+    helium Peebles rate 360 / 105, helium Peebles x_e sum 28 / 8.7, final x_e sum >= 2.1.
+  - **omega_b - 20% added to `COSMOLOGY_GRID_RECOMB`** (11 points): the one point where the Saha
+    x_H at z = 1600 (0.9954) exceeds RECFAST's C = 1 threshold 0.995, so the hydrogen ODE starts
+    with C = 1 and crosses that state-dependent switch. Measured harmless (job 26861): x_e along
+    omega_b (21 points over +-1%) has relative second differences 2e-9 to 9e-9 at z 1540-1650,
+    as at fiducial; AD vs central FD 1.7e-6 (3000 points), 3.5e-8 (20000).
+  - **Stock-CLASS cross-check has a verdict.** `crosscheck_recfast_hesw1_stock.py` prints the
+    `classy` import path, exits 1 above 1e-6 and 2 when every difference is exactly 0 (the
+    reference build itself); the generator records the import path as the build. Stock vs the
+    new references: x_e <= 2.9e-8, T_b <= 2.1e-10.
+  - **Corrections.** `test_pk_table_auto_batch_matches_full_vmap`'s comment blamed "the batched
+    Rosenbrock solver"; `PREC_FAST` runs Kvaerno5 on the per-mode vmap path, and the cause of the
+    1e-3 auto-vs-full difference at rtol 1e-2 is not established. The ROS2 one-step-factor gap is
+    0.005 at |h J| = 2.35 and 0.007 at 4.0 (was "0.006 up to 4.0"); HeI ionisation temperature
+    285,325 K (was 285,335); `_recfast_dxHe_dlna`'s K_He is CLASS's Heflag >= 1 Sobolev form (was
+    labelled Heflag = 0 / >= 2); the hydrogen Saha's x_HeII term is the step-start value;
+    `_ionHe` is unchanged apart from D4's f_He; the T_b Taylor switch is on f_e < 1e-3
+    (x_e < ~1.08e-3); `lax.cond` recovers 14-18% of the GPU jvp (was 10-16%); the x_e ADR 0001
+    note's 3.1e-5 is a first-version figure; README's x_e row restated; DESIGN.md points to
+    ADR 0003; open decisions now cite #54 and #55. `_f_He` is imported inside the one test that
+    uses it, so `test_recomb_thermo.py` goes red by assertion on the unfixed tree.
+- **Direct C_l shift** (jobs 24328-24331), max |C_fixed/C_unfixed - 1| of unlensed
+  `planck_cl` TT / EE: 0.0051% / 0.0037% for l <= 500, 0.0188% / 0.0255% for 500-1500,
+  0.0518% / 0.0627% for 1500-2500. At `fit_cl` it is larger (TT 10.3% at l = 4, 1.7% at
+  l = 30, 0.46% over 100-500) and the error against CLASS moves both ways (TT l 2-30:
+  84% -> 94%; EE l 30-100: 3.6% -> 0.8%); the cause is unresolved (a real x_e correction at
+  z ~ 1560-1650, or noise at 20 k/decade and rtol = 1e-3; neither tested). `planck_cl`'s
+  absolute TT error against CLASS (1.1% / 3.3% / 9.3%) is a pre-existing baseline from the
+  default `hr_n_k_fine = 5000`, k-unconverged above l ~ 500, on both trees. Measured on the
+  first version of this PR; the Oct 16, 2026 review fixes move x_e relative to it by at most
+  5.4e-5 (100000 points), 7.1e-5 (20000) and 4.6e-4 (3000); C_l not re-run.
+- One existing test changed: `test_pk_table_auto_batch_matches_full_vmap` runs at rtol = 1e-3,
+  not 1e-2 (bar unchanged); at 1e-2 smooth tables show a steady -1.09e-3 mismatch (ADR 0003).
+
+**Test pass rates after the Oct 19, 2026 review round** (CPU, final tree, snapshot of the working
+tree as committed):
+- Full mode, recombination modules at 11 cosmologies: `test_recomb_thermo` + reference + stiff
+  step 865 of 865 (job 26862); the previous test set on the regenerated references, 777 of 777
+  (job 26860, before the hydrogen guard was added).
+- `tests/ --fast -q`: 454 passed, 972 skipped, 1 failed (the pre-existing
+  `test_pk_rosenbrock_vs_kvaerno5`, max_steps; job 26863). Against the Oct 18 run: +6 passed (the
+  four hydrogen-guard windows and the bounds test's two extra grids), +152 skipped (omega_b - 20%'s
+  non-fiducial cases).
+- The same tests with the unfixed `clax/` (4d084b5): the module collects and 28 of 43 `--fast`
+  cases fail by assertion, all four hydrogen-guard windows among them (job 26864).
+- Measurements behind the bars: job 26861 (`/lustre/work/n2minh/clax-probes/recomb/r6/`).
+
+**Test pass rates** (after the Oct 16, 2026 review fixes; each commit's tree tested as committed).
+- `tests/ --fast -q`: final tree 448 passed, 820 skipped, 1 failed (pre-existing
+  `test_pk_rosenbrock_vs_kvaerno5`, max_steps), job 26272; staging commit before the `_not4_`
+  change 442 passed, 706 skipped, the same 1 failed, job 26275.
+- Full mode, recombination modules (CPU, 10 cosmologies): final tree `test_recomb_thermo` 690
+  of 690 (job 26314), reference + stiff step 17 of 17 (job 26273); staging commit 587 of 587
+  (job 26276). `test_recomb_gpu` 9 of 9 on both (V100, jobs 26355, 26356);
+  `test_recomb_downstream` 10 of 12 on a V100 on both with the smoothness test on the
+  800-point background (jobs 26274, 26277); on the 8000-point background its 3 cases pass on
+  the V100 and on CPU (jobs 26586, 26587).
+- First version of this PR, for the record: `--fast` 441 passed, 706 skipped, 1 failed (job
+  24501).
+- Full mode (first version): `test_recomb_thermo` 570 of 570; thermodynamics + recomb reference + stiff step
+  36; downstream delta_m 12 of 12; CPU-vs-GPU 9 of 9 (V100); EPT gradients 11; harmonic 11;
+  lensing 11; multicosmo consistency 10; P(k) accuracy 7; forward mode 1; tau endpoint 21 of
+  21; `test_pk_gradients` 5 passed, 2 skipped, 1 failed (pre-existing, below).
+- Full mode, modules not previously run on the fixed tree (CPU jobs 24528-24534, final
+  library code; no failure, so no re-run on the unfixed tree was needed):
+  `test_thermo_reverse_composite` 15 passed (24528), including the production-reverse vs jvp
+  delta_m test at pt_k_max_cl = 5, relative gap 6.955e-08 on CPU (bar 1e-4; 3.293e-06 on a
+  V100, job 24538); `test_perturbations` 19 (24529); `test_multipoint` 5 (24530);
+  `test_mpk_delta_cb` 9 passed, 2 skipped for lack of a CLASS reference at two massive-nu
+  points (24531); `test_tensor` 4 + `test_shooting` 9 (24532); `test_ap` 23 (24533);
+  `test_ept_ap` 14 (24534).
+
+**Failed approaches** (probe variants, throwaway; table in ADR 0003). An L-stable step
+without staging overshoots x_e to -988. Helium staged (old Heun or the new step) with
+hydrogen untouched leaves hydrogen chattering (spike ratio 2.3e4, 6.9e3). Hydrogen staged
+but still clipped RK4: spike ratio 10.9 (bar 10), x_e 4.4e-3 off at z 800-1600.
+
+**Discovered, pre-existing (identical on 4d084b5).**
+- `test_solver_selection.py::TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5` fails with
+  max_steps (jobs 24310, 24353).
+- `test_pk_gradients.py::TestPkPublicTableGradients::test_public_table_partials_match_fd_full`:
+  AD vs FD for dP(k = 0.05 Mpc^-1)/d omega_b disagree by 4.02% fixed (job 24324), 4.08%
+  unfixed (job 24429), bar 1%. The kappa_dot `stop_gradient` is a candidate, untested; #45
+  is about omega_cdm; both biases are tracked in #55 (filed Oct 18, 2026).
+- `test_pk_forward_mode.py` (job 24323): AD sits +0.66% above converged FD for
+  dP(k = 0.1 Mpc^-1)/d omega_cdm (jvp 1.22116e5, FD 1.21311e5; FD std 0.007% over steps
+  1e-4 to 2e-3; CPU and GPU agree to 2e-8). On the unfixed tree FD scattered 1.06% and AD
+  sat +0.64% (CPU) / +0.56% (GPU) above its mean, which equals the fixed slope to 1.6e-5:
+  the bias was hidden by FD noise, not created. It is 0.0092 in d ln P/d ln omega_cdm, about
+  2.3 times the ~0.004 quoted in #45. The `stop_gradient` is a candidate cause, untested,
+  probably not the sole one; one cosmology, one k, one parameter.
+
+**Not done (tracked).**
+- The C_l-level gradient test at `fit_cl` (the planned C_l-level seam) is parked. Pre-existing and
+  identical on 4d084b5, `compute_cls_all_fast` cannot be differentiated with respect to any
+  parameter that moves tau_0 (`clax/harmonic.py:836-837` turns it into a Python float and
+  int), and its reverse mode would need ~46 GB on a 32 GB V100 (jobs 24255, 24256, 24261).
+  Fixing that leaves this issue's scope and needs C_l re-validation against CLASS. Tracked as
+  #54 (filed Oct 18, 2026): a separate PR for harmonic differentiability where the test lands;
+  the df/dh rows already show the fix reaching the matter field.
+- #45: test whether the kappa_dot `stop_gradient` is still needed now that recombination is
+  smooth (keep a removal only if AD matches FD for omega_b, omega_cdm at 3-5 cosmologies).
+- Out of scope, to be filed separately: CLASS's default helium physics (`Heswitch = 6`: x_e
+  off by 1.5% at z = 2000 and 4.2% at z ~ 1771); the hard Taylor switch in the T_b update at
+  f_e < 1e-3, i.e. x_e < ~1.08e-3 (spike ratio 20 at z ~ 624 on a 1500-point grid only); c_s^2 vs CLASS c_b^2
+  (1.3% apart at z ~ 632), together with the four `1 - 0.75 Y_He` sites of D4.
+
 ### Oct 7, 2026: Linear P(k) at z=0 was 0.33% low through the C_l solve -- fixed, and the silent clamp now raises
 
 **Bug (smsharma/clax#42, part 1).** `perturbations_solve` integrates to

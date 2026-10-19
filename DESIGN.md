@@ -507,6 +507,13 @@ function g(z), baryon sound speed c_s²(z).
 #### Physics: Recombination
 
 We implement a simplified RECFAST-like solver (following DISCO-EB's approach).
+Since Oct 2026 (smsharma/clax#48) the hydrogen and helium ionisation fractions
+follow CLASS's RECFAST with `recfast_Heswitch = 1` and CLASS's staging: Saha
+equilibrium above z = 2870 (HeII -> HeI) and z = 1600 (hydrogen), the Peebles
+equations below, each advanced by an L-stable linearly implicit step inside the
+ln tau scan with no clip. The equations below are the generic form; the exact
+staging, the step and the measured accuracy are in
+`docs/adr/0003-recombination-staging.md`.
 
 **Hydrogen recombination** (Peebles 3-level atom):
 
@@ -560,8 +567,11 @@ From x_e(z), compute:
 
 #### Algorithm
 
-1. Integrate the recombination ODE system (x_e, T_m) from z_max ~ 1e4 down to z=0
-   using a stiff solver (Kvaerno5). Initial conditions: Saha equilibrium at z_max.
+1. Advance the recombination state (x_HII, x_HeII, x_HeIII, T_m) from z_max
+   (`th_z_max`) down to z = 0 by one `jax.lax.scan` over a grid uniform in
+   ln tau: Saha stages above the CLASS switch redshifts, L-stable ROS2 steps for
+   the Peebles equations below (ADR 0003). Initial conditions: Saha equilibrium
+   at z_max.
 
 2. Splice in reionization: combine recombination x_e with reionization x_e
    (using the tanh profile). This is a smooth operation, no branching.

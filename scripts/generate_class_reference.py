@@ -12,6 +12,7 @@ Usage:
 
 import json
 import os
+import sys
 import numpy as np
 
 # Planck 2018 best-fit LCDM parameters
@@ -362,8 +363,93 @@ def generate_model(params, name, outdir_base):
     print(f"  Done: {name}")
 
 
+# Recombination staging (smsharma/clax#48): CLASS RECFAST with
+# recfast_Heswitch=1 (Sobolev singlet only), the helium physics clax implements.
+# Cosmology names/overrides mirror tests/conftest.py COSMOLOGY_GRID_RECOMB;
+# tests/test_recomb_reference.py::test_reference_grid_matches_test_grid fails if
+# the two copies drift apart.
+NEFF_NCDM = (0.71611 / (4.0 / 11.0) ** (1.0 / 3.0)) ** 4
+RECOMB_GRID = {
+    "lcdm_fiducial": {},
+    "h_high": {"h": 0.6736 * 1.10},
+    "omega_b_high": {"omega_b": 0.02237 * 1.20},
+    "omega_cdm_low": {"omega_cdm": 0.1200 * 0.80},
+    "ns_high": {"n_s": 0.9649 * 1.05},
+    "omega_b_low": {"omega_b": 0.02237 * 0.80},
+    "YHe_022": {"Y_He": 0.22},
+    "YHe_028": {"Y_He": 0.28},
+    "Neff_2": {"N_ur": 2.0 - NEFF_NCDM},
+    "Neff_4": {"N_ur": 4.0 - NEFF_NCDM},
+    "massive_nu_015": {"m_ncdm": 0.15},
+}
+RECFAST_HESW1_BASE = {
+    'h': 0.6736, 'omega_b': 0.02237, 'omega_cdm': 0.1200, 'A_s': 2.1e-9,
+    'n_s': 0.9649, 'tau_reio': 0.0544, 'N_ur': 2.0328, 'N_ncdm': 1,
+    'm_ncdm': 0.06, 'T_ncdm': 0.71611, 'YHe': 0.2454006,  # = clax CosmoParams default, never BBN
+    'recombination': 'RECFAST', 'recfast_Heswitch': 1,
+    'tol_background_integration': 1e-12,
+    # CLASS's default 1e-6 leaves 3-6e-6 of its own integration error in x_e
+    # (2.3e-4 at omega_b - 20%, where the Peebles C = 1 switch fires inside the
+    # hydrogen ODE), comparable to the bars the tests set; at 1e-10 the error is
+    # <= 3e-9 at all 11 cosmologies (vs 1e-12, measured Oct 19, 2026).
+    'tol_thermo_integration': 1e-10,
+}
+
+
+def generate_recfast_hesw1_thermo(name, overrides, outdir_base):
+    """CLASS RECFAST (recfast_Heswitch=1) thermodynamics on a 4000-point
+    log(1+z) grid over z in [200, 8000], for tests/test_recomb_*.py.
+
+    Interpolated linearly in log(1+z) from CLASS's own table (~28k rows).
+    Writes thermo_recfast_hesw1.npz (z, x_e, Tb, g, kappa_dot) and a .json
+    provenance file next to it.
+    """
+    import classy
+    from classy import Class
+
+    pars = dict(RECFAST_HESW1_BASE)
+    for k, v in overrides.items():
+        pars['YHe' if k == 'Y_He' else k] = v
+    c = Class()
+    c.set(pars)
+    c.compute()
+    th = c.get_thermodynamics()
+    z_tab = np.asarray(th['z'])
+    order = np.argsort(z_tab)
+    z_out = np.expm1(np.linspace(np.log1p(200.0), np.log1p(8000.0), 4000))
+
+    def on_grid(key):
+        return np.interp(np.log1p(z_out), np.log1p(z_tab[order]), np.asarray(th[key])[order])
+
+    outdir = os.path.join(outdir_base, name)
+    os.makedirs(outdir, exist_ok=True)
+    np.savez(os.path.join(outdir, 'thermo_recfast_hesw1.npz'),
+             z=z_out, x_e=on_grid('x_e'), Tb=on_grid('Tb [K]'),
+             g=on_grid('g [Mpc^-1]'), kappa_dot=on_grid("kappa' [Mpc^-1]"))
+    with open(os.path.join(outdir, 'thermo_recfast_hesw1.json'), 'w') as fh:
+        # The 10 references of Oct 2026 came from the CLASS-PT tree's classy, which
+        # also reports v3.3.4, so record where classy was imported from.
+        json.dump({"class_params": pars,
+                   "classy": getattr(classy, '__version__', 'unknown'),
+                   "build": f"classy imported from {os.path.dirname(classy.__file__)}",
+                   "grid": "4000 points, uniform in log(1+z), z in [200, 8000]"}, fh, indent=1)
+    c.struct_cleanup()
+    c.empty()
+    print(f"  {name}: x_e(z=2500)={np.interp(2500.0, z_out, on_grid('x_e')):.6f}")
+
+
 def main():
     outdir = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
+    if '--recfast-hesw1-thermo' in sys.argv:
+        # Optional cosmology names after the flag restrict the run to those points.
+        only = [a for a in sys.argv[1:] if not a.startswith('--')]
+        unknown = sorted(set(only) - set(RECOMB_GRID))
+        if unknown:
+            sys.exit(f"ERROR unknown RECOMB_GRID names {unknown}")
+        for name, overrides in RECOMB_GRID.items():
+            if not only or name in only:
+                generate_recfast_hesw1_thermo(name, overrides, outdir)
+        return
     generate_model(FIDUCIAL_PARAMS, 'lcdm_fiducial', outdir)
 
 

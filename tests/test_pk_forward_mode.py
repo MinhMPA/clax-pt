@@ -43,6 +43,30 @@ block or software/driver stack; it is not reproduced exactly here and this
 file does not force it to match, per the task's own instruction to report
 such a discrepancy rather than adjust the expected numbers to fit.
 
+UPDATE (Oct 11, 2026, smsharma/clax#48): the two GPU runs above used the
+unfixed recombination (clipped explicit helium/hydrogen steps whose "chatter",
+a zigzag from grid point to grid point, made derivatives depend on step
+placement). On the fixed code (Saha -> ODE staging, ADR 0003; CPU, job 24323)
+the three AD numbers are grad(recursive)=1.22116400e5, grad(direct)=1.22116401e5,
+jvp(direct)=1.22116400e5, equal to 1e-8, and the jvp agrees between CPU and GPU
+to 1.6e-7 (jobs 24514 CPU, 24516 GPU); the three-way spread was measured on CPU
+only. The 5e-3 mutual bar is unchanged.
+
+FD=1.21310978e5, so AD sits 0.66% above FD. That offset is pre-existing and was
+hidden by finite-difference noise (diagnosis jobs 24513-24517). On the unfixed
+tree central FD of dP(k=0.1)/d omega_cdm scatters 1.06% across steps 1e-4 to 2e-3
+(std 0.44%; jobs 24515 CPU, 24517 GPU); its mean, 1.21312e5, equals the fixed
+tree's slope to 1.6e-5, and AD sits +0.64% (CPU) / +0.56% (GPU) above that mean.
+On the fixed tree FD is converged (std 0.007%; jobs 24514 CPU, 24516 GPU,
+agreeing to 2e-8) and AD is a steady +0.66%. The fix therefore exposed the bias by
+smoothing the primal; it did not create it. The 0.008%-0.094% agreement in the
+GPU runs above reflected one lucky FD step. In units of d ln P/d ln omega_cdm the
+bias is 0.0092, about 2.3x the ~0.004 quoted in smsharma/clax#45, whose
+measurement conditions were not recorded. The kappa_dot stop_gradient (#45) is a
+candidate cause, untested, and probably not the sole one (one cosmology, one k,
+one parameter, one precision block). The 1% FD bar passes with a 0.34-point
+margin.
+
 Why ``ode_adjoint="direct"`` is required (not optional):
     The production-default ``RecursiveCheckpointAdjoint`` implements its
     checkpointed ``while_loop`` as an ``eqx.filter_custom_vjp``

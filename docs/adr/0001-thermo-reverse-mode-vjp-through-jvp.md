@@ -128,3 +128,42 @@ Wiring:
 - `clax` now contains exactly one `jax.custom_vjp`; the "zero custom_vjp
   rules" invariant documented in `tests/test_pk_forward_mode.py` is retired
   (note updated in place).
+
+## Note (Oct 11, 2026, smsharma/clax#48)
+
+The premise "forward mode is exact" holds only when ODE solver stages miss the
+recombination chatter that clipped explicit helium/hydrogen steps produced; with
+them, both modes carried step-placement-dependent spikes (#48). ADR 0003 removes
+the chatter; this rule's re-association remains valid and is unchanged.
+(Re-association here means this ADR's rule: compute the thermodynamics
+reverse-mode product through a batch of forward-mode jvp columns instead of one
+native reverse sweep.)
+
+After ADR 0003, on CPU: reverse (this rule's stable path) and forward mode through
+background + thermodynamics agree to 2.4e-16-4.6e-15 at the five LCDM grid points
+of `tests/test_multicosmo_consistency.py` (job 24321), and through the full matter
+solve (f = sum_k delta_m(k, tau_0)^2, `fast_cl`) to <= 3.1e-5 at three
+cosmologies on the production gradient entry, i.e. the path of this rule (jobs
+24227/24229/24231; the first version of the #48 fix, `fast_cl`'s Kvaerno5 at
+rtol 1e-3 on the 800-point background). On the final version of that fix,
+measured with Rodas5 at rtol = atol = 1e-4 on a V100, the same disagreement is
+<= 1.2e-10 (ADR 0003, Consequences). On unmodified upstream the same
+production-path disagreement was 1.16 at fiducial (job 24226) and 1.13 in the
+diagnosis run.
+
+On the smooth tables, native reverse mode and the production `custom_vjp` path
+coincide at fiducial: both give -2.75564438e9 against forward -2.75572953e9 (job
+24227). At all three cosmologies their relative disagreements with forward mode
+agree to about 1e-3 relative (omega_b_high 8.081e-7 vs 8.073e-7; jobs
+24227/24229/24231). So the re-association is still valid, and for this functional
+at k <= 0.15 Mpc^-1 the two reverse paths agree.
+
+The pipeline-level acceptance test of this ADR, `TestPipelineDeltaM`
+(`tests/test_thermo_reverse_composite.py`), reaches much higher k: g(h) =
+sum_k delta_m(k, tau_0)^2 at `fast_cl` with `pt_k_max_cl = 5`, production reverse
+mode against a forward-mode jvp, bar 1e-4. Run in full mode on the fixed tree, it
+passes on both platforms: on 12 CPU cores jvp = -7.96742981e10, grad(stable) =
+-7.96743037e10, relative gap 6.955e-08 (job 24528, 2 h); on a V100 jvp =
+-7.96743395e10, grad(stable) = -7.96740772e10, relative gap 3.293e-06 (job 24538,
+1 h 41 min). The two platforms' jvp values differ by 5.2e-7, of the order of the
+adaptive-step noise the test docstring quotes (~7e-7).
