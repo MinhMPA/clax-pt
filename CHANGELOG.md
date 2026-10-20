@@ -66,7 +66,7 @@ branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
   `slurm/rsa-trigger-v100.sbatch` (V100 jobs 24641, 24657): the 13 new tests pass (6
   thermodynamics, 6 source cosmologies, high-l bands); `tests/test_preset_accuracy.py`
   + `tests/test_bessel_table.py` 12 passed in full mode (the l <= 1000 bars hold: TT
-  2-1000 max 0.36% against 0.4%, up from 0.25% because modes with k = 0.12-0.15/Mpc
+  2-1000 max 0.36% (0.370% after #53, job 27001; the bar is now 0.55%), up from 0.25% because modes with k = 0.12-0.15/Mpc
   also feed l ~ 1000 through the Bessel tail); fast suite 329 passed, 85 skipped, 1
   deselected (`test_pk_rosenbrock_vs_kvaerno5`), 2 failed in `test_solver_selection`
   (fit_cl expected on rodas5 at atol 1e-4: pre-existing on the kvaerno5 preset base,
@@ -91,6 +91,15 @@ branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
   DESIGN.md's "approximation-free" sections describe neither the tight-coupling blend
   nor the RSA that `clax/perturbations.py` has carried; the module docstring now says
   what the code does.
+
+- Re-validated after the rebase onto main 7d23008 (#53 recombination rewrite;
+  jobs 27001 / 27002 / 27003, igpu V100, Oct 20, 2026): 12/12 accuracy tests and
+  7/7 thermodynamics + source tests. High l: TT rms 0.407% / 0.544%, EE 0.405% /
+  0.599% over l = 1000-2000 / 2000-2500, TT max 0.686% (bars 0.6 / 0.8 / 0.7 /
+  1.0 / 1.0%, i.e. 1.5-1.7x); planck_cl fiducial TT 0.086 / 0.238 / 0.370%
+  (l <= 30 / 500 / 1000), EE 0.596 / 0.455 / 0.981%, TEn 0.327%; LCDM grid TT
+  0.317-0.527%, EE 0.755-1.038%, TEn 0.297-0.417%; tau_free_streaming +0.000%
+  vs CLASS at all five grid points. Fast suite: 465 passed, 995 skipped, 1 deselected, 0 failed in 1:24:44 (job 27001, with the review-round test changes on disk).
 
 **AD convention for the switch time (Oct 20, 2026 addendum).**
 `tau_free_streaming` is wrapped in `stop_gradient`, like CLASS's switch, which

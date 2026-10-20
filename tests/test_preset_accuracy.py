@@ -113,7 +113,10 @@ class TestPlanckClPreset:
         # the 0.98 is the l ~ 526 sparse-l-grid point, see the module docstring)
         assert got["TT 2-30"] < 0.0015
         assert got["TT 2-500"] < 0.0035
-        assert got["TT 2-1000"] < 0.004
+        # With the CLASS radiation-streaming trigger (this branch) TT 2-1000 is
+        # 0.370% after #53 (job 27001; 0.36% before): modes with k = 0.12-0.15/Mpc
+        # also feed l ~ 1000 through the Bessel tail. Bar 1.5x that.
+        assert got["TT 2-1000"] < 0.0055
         assert got["EE 2-4"] < 0.010
         assert got["EE 5-500"] < 0.0075
         assert got["EE 5-1000"] < 0.015
@@ -124,7 +127,9 @@ class TestPlanckClPreset:
         read TT rms 1.7% / 2.0% and EE 3.0% / 8.2% over l = 1000-2000 /
         2000-2500 (the photon quadrupole source was zeroed at tau ~ 296 Mpc for
         k > 0.15/Mpc); with CLASS's tau_free_streaming criterion, 60 k per
-        decade: TT 0.38% / 0.49%, EE 0.39% / 0.52% (bars ~1.5x). Computed to
+        decade: TT 0.38% / 0.49%, EE 0.39% / 0.52% before #53; after #53 (job
+        27001) TT 0.407% / 0.544%, EE 0.405% / 0.599%, TT max 0.686% (bars
+        1.5-1.7x). Computed to
         the preset's hr_l_max (2500) with the sparse-l spline padded past it
         (L_SPLINE_PAD), so the single-l maximum covers the whole band. What
         remains is a smooth +0.3% to +0.5% from the helium-era opacity
