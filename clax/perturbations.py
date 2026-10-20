@@ -3,9 +3,19 @@
 Integrates the linearized Einstein-Boltzmann equations for each Fourier mode k,
 producing source functions S(k,τ) for temperature, E-polarization, and lensing.
 
-Uses the full Boltzmann hierarchy by default, with an optional CLASS-style
-late-time ``ncdm`` fluid approximation controlled by
-``PrecisionParams.ncdm_fluid_approximation``.
+Integrates the full photon, polarization and neutrino hierarchies (no
+ultra-relativistic fluid approximation), keeping CLASS's two photon-sector
+approximations because the hierarchies are truncated: the tight-coupling blend
+at early times (``_compute_tca_criterion``, ``_tca_blend``) and the radiation
+streaming approximation (RSA) once ``k*tau >
+PrecisionParams.pt_rsa_trigger_tau_over_tau_k`` and ``tau >
+ThermoResult.tau_free_streaming`` (CLASS perturbations.c
+``perturbations_approximations``; thermodynamics.c ``tau_free_streaming``,
+tau_c/tau > ``pt_rsa_trigger_tau_c_over_tau``). An optional CLASS-style
+late-time ``ncdm`` fluid approximation is controlled by
+``PrecisionParams.ncdm_fluid_approximation``. The "approximation-free, no
+TCA/RSA switching" wording in CLAUDE.md and DESIGN.md predates both switches
+(docs/highl_residual_2026-10-12.md, branch exp/highl-investigation).
 
 Key function:
     perturbations_solve(params, prec, bg, th) -> PerturbationResult
@@ -49,6 +59,19 @@ from clax.thermodynamics import ThermoResult
 # Module-level flag to disable RSA relaxation damping in the ODE RHS.
 # Set to False for testing whether RSA damping helps or hurts.
 _RSA_DAMPING_ENABLED = True
+
+# Width [Mpc] of the sigmoid that turns the RSA relaxation on at
+# ThermoResult.tau_free_streaming. CLASS switches abruptly; the ramp keeps the
+# RHS smooth in tau and in the cosmological parameters (AD). 2.5 Mpc is the
+# local width in tau that the former kappa'/(aH)-based sigmoid had at the
+# fiducial cosmology (tau_c/tau grows by e per ~25 Mpc near tau ~ 365 Mpc) and
+# is short against the relaxation time 1/k (>= 3 Mpc for k <= 0.3/Mpc). For
+# planck_cl's k up to 1.0/Mpc, 1/k = 1 Mpc < 2.5 Mpc, so there the hierarchy
+# follows the ramp rather than the reverse; those modes feed l > 4000 and the
+# visibility is at 2.4% of its peak at the switch, so it is immaterial. The
+# sigmoid is centred on tau_free_streaming (half-on at the switch, ~12% on
+# 5 Mpc before it); CLASS turns on strictly after.
+_RSA_TAU_BLEND_WIDTH = 2.5
 
 # Width of the sigmoid used for the ncdm fluid approximation transition.
 # Matches the _TCA_WIDTH convention: large enough for a sharp transition
@@ -972,6 +995,9 @@ def _perturbation_rhs(tau, y, args):
         w_ncdm_qw = jnp.zeros(1)
         M_ncdm_qw = 0.0
         dlnf0_ncdm_qw = jnp.zeros(1)
+    # RSA first trigger k*tau > PrecisionParams.pt_rsa_trigger_tau_over_tau_k
+    # (args[14]); callers passing the older 14-tuple get CLASS's default 45.
+    rsa_tau_over_tau_k = args[14] if len(args) > 14 else 45.0
 
     # Background quantities at this τ
     loga = bg.loga_of_tau.evaluate(tau)
@@ -1056,14 +1082,21 @@ def _perturbation_rhs(tau, y, args):
     # === TCA CRITERION (shared helper, dual criteria matching CLASS) ===
     is_tca, tau_c = _compute_tca_criterion(kappa_dot, a_prime_over_a, k)
 
-    # === RSA CRITERION (matching CLASS perturbations.c:10407-10426) ===
-    # After recombination, when photons/neutrinos are free-streaming,
-    # replace hierarchy values with algebraic RSA expressions in Einstein eqs.
-    # This prevents inaccurate truncated hierarchy from contaminating h', η'.
+    # === RSA CRITERION (CLASS perturbations.c, perturbations_approximations()) ===
+    # rsa_on once tau/tau_k > radiation_streaming_trigger_tau_over_tau_k (45)
+    # AND tau > tau_free_streaming, the first time after recombination at which
+    # tau_c/tau = 1/(kappa' tau) exceeds radiation_streaming_trigger_tau_c_over_tau
+    # (5): CLASS thermodynamics.c, here ThermoResult.tau_free_streaming (~365 Mpc,
+    # visibility at 2.4% of its peak). After that, replace the hierarchy values by
+    # the algebraic RSA expressions in the Einstein equations, so that the
+    # truncated hierarchy cannot contaminate h', η'.
     # cf. CLASS: perturbations_einstein() uses rsa_delta_g when rsa_on (line 8218-8224)
+    # Until Oct 12, 2026 the second condition was kappa'/(aH) < 5, i.e. kappa' tau
+    # < ~10 in matter domination: it fired at 296 Mpc with the visibility at 69%
+    # of its peak and zeroed the photon quadrupole source for k > 0.15/Mpc during
+    # recombination (docs/highl_residual_2026-10-12.md, exp/highl-investigation).
     tau_k = tau * k
-    kd_over_aH = kappa_dot / jnp.maximum(a_prime_over_a, 1e-30)
-    is_rsa = (tau_k > 45.0) & (kd_over_aH < 5.0)
+    is_rsa = (tau_k > rsa_tau_over_tau_k) & (tau > th.tau_free_streaming)
 
     # === EINSTEIN EQUATIONS with RSA substitution ===
     # cf. CLASS perturbations.c:6611-6644, 8218-8265, 10407-10462
@@ -1282,7 +1315,11 @@ def _perturbation_rhs(tau, y, args):
     # targets computed from the metric, preventing this contamination.
     #
     # cf. CLASS perturbations.c:6235-6243, 10408-10449
-    # Condition: tau*k > 45 AND kappa_dot/(a'/a) < 5
+    # Condition: tau*k > pt_rsa_trigger_tau_over_tau_k (45) AND
+    # tau > ThermoResult.tau_free_streaming (CLASS's two triggers, see the RSA
+    # CRITERION block above), each as a sigmoid so that the relaxation rate is
+    # smooth in tau and in the cosmological parameters (AD): width 2 in k*tau,
+    # _RSA_TAU_BLEND_WIDTH in tau.
     # Targets (synchronous gauge):
     #   delta_g_rsa = 4/k² * (aH*h' - k²*eta)
     #   theta_g_rsa = -h'/2  →  F_1_rsa = -2*h'/(3*k)
@@ -1293,8 +1330,8 @@ def _perturbation_rhs(tau, y, args):
     # the mode), which is fast enough to prevent ringing but slow enough for
     # the ODE solver to handle.
     tau_k = tau * k
-    kd_over_aH = kappa_dot / jnp.maximum(a_prime_over_a, 1e-30)
-    rsa_crit = jax.nn.sigmoid(0.5 * (tau_k - 45.0)) * jax.nn.sigmoid(2.0 * (5.0 - kd_over_aH))
+    rsa_crit = (jax.nn.sigmoid(0.5 * (tau_k - rsa_tau_over_tau_k))
+                * jax.nn.sigmoid((tau - th.tau_free_streaming) / _RSA_TAU_BLEND_WIDTH))
 
     # RSA targets
     delta_g_rsa = 4.0 / k2 * (a_prime_over_a * h_prime - k2 * eta)
@@ -1531,7 +1568,8 @@ def _perturbation_rhs(tau, y, args):
 def _extract_sources(y, k, tau, bg, th, idx, params,
                      q_ncdm=None, w_ncdm=None, M_ncdm=0.0,
                      ncdmfa_mode_code: int = 3,
-                     ncdmfa_trigger: float = 31.0):
+                     ncdmfa_trigger: float = 31.0,
+                     rsa_trigger_tau_over_tau_k: float = 45.0):
     """Extract CMB source functions from the perturbation state.
 
     Uses the non-IBP form: S_T0 × j_l + S_T1 × j_l' in the transfer integral.
@@ -1605,10 +1643,10 @@ def _extract_sources(y, k, tau, bg, th, idx, params,
     theta_g_raw = 3.0 * k * F_g_1 / 4.0
     theta_ur_raw = 3.0 * k * F_ur_1 / 4.0
 
-    # RSA criterion (same as ODE RHS)
+    # RSA criterion (same as the ODE RHS: k*tau > pt_rsa_trigger_tau_over_tau_k
+    # and tau > ThermoResult.tau_free_streaming, CLASS's two triggers)
     tau_k = tau * k
-    kd_over_aH = kappa_dot / jnp.maximum(a_prime_over_a, 1e-30)
-    is_rsa = (tau_k > 45.0) & (kd_over_aH < 5.0)
+    is_rsa = (tau_k > rsa_trigger_tau_over_tau_k) & (tau > th.tau_free_streaming)
 
     # First compute raw h' (needed for RSA algebraic values)
     # ncdm: use integrated moments from hierarchy; includes fld
@@ -2216,7 +2254,8 @@ def _perturbations_solve_impl(
                            args_ncdm=args_ncdm)
         ode_args = (k, bg, th, params, idx, l_max_g, l_max_pol, l_max_ur,
                     ncdmfa_mode_code, ncdmfa_trigger,
-                    q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm)
+                    q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm,
+                    prec.pt_rsa_trigger_tau_over_tau_k)
 
         def save_sources(tau_i, y_i, args_unused):
             return _extract_sources(
@@ -2224,6 +2263,7 @@ def _perturbations_solve_impl(
                 q_ncdm=q_ncdm, w_ncdm=w_ncdm, M_ncdm=M_ncdm,
                 ncdmfa_mode_code=ncdmfa_mode_code,
                 ncdmfa_trigger=ncdmfa_trigger,
+                rsa_trigger_tau_over_tau_k=prec.pt_rsa_trigger_tau_over_tau_k,
             )
 
         sol = diffrax.diffeqsolve(
@@ -2320,7 +2360,8 @@ def _solve_mpk_batched_rosenbrock(
     # Shared args captured in closure — only k varies per mode.
     shared_args = (bg, th, params, idx, l_max_g, l_max_pol, l_max_ur,
                    ncdmfa_mode_code, ncdmfa_trigger,
-                   q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm)
+                   q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm,
+                   prec.pt_rsa_trigger_tau_over_tau_k)
 
     def f_single(t, y, k_scalar):
         """Single-mode RHS for Jacobian computation by Rodas5Batched."""
@@ -2423,7 +2464,8 @@ def _perturbations_solve_mpk_impl(
                            args_ncdm=args_ncdm)
         ode_args = (k, bg, th, params, idx, l_max_g, l_max_pol, l_max_ur,
                     ncdmfa_mode_code, ncdmfa_trigger,
-                    q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm)
+                    q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm,
+                    prec.pt_rsa_trigger_tau_over_tau_k)
 
         def save_delta_m(tau_i, y_i, args_unused):
             dm = _extract_delta_m(
@@ -2532,7 +2574,8 @@ def _matter_delta_m_single_k_impl(
     y0 = _adiabatic_ic(k, tau_ini, bg, params, idx, n_eq, args_ncdm=args_ncdm)
     ode_args = (k, bg, th, params, idx, l_max_g, l_max_pol, l_max_ur,
                 ncdmfa_mode_code, ncdmfa_trigger,
-                q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm)
+                q_ncdm, w_ncdm, M_ncdm, dlnf0_ncdm,
+                prec.pt_rsa_trigger_tau_over_tau_k)
     sol = diffrax.diffeqsolve(
         diffrax.ODETerm(_perturbation_rhs),
         solver=_get_stiff_solver(prec.pt_ode_solver),

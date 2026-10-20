@@ -12,6 +12,9 @@ Notes:
 - These tests use CLASS-generated reference data for forward assertions plus narrow FD spot checks for the repaired thermodynamics AD paths.
 """
 
+import dataclasses
+import os
+
 import jax
 jax.config.update("jax_enable_x64", True)
 
@@ -38,6 +41,18 @@ PREC = PrecisionParams(
     # spacing near recombination. Do not loosen the tolerance to compensate.
     th_n_points=10000, th_z_max=5e3,
 )
+
+
+_REFERENCE_DIR = os.path.join(os.path.dirname(__file__), "..", "reference_data")
+
+
+def _class_tau_free_streaming(name):
+    """CLASS 3.3.4 tau_free_streaming [Mpc] stored with the source references
+    (scripts/generate_class_sources_reference.py), or None if absent."""
+    path = os.path.join(_REFERENCE_DIR, name, "sources_k0.15.npz")
+    if not os.path.exists(path):
+        return None
+    return float(np.load(path)["tau_free_streaming"])
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +83,78 @@ class TestThermoScalars:
         val = float(th.z_rec)
         rel_err = abs(val - ref) / ref
         assert rel_err < 0.02, f"z_rec: {val:.1f} vs CLASS {ref:.1f}, err={rel_err:.2%}"
+
+    def test_tau_free_streaming(self, th, bg):
+        """``tau_free_streaming`` matches CLASS's definition to 0.05% (0.18 Mpc).
+
+        Floor: the linear-in-log-a interpolation of the crossing (~0.01 Mpc on
+        this 10000-point grid) and CLASS's 0.023 Mpc table-point ambiguity;
+        measured 0.0003% at all five LCDM grid points after #53 (job 27002).
+
+        CLASS (thermodynamics.c, ``tau_free_streaming``) switches the photon
+        radiation-streaming approximation on at the first conformal time after
+        recombination where the Thomson mean free path exceeds
+        ``radiation_streaming_trigger_tau_c_over_tau`` = 5 conformal times,
+        tau_c/tau = 1/(kappa' tau) >= 5. Reference: CLASS 3.3.4, RECFAST,
+        Y_He = 0.2454006, fiducial with the 0.06 eV neutrino, interpolated
+        between table points (scripts/generate_class_sources_reference.py,
+        stored with the source references): 364.767 Mpc (z = 760), where the
+        visibility function is 2.4% of its peak. The legacy clax criterion
+        kappa'/(aH) < 5 corresponds to 296 Mpc (visibility at 69% of peak),
+        see docs/highl_residual_2026-10-12.md (branch exp/highl-investigation).
+        """
+        ref = float(_class_tau_free_streaming('lcdm_fiducial'))
+        val = float(th.tau_free_streaming)
+        rel_err = abs(val - ref) / ref
+        assert np.isfinite(val)
+        assert val > float(th.tau_star), f"tau_free_streaming {val:.2f} must follow the visibility peak {float(th.tau_star):.2f}"
+        assert rel_err < 0.0005, f"tau_free_streaming: {val:.3f} vs CLASS {ref:.3f} Mpc, err={rel_err:.3%}"
+
+    def test_tau_free_streaming_no_gradient(self):
+        """``tau_free_streaming`` carries no gradient: the switch location is
+        held fixed under AD (stop_gradient), like CLASS's table point. Without
+        it two partials would reach it: the one through the opacity table's
+        n_H_0 rescale (+698 Mpc per unit omega_b against -545 by finite
+        differences, the wrong sign) and the background-time partial through
+        tau(z) (incomplete on its own); the dropped term is <= 3e-5 on
+        d ln C_l / d ln theta. Forward mode (direct adjoint, as in
+        tests/test_pk_forward_mode.py: the production checkpointed adjoint is
+        a custom_vjp that jax.jvp cannot cross) and reverse mode (production
+        adjoint, what inference runs) along omega_b must both return exactly
+        zero. Exempt from the multi-cosmology rule: a stop_gradient is a
+        structural property, identical at every cosmology."""
+        def f(omega_b, prec):
+            params = CosmoParams(omega_b=omega_b)
+            return thermodynamics_solve(params, prec, background_solve(params, prec)).tau_free_streaming
+        omega_b0 = jnp.asarray(CosmoParams().omega_b, dtype=jnp.float64)
+        prec_fwd = dataclasses.replace(PREC, ode_adjoint="direct")
+        val, dot = jax.jvp(lambda ob: f(ob, prec_fwd), (omega_b0,), (jnp.ones_like(omega_b0),))
+        assert float(val) > 0.0
+        assert float(dot) == 0.0, f"jvp: d tau_free_streaming/d omega_b = {float(dot):+.3e}, expected exactly 0"
+        grad = float(jax.grad(lambda ob: f(ob, PREC))(omega_b0))
+        assert grad == 0.0, f"grad: d tau_free_streaming/d omega_b = {grad:+.3e}, expected exactly 0"
+
+    def test_tau_free_streaming_grid(self, lcdm_cosmology):
+        """Multi-cosmology: ``tau_free_streaming`` within 0.05% of CLASS at every
+        LCDM grid point (fiducial only under --fast), and it moves with the
+        cosmology in the same direction as in CLASS (omega_cdm_low: later by
+        19 Mpc; omega_b_high: earlier by 2.4 Mpc; h and n_s: unchanged)."""
+        name, params = lcdm_cosmology
+        ref = _class_tau_free_streaming(name)
+        if ref is None:
+            pytest.skip(f"no CLASS source/thermo reference for {name}")
+        bg_i = background_solve(params, PREC)
+        th_i = thermodynamics_solve(params, PREC, bg_i)
+        val = float(th_i.tau_free_streaming)
+        rel_err = abs(val - ref) / ref
+        print(f"tau_free_streaming {name}: clax {val:.3f} vs CLASS {ref:.3f} Mpc ({100 * (val / ref - 1):+.3f}%)")
+        assert rel_err < 0.0005, f"{name}: tau_free_streaming {val:.3f} vs CLASS {ref:.3f} Mpc, err={rel_err:.3%}"
+        ref_fid = _class_tau_free_streaming('lcdm_fiducial')
+        if abs(ref - ref_fid) > 1.0:
+            bg_f = background_solve(CosmoParams(), PREC)
+            val_fid = float(thermodynamics_solve(CosmoParams(), PREC, bg_f).tau_free_streaming)
+            assert np.sign(val - val_fid) == np.sign(ref - ref_fid), (
+                f"{name}: tau_free_streaming moves by {val - val_fid:+.2f} Mpc vs CLASS {ref - ref_fid:+.2f}")
 
 
 class TestIonizationFraction:
