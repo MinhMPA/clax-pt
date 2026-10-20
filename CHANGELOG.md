@@ -10,8 +10,9 @@ power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 
 ### Oct 12, 2026: RSA second trigger follows CLASS's tau_free_streaming (l > 1500 residual fixed)
 
-Diagnosis in `docs/highl_residual_2026-10-12.md` (branch `exp/highl-investigation`);
-fix on branch `fix/rsa-trigger` (based on `fix/preset-retune`).
+Diagnosis in `docs/highl_residual_2026-10-12.md` (its diagnostic scripts stay on
+branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
+`fix/preset-retune`).
 
 - **Bug.** The radiation streaming approximation (RSA) switched on when
   kappa'/(aH) < 5. In matter domination aH = 2/tau, so this is kappa' tau < ~10:
@@ -87,6 +88,17 @@ fix on branch `fix/rsa-trigger` (based on `fix/preset-retune`).
   DESIGN.md's "approximation-free" sections describe neither the tight-coupling blend
   nor the RSA that `clax/perturbations.py` has carried; the module docstring now says
   what the code does.
+
+**AD convention for the switch time (Oct 20, 2026).** `tau_free_streaming` is
+wrapped in `stop_gradient`. CLASS's switch is a table point with no derivative,
+and ADR 0003 holds the recombination stage-switch redshifts fixed for the same
+reason. Without it the only derivative that reached the switch time was the
+partial through the opacity table's n_H_0 rescale (`_kd_safe`, #45), which has
+the wrong sign: d tau_fs / d omega_b = +698 Mpc per unit omega_b by AD against
+-545 by finite differences. The term it feeds is small either way
+(d ln C_l / d ln tau_fs ~ 1e-4, so the dropped contribution to
+d ln C_l / d ln omega_b is ~ 3e-6). `tests/test_thermodynamics.py` pins the
+zero derivative.
 
 ### Oct 12, 2026: Preset retune (planck_cl ~45x faster at equal accuracy), fast-path Bessel table fix, presets on the Hermite rodas5
 

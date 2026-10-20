@@ -105,6 +105,23 @@ class TestThermoScalars:
         assert val > float(th.tau_star), f"tau_free_streaming {val:.2f} must follow the visibility peak {float(th.tau_star):.2f}"
         assert rel_err < 0.005, f"tau_free_streaming: {val:.2f} vs CLASS {ref:.2f} Mpc, err={rel_err:.2%}"
 
+    def test_tau_free_streaming_no_gradient(self):
+        """``tau_free_streaming`` carries no gradient: the switch location is
+        held fixed under AD (stop_gradient), like CLASS's table point and the
+        fixed stage-switch redshifts of ADR 0003. Forward mode along omega_b
+        must return exactly zero. Before the stop_gradient the only derivative
+        reaching it was the partial through the opacity table's n_H_0 rescale,
+        +698 Mpc per unit omega_b against -545 by finite differences (wrong
+        sign). Exempt from the multi-cosmology rule: a stop_gradient is a
+        structural property, identical at every cosmology."""
+        def f(omega_b):
+            params = CosmoParams(omega_b=omega_b)
+            return thermodynamics_solve(params, PREC, background_solve(params, PREC)).tau_free_streaming
+        omega_b0 = jnp.asarray(CosmoParams().omega_b, dtype=jnp.float64)
+        val, dot = jax.jvp(f, (omega_b0,), (jnp.ones_like(omega_b0),))
+        assert float(val) > 0.0
+        assert float(dot) == 0.0, f"d tau_free_streaming/d omega_b = {float(dot):+.3e}, expected exactly 0"
+
     def test_tau_free_streaming_grid(self, lcdm_cosmology):
         """Multi-cosmology: ``tau_free_streaming`` within 0.5% of CLASS at every
         LCDM grid point (fiducial only under --fast), and it moves with the

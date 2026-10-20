@@ -217,7 +217,10 @@ class ThermoResult:
     the Thomson mean free path tau_c = 1/kappa' exceeds
     ``PrecisionParams.pt_rsa_trigger_tau_c_over_tau`` (= 5) conformal times.
     Together with k*tau > ``pt_rsa_trigger_tau_over_tau_k`` it switches the
-    photon radiation streaming approximation on in perturbations.py.
+    photon radiation streaming approximation on in perturbations.py. It
+    carries no gradient (``stop_gradient``): like CLASS's table point and the
+    fixed stage-switch redshifts of ADR 0003, the switch location is not
+    differentiated.
     """
     xe_of_loga: CubicSpline
     Tb_of_loga: CubicSpline
@@ -1055,7 +1058,12 @@ def thermodynamics_solve(
     # takes the table point itself; here the crossing is interpolated linearly
     # in log a between the two bracketing points (364.8 Mpc, z = 760 at the
     # fiducial cosmology, visibility at 2.4% of its peak; CLASS's table point
-    # is 0.03 Mpc later). Same AD convention as kappa_dot_of_loga (_kd_safe);
+    # is 0.03 Mpc later). The switch time is held fixed under AD
+    # (stop_gradient), like CLASS's table point and the fixed stage-switch
+    # redshifts of ADR 0003: the only derivative that would reach it is the
+    # partial through _kd_safe's n_H_0 rescale, which has the wrong sign
+    # (d tau_fs/d omega_b: AD +698 vs finite differences -545 Mpc per unit
+    # omega_b), and the term it feeds is small (d ln C_l/d ln tau_fs ~ 1e-4).
     # tau from the background spline, as for tau_star. If no crossing exists
     # (never for a recombining universe) the switch is pushed past the table.
     _tau_grid_bg = jax.vmap(bg.tau_of_loga.evaluate)(loga_grid_sg)
@@ -1069,9 +1077,9 @@ def thermodynamics_solve(
     _w = jnp.clip((prec.pt_rsa_trigger_tau_c_over_tau - _f0)
                   / jnp.where(_f1 == _f0, 1.0, _f1 - _f0), 0.0, 1.0)
     _loga_fs = loga_grid_sg[_i0] + _w * (loga_grid_sg[_i1] - loga_grid_sg[_i0])
-    tau_free_streaming = jnp.where(jnp.any(_crossed),
-                                   bg.tau_of_loga.evaluate(_loga_fs),
-                                   _tau_grid_bg[-1])
+    tau_free_streaming = jax.lax.stop_gradient(
+        jnp.where(jnp.any(_crossed), bg.tau_of_loga.evaluate(_loga_fs),
+                  _tau_grid_bg[-1]))
 
     return ThermoResult(
         xe_of_loga=xe_of_loga,
