@@ -8,6 +8,99 @@ C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
 
+### Oct 20, 2026: The opacity tables carry their full tangents; dP(k)/d omega_b and d omega_cdm follow finite differences (#55, #45)
+
+**Bug (smsharma/clax#55, #45).** The five opacity tables perturbations.py reads
+(kappa_dot, exp(-kappa), g, dkappa_dot/dlna, g') were built from `stop_gradient`
+copies of their spline knots and values, with only the n_H_0 ∝ omega_b factor
+restored (d127731, May 10, 2026). Along omega_cdm and N_ur their AD tangents were
+exactly zero at every redshift; along omega_b and Y_He the x_e response was
+missing (reverse-mode d kappa_dot/d omega_b at z ~ 1095: 2.91 against 1.42 from
+finite differences; d g/d omega_b with the wrong sign). Downstream, AD put
+dP(k = 0.05 Mpc^-1)/d omega_b 4.0% and dP(k = 0.1 Mpc^-1)/d omega_cdm +0.66% off
+converged finite differences, in both AD modes (#55). The cut had answered a
+"10^8x blow-up" of the reverse derivative through the old thermodynamics scan.
+
+**Cause.** The scan is uniform in ln tau, so the ln a knots move with the
+parameters; a value tangent at fixed knot index is off by the transport term
+(table slope times d ln a/d theta). The "blow-up" was that term read against a
+vanishing true derivative (h at fixed densities, z >= 400): a probe tree with the
+values uncut and the knots still frozen reproduces it (errors of order 1 to 1e3
+in d ln Q/d ln theta along every knot-moving parameter, exact along Y_He, which
+moves no knot). Knot and value tangents have to travel together, which the
+live-knot spline does by construction. ADR 0004.
+
+**Fix.** The cut is removed: the opacity tables are splines on the live knots
+with the live values, like x_e, T_b and c_s^2; dkappa_dot/dlna is the derivative
+of the kappa_dot spline. The primal is bitwise unchanged (132 table arrays at
+three cosmologies and two grids identical between main and the fix, jobs 27164 /
+27165). The tau_free_streaming switch time keeps its own `stop_gradient` (#51).
+
+**Measured (probe of Oct 20, 2026, `/lustre/work/n2minh/clax-probes/opacity/`,
+jobs 27125-27127, 27159; five cosmologies, both thermodynamics grids, twenty
+redshifts; forward tangent vs Richardson finite differences, in d ln Q/d ln theta).**
+Worst error of kappa_dot: omega_b 12.6 -> 7.5e-3, omega_cdm 5.1 -> 2.5e-7,
+h 1.14 -> 6.8e-3, Y_He 2.69 -> 6.8e-3, N_ur 2.7e-2 -> 6.8e-3; of g: omega_b
+19.7 -> 1.7e-2, omega_cdm 59.5 -> 2.2e-5. The remaining 6.8e-3 is the number x_e
+itself shows on every tree, at z = 600 on the 3000-point grid (the T_b Taylor
+switch, ADR 0003 Known limitations); on the 20000-point grid the worst resolved
+rows are 1e-4 or below, and the 1.7e-2 / 2.2e-5 sit at z = 3000 where
+exp(-kappa) goes as exp(-220 dln omega_b) and a 1e-3 finite difference is not
+converged. Reverse mode (native and the production custom rule of ADR 0001) agrees
+with forward to 6.2e-9 on the full tangents. Nothing non-finite.
+
+**Tests (red first, then green).**
+- `tests/test_recomb_thermo.py::test_opacity_tangents_match_converged_fd`: the
+  five opacity tables through the #48 finite-difference classifier at the 11
+  recombination cosmologies (slow; full mode): 21 redshifts (1650 and 1550 in
+  place of the hand-over at 1600, where the derivative tables have a kink) along
+  omega_cdm, Y_He and N_ur; z >= 900 along omega_b and z <= 1200 along h with a
+  1e-5 floor, for the reasons under "Discovered" below and in ADR 0004. Red on
+  main 55/55 (job 27183); green 55/55 (job 27184), worst resolved error 2.0e-4
+  (omega_b), 1.8e-4 (h, omega_cdm, N_ur), 9.7e-5 (Y_He); where the h derivative
+  is below the floor the tangent stays below 6.7e-6 of the value (bar 1.4e-5).
+- `tests/test_pk_forward_mode.py`: dP(k = 0.1 Mpc^-1)/d omega_cdm by forward mode
+  against central FD at the five LCDM grid points: on main +0.59% to +0.76% at
+  every point (job 27176); on this change -0.08% to +0.09% at steps 1e-3 and
+  5e-4, the FD's own step scatter (job 27177). The bar is 1.8e-3 (was 1%), 2x the
+  worst, and the test runs on the LCDM grid (multi-cosmology rule).
+- `tests/test_thermodynamics.py::TestThermoGradients`: the reverse-mode spot
+  checks of kappa_dot, exp(-kappa), g and dkappa_dot/dlna sample ln a = -8, -7,
+  -6 along omega_b and -7, -6 along omega_cdm (they sampled -8 along omega_b
+  only, where the cut was exact). Red on main: 16 of 20 cases fail by assertion
+  (job 27160).
+- The PREC note of that module claimed th_z_max = 5e4 breaks the omega_b
+  dkappa_dot/dlna check by 8%; that was the cut. With the full tangents the check
+  agrees with FD to 4e-10 at both z_max (job 27170); the note is rewritten.
+
+**Test pass rates on the final tree (CPU, 12 cores).** Full mode of
+`tests/test_recomb_thermo.py` and `tests/test_thermodynamics.py` at the 11
+recombination cosmologies: 945 passed (job 27188, 43 min; 865 before this
+change). Forward-mode P(k) test on the LCDM grid: 5 passed (job 27186), all three
+AD routes equal to 1e-8 at every point. CPU vs GPU tangents (V100): 9 passed
+(job 27169). `tests/ --fast -q`: 484 passed, 1055 skipped, 1 failed, the
+pre-existing `test_pk_rosenbrock_vs_kvaerno5` max_steps failure, identical on
+main (job 27166, 1:39; was 468 passed on main at 99b62fe, job 27048; the new
+cases are the spot-check samples). GPU (V100), `tests/test_recomb_downstream.py`
+(step-placement independence, native and production reverse vs forward,
+smoothness along h at the three downstream cosmologies): 12 passed (job 27168,
+2:37). `test_pk_gradients.py::TestPkPublicTableGradients::test_public_table_partials_match_fd_full`,
+the test #55 reported failing (dP(k = 0.05 Mpc^-1)/d omega_b 4.0% off, bar 1%):
+passed (job 27167, CPU, 5:13 for the one reverse-mode table gradient and six
+finite-difference table solves).
+
+**Discovered, pre-existing.** Below the T_b Taylor switch (f_e < 1e-3, z ~ 620;
+ADR 0003 Known limitations) the primal's dependence on omega_b carries grid-scale
+jumps: in a step scan at the thermodynamics tests' precision block the
+finite-difference error of every opacity table halves when the step doubles and
+scales with the grid (1.7e-2 relative on 3000 points, 1.7e-3 on 10000, 4e-4 on
+20000), while AD is grid-stable to 1e-4 and forward equals reverse to 1e-11
+(job 27172). Where the derivative is near a zero crossing, the omega_b derivative
+of exp(-kappa) at z ~ 400, a single-step finite difference is 30% off the
+derivative; the spot check samples that table at z ~ 147 instead. A
+finite-difference gate along omega_b through anything downstream of the
+thermodynamics inherits this floor at its thermodynamics grid.
+
 ### Oct 12, 2026: RSA second trigger follows CLASS's tau_free_streaming (l > 1500 residual fixed)
 
 Diagnosis in `docs/highl_residual_2026-10-12.md` (its diagnostic scripts stay on

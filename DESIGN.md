@@ -1295,7 +1295,7 @@ Before trusting `DirectAdjoint` for a new machine, backend, or precision profile
 
 Suggested repository-level checks:
 
-- `pytest tests/test_thermodynamics.py -q -k 'test_reionization_gradients_match_fd or test_opacity_logderivative_gradient_matches_fd_for_omega_b'`
+- `pytest tests/test_thermodynamics.py -q -k 'test_reionization_gradients_match_fd or test_opacity_logderivative_gradient_matches_fd'`
 - `pytest tests/test_pk_gradients.py -q --fast`
 - `pytest tests/test_pk_gradients.py -q -k 'test_scalar_partials_match_fd_full and 1.0'`
 
