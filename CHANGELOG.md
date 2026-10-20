@@ -80,8 +80,7 @@ mode exists; the earlier single-job numbers (24.8 / 26.4 / 30.6 s) are
 node noise.
 
 **Preset solver choice, measured** (`diags/diag_preset_solver_choice.py`,
-job 24652, V100, massless vs `reference_data/cls_massless_recfast.npz`;
-results `/lustre/work/n2minh/std/clax/rodas5dense/preset-abcdef-24652.md`).
+job 24652, V100, massless vs `reference_data/cls_massless_recfast.npz`).
 Planck-like settings (60 k/decade, n_tau 5000, th 100000, l_max 17/17/17,
 max_steps 8192; C_l to 2500 with n_k_fine 20000, read l <= 1000), cached
 seconds bg/th/pt/hr: A kvaerno5 1e-4/1e-6 0.6/69.1/110.6/5.5; B rodas5
@@ -106,8 +105,17 @@ rodas5 (config B above); fit_cl's tolerance choice is the 1.8%-at-l=2
 versus +5.6 s trade-off above.
 
 Tools: `slurm/rodas5-dense-v100.sbatch` (MODE=cltest|timing|abc|fast; COMMIT
-pins a `git archive` export so queued jobs are immune to later edits); logs
-under `/lustre/work/n2minh/std/clax/rodas5dense/`.
+pins a `git archive` export so queued jobs are immune to later edits); logs go
+to the directory named in the sbatch header.
+
+**ADR 0003 cross-reference (Oct 20, 2026).** The `fit_cl` C_l numbers in
+`docs/adr/0003-recombination-staging.md` (section "C_l": TT 84% -> 94% at
+l = 2-30, unfixed -> fixed recombination) were measured with the linear dense
+output this entry replaces, at fit_cl's then rtol 1e-3 / atol 1e-4, where that
+output alone puts the Rosenbrock path tens of percent off at l < 5 (-46% at
+l = 2 at rtol 1e-4 / atol 1e-6 above); the ADR's two candidate causes do not
+include it. The retuned `fit_cl` of the next entry (Hermite output, rtol 1e-4)
+carries the numbers to use.
 
 ### Oct 11, 2026: Recombination follows CLASS's Saha -> ODE staging; thermodynamics gradients are smooth (#48)
 
@@ -234,7 +242,7 @@ Jobs (cluster logs, not in the repo; more in ADR 0003): unfixed 24095-24097, 241
   1.1e-6); +17% per evaluation (job 26578). The unfixed code still fails it: CPU fiducial
   1.4e2, V100 5.0e-4 / 2.0 / 3.9e-4 (jobs 26590, 26588). The 800-point noise is pre-existing
   and reaches production derivatives with respect to any parameter that moves the late-time
-  expansion at fixed omega; it is reported upstream as its own issue.
+  expansion at fixed omega; it is reported upstream as issue #56.
 - **Review round** (Oct 19, 2026; four reviewers on 2717b5c: physics against CLASS, tests,
   docs, silent failures; no defect in `clax/thermodynamics.py`). Changes:
   - **Hydrogen hand-over was effectively untested.** The 1e-3 windows skipped z 1550-1590 (inside
