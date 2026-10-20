@@ -760,8 +760,15 @@ _build_jl_table = build_jl_table
 # The sparse-l grid is extended this far beyond the requested l_max so that
 # the cubic spline's end condition sits outside the returned range. Without
 # the pad the last ~50 multipoles are off by up to 2% (1.87% at l=983 for
-# l_max=1000; precision sweep follow-up, Oct 12, 2026); with it the spline
-# error is below 0.01% everywhere. Costs two extra l rows.
+# l_max=1000; precision sweep follow-up, Oct 12, 2026). Measured by splining
+# CLASS's own spectra on the sparse grid: the end-condition residual over the
+# last 50 multipoles is 1.94% TT / 1.80% EE at l_max=1000 and 0.26% / 2.7%
+# at 1500 unpadded, 0.03% TT at both l_max and 0.09% EE at 1500 with the
+# pad; larger pads gain nothing. The whole-range spline error is a separate
+# matter, set by the grid's 500 -> 550 step: EE 1.13% at l=526, TT 0.16% at
+# l=527, EE 0.43% at l=832, TT ~0.10% over l=680-1580; <= 0.03% TT and
+# <= 0.11% EE below l=500 (CHANGELOG, Oct 12, 2026, follow-ups). Costs two
+# extra l rows.
 L_SPLINE_PAD = 100
 
 

@@ -8,6 +8,10 @@ n_k_fine 20000). Measured against the CLASS massless-RECFAST reference (sweep co
 Oct 12, 2026) the new preset reads TT within 0.09% (l < 30), 0.22% (l <= 500),
 0.25% (l <= 1000); EE within 0.60% (l = 2-4), 0.48% (l = 5-500), 0.98% at a
 single l near 526 (rms 0.28% over 500-1000); TE/sqrt(TT EE) within 0.37%.
+The l ~ 526 EE excursion is the sparse l grid of the C_l stage, not the
+preset: `sparse_l_grid` steps by 20 to l = 500 and by 50 from 550, and
+splining CLASS's own spectra on the padded grid gives EE 1.13% at l = 526 and
+TT 0.16% at l = 527 from the grid alone (CHANGELOG, Oct 12, 2026, follow-ups).
 With the default 0.06 eV neutrino against the CLASS default (HyRec) fiducial
 reference: TT 0.20 / 0.23 / 0.26%, EE 0.52 / 0.49 / 0.75%, TE 0.36%. These tests pin those numbers with margin and
 guard the two failure classes the sweep found: a biased Bessel table (-1% at
@@ -17,7 +21,9 @@ ISW (rodas5: -4% to -46% at l = 2).
 Multi-cosmology rule: the fiducial massless-RECFAST comparison is the tight
 gate; the LCDM grid (massive 0.06 eV neutrino, CLASS default HyRec
 recombination) runs with looser bars that include the RECFAST-vs-HyRec and
-ncdm-fluid systematics. All tests are GPU-scale and marked slow.
+ncdm-fluid systematics. fit_cl has the same grid test (added Oct 20, 2026;
+its bars are provisional until the grid measurement is recorded). All tests
+are GPU-scale and marked slow.
 """
 import dataclasses
 import os
@@ -35,10 +41,12 @@ REFERENCE_DIR = os.path.join(os.path.dirname(__file__), "..", "reference_data")
 
 
 def _cls(params, prec, l_max=None):
-    """C_l from the preset. Always computed to the preset's hr_l_max: the
-    sparse-l cubic spline's end condition contaminates the last ~50 l below
-    whatever l_max is passed (2% at l~1000 when l_max=1000), so the bands
-    are judged well inside the computed range."""
+    """C_l from the preset, computed to the preset's hr_l_max unless an l_max
+    is passed: the preset is validated as shipped (its own l range, table rows
+    and n_k_fine), with the bands read well inside that range. The sparse-l
+    spline's end condition, which once put ~2% into the last ~50 multipoles
+    below the requested l_max, is padded out of the returned range by
+    harmonic.L_SPLINE_PAD."""
     l_max = prec.hr_l_max if l_max is None else l_max
     bg = background_solve(params, prec)
     th = thermodynamics_solve(params, prec, bg)
@@ -91,6 +99,8 @@ class TestPlanckClPreset:
         }
         _report("planck_cl vs CLASS massless RECFAST", got)
         # measured 0.091 / 0.220 / 0.254 / 0.60 / 0.48 / 0.98 / 0.37 percent (P1); bars ~1.5x
+        # (job 24668, before #53: 0.086 / 0.233 / 0.262 / 0.60 / 0.46 / 0.98 / 0.33;
+        # the 0.98 is the l ~ 526 sparse-l-grid point, see the module docstring)
         assert got["TT 2-30"] < 0.0015
         assert got["TT 2-500"] < 0.0035
         assert got["TT 2-1000"] < 0.004
@@ -115,7 +125,10 @@ class TestPlanckClPreset:
             "TEn 2-1000": _te_norm_max(cls, ref, 2, 1000),
         }
         _report(f"planck_cl vs CLASS ({name}, massive, HyRec)", got)
-        # fiducial measured 0.26 / 0.75 / 0.36 percent (P1m); other grid points unmeasured
+        # fiducial measured 0.26 / 0.75 / 0.36 percent (P1m). Over the five grid
+        # points (jobs 24639 / 24668, before #53): TT <= 0.43% (omega_b_high),
+        # EE <= 1.03% (h_high), TE <= 0.44% (omega_b_high, omega_cdm_low); the
+        # bars 0.8 / 1.5 / 0.8% are 1.9x / 1.45x / 1.8x those maxima.
         assert got["TT 2-1000"] < 0.008
         assert got["EE 5-1000"] < 0.015
         assert got["TEn 2-1000"] < 0.008

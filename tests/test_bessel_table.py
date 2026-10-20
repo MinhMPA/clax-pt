@@ -75,7 +75,12 @@ def test_sparse_l_spline_pad_removes_end_error():
     """The dense C_l come from a cubic spline over the sparse l grid; its end
     condition corrupts the last interval unless the sparse grid extends past
     the requested l_max. Synthetic damped-acoustic C_l: unpadded error at
-    l_max-60..l_max is ~1-2%, padded < 0.01%."""
+    l_max-60..l_max is ~1-2%, padded ~1e-3 (bar 2e-3: this model's own
+    interior spline error, 6 nodes per acoustic period). On CLASS's spectra
+    the padded end-condition residual over the last 50 multipoles is 0.03% TT
+    (l_max 1000 and 1500) and 0.09% EE (l_max 1500); unpadded 1.94% TT /
+    1.80% EE at l_max 1000 and 0.26% / 2.7% at 1500. Pad 100 is adequate and
+    larger pads gain nothing."""
     import jax.numpy as jnp
     from clax.interpolation import CubicSpline
 

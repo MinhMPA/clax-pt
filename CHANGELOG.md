@@ -1,6 +1,6 @@
 # clax Development Progress
 
-## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
+## Status: Retuned presets (fit_cl ~17-19 s, planck_cl ~124 s end to end on a V100, job 24668) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
@@ -12,7 +12,11 @@ power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 
 Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`;
 its apparatus, `diags/diag_precision_sweep.py` and the sweep sbatch, stays on
-branch `exp/precision-sweep`). Branch `fix/preset-retune`.
+branch `exp/precision-sweep`). Branch `fix/preset-retune`. The "~45x" in the
+title is the perturbation-stage ratio of the sweep's Kvaerno5 candidate
+(4606 s -> 100 s on a V100, massless); the shipped rodas5 preset is ~150x on
+that stage (~30 s massless) and ~38x end to end (`benchmark_speed.py` cached,
+4679 s -> 124 s, job 24668, before #53).
 
 - `PrecisionParams.planck_cl()`: l_max 17/17/17, rtol 1e-4, atol 1e-6,
   max_steps 8192, hr_n_k_fine 20000 (was l_max 50, 1e-6, 1e-11, 131072,
@@ -47,8 +51,9 @@ branch `exp/precision-sweep`). Branch `fix/preset-retune`.
 - Candidate measured before validation (sweep configs P1/P1m, V100 cached):
   perturbations 105 s massless / 189 s massive, harmonic 13 s; vs CLASS
   massless RECFAST TT 0.09 / 0.22 / 0.25% (l<30 / <=500 / <=1000), EE 0.60 /
-  0.48 / 0.98% (l=2-4 / 5-500 / 5-1000, the last a single l near 526, rms
-  0.28%), TE/sqrt(TT EE) 0.37%; vs CLASS fiducial (massive, HyRec) TT 0.20 /
+  0.48 / 0.98% (l=2-4 / 5-500 / 5-1000, the last a single l near 526 that
+  is the sparse l grid of the C_l stage, not the preset -- see follow-ups;
+  rms 0.28%), TE/sqrt(TT EE) 0.37%; vs CLASS fiducial (massive, HyRec) TT 0.20 /
   0.23 / 0.26%, EE 0.52 / 0.49 / 0.75%. th_n_points 20000 vs 100000: <=0.02%
   to l=500, <=0.05% to l=1000, ~0.13% above; 13 s vs 59 s (planck_cl keeps
   100000; planck_fast uses 20000).
@@ -83,12 +88,38 @@ branch `exp/precision-sweep`). Branch `fix/preset-retune`.
   atol 1e-6 for fit_cl.
 - Final validation of the stack (job 24668 at 9cb9bc1, igpu V100): all 11
   accuracy tests pass (planck_cl vs CLASS massless RECFAST TT 0.086 / 0.233
-  / 0.262%, EE 0.60 / 0.46 / 0.98%, TE 0.33%; LCDM grid TT <= 0.43%, EE <=
+  / 0.262%, EE 0.60 / 0.46 / 0.98% (the l ~ 526 sparse-l-grid point, see
+  follow-ups), TE 0.33%; LCDM grid TT <= 0.43%, EE <=
   1.03%, TE <= 0.42% at l<=1000; fit_cl TT 0.46% at l<=30, 0.69% at l<=500,
   EE 1.25%). `benchmark_speed.py` cached: planck_cl thermodynamics 63.1 s,
   perturbations 47.2 s (with the 5 neutrino q-bins at m=0), harmonic 13.4 s,
   total 124 s (4679 s before the retune, 38x); fit_cl 2.1 / 8.4 / 7.6 s,
   total 18.6 s. Fast suite: 333 passed, 79 skipped, 1 deselected, 0 failed.
+  Note on that suite: the `--fast` variants of the matched-species
+  perturbation comparisons in `tests/test_perturbations.py`
+  (`_matched_species_results` and
+  `test_ncdm_observable_projection_matches_integrated_moments`) run on
+  `planck_fast()`, whose hierarchy (17/17/17, was 50) and tolerances
+  (rtol 1e-4 / atol 1e-6, were 1e-6 / 1e-11) this entry loosened; they
+  pass, but the comparison against the CLASS perturbation references is
+  looser than its authors intended.
+
+**Follow-ups.** The sparse l grid's 500 -> 550 step is the next C_l-stage
+item. `sparse_l_grid` (clax/bessel.py) steps by 20 to l = 500 and by 50 from
+550, and the cubic spline across that first wide interval is the worst place
+on the grid. Splining CLASS's own massless-RECFAST spectra on the padded
+sparse grid and comparing with CLASS's dense output gives, from the l grid
+alone: EE 1.13% at l = 526, TT 0.16% at l = 527; EE 0.43% at l = 832, 0.32%
+at 1425, 0.30% at 1776; TT about 0.10% over l = 680-1580; TE/sqrt(TT EE)
+0.22% at l = 570; below l = 500 the grid contributes <= 0.03% TT and <= 0.11%
+EE. The 0.98% EE excursion of the validation runs is this grid point, not the
+preset. Not refined in this PR: a physics-facing change that would reopen
+every bar. The same measurement bounds the spline end condition that
+`L_SPLINE_PAD = 100` removes: over the last 50 multipoles the residual is
+1.94% TT / 1.80% EE at l_max = 1000 and 0.26% / 2.7% at 1500 unpadded, 0.03%
+TT at both and 0.09% EE at 1500 with the pad; larger pads gain nothing (the
+synthetic test in `tests/test_bessel_table.py` measures ~1e-3 padded against
+its 2e-3 bar, which is that model's own interior spline error).
 
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 

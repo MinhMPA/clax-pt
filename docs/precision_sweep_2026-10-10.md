@@ -1,5 +1,33 @@
 # planck_cl precision sweep toward ABCMB-like ODE settings (Oct 10-11, 2026)
 
+**What the follow-up PRs did with these findings (Oct 20, 2026):** this file
+is the sweep's write-up as it stood on `exp/precision-sweep`; the findings
+below are left as written, and the outcomes are:
+
+- Finding 5 (Rodas5 dense output): fixed by `fix/rodas5-dense-output` (#49,
+  cubic Hermite dense output). `fit_cl` was not moved off rodas5; it, like
+  `planck_cl` and `planck_fast`, ships on rodas5 at rtol 1e-4 / atol 1e-6
+  (`fix/preset-retune`, #50), where rodas5 matches Kvaerno5 to 0.08% at l=2
+  and <= 0.03% elsewhere. The sentence "Until then fit_cl (rodas5, rtol
+  1e-3, atol 1e-4) is wrong at l<30" no longer applies.
+- Finding 6 (Bessel table): the `x_per_unit` knob's default is now
+  `JL_TABLE_X_PER_UNIT = 30` in `clax/harmonic.py` ("default 3 unchanged"
+  below describes the sweep branch), and `L_SPLINE_PAD = 100` pads the
+  sparse-l spline past the requested l_max (#50).
+- Implications: #50 chose rodas5 rather than the Kvaerno5 recommended here
+  for `planck_cl` (l_max 17/17/17, rtol 1e-4, atol 1e-6, max_steps 8192,
+  hr_n_k_fine 20000) and kept th_n_points 100000 for `planck_cl` (20000 in
+  `planck_fast`): the 20000-vs-100000 C_l difference measured <= 0.05% to
+  l=1000, ~0.13% above. Shipped preset vs CLASS massless RECFAST (job
+  24668, before #53): TT 0.086 / 0.233 / 0.262% (l<=30 / 500 / 1000), EE
+  0.60 / 0.46 / 0.98% (2-4 / 5-500 / 5-1000, the last a sparse-l-grid point
+  at l~526); V100 cached 124 s end to end.
+- `pt_ode_dtmax` stays on `exp/precision-sweep`; it is not on the branch
+  that carries this document.
+- The residual above l~1000 that findings 6 and 8 leave open was traced to
+  the radiation-streaming trigger (`docs/highl_residual_2026-10-12.md` on
+  `exp/highl-investigation`, fixed in the PR stacked on #50).
+
 Status: COMPLETE (Oct 11, 07:50 JST); all runs done, including the fast-path
 Bessel-table fix validation (G6x30k20 / H6x30k20). Script `diags/diag_precision_sweep.py`, wrapper
 `slurm/precision-sweep-v100.sbatch`, branch `exp/precision-sweep` (from main

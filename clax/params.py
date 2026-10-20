@@ -234,8 +234,18 @@ class PrecisionParams:
             pt_l_max_g=50,           # reduce truncation artifacts
             pt_l_max_pol_g=50,
             pt_l_max_ur=50,
-            pt_ode_rtol=1e-4,        # Oct 2026: converged rung (see planck_cl)
+            # Oct 2026: tolerance rung carried over from the planck_cl sweep
+            # (docs/precision_sweep_2026-10-10.md), not measured on this
+            # preset's 20 k/decade, k_max 0.3 grid. At l_max 50, 60 k/decade,
+            # k_max 1.0 (config E6, Kvaerno5) rtol 1e-4 / atol 1e-6 differs
+            # from 1e-6 / 1e-11 by 0.094% at l=2 and 0.003% at l>=30; this
+            # preset's old 1e-5 / 1e-10 and the new rung agree to < 0.01% for
+            # l>=30 at the 12/10/17 hierarchy (sweep configs F vs G6).
+            pt_ode_rtol=1e-4,
             pt_ode_atol=1e-6,
+            # 4096 was sufficient with Kvaerno5 at rtol 1e-4 / atol 1e-8
+            # (sweep config G4, hierarchy 12/10/17); 8192 carried over from
+            # planck_cl, not measured on this grid (Kvaerno5 here by default).
             ode_max_steps=8192,
         )
 
@@ -255,29 +265,52 @@ class PrecisionParams:
             pt_l_max_g=50,           # converged hierarchy
             pt_l_max_pol_g=50,
             pt_l_max_ur=50,
-            pt_ode_rtol=1e-4,        # Oct 2026: converged rung (1e-6 / 1e-11 identical to 0.005%)
+            # Oct 2026: tolerance rung carried over from the planck_cl sweep
+            # (docs/precision_sweep_2026-10-10.md), not measured on this
+            # preset's 200 k/decade, k_max 0.35 grid. At l_max 50, 60 k/decade,
+            # k_max 1.0 (config E6, Kvaerno5) rtol 1e-4 / atol 1e-6 differs
+            # from the old 1e-6 / 1e-11 by 0.094% at l=2 and 0.003% at l>=30
+            # (config E, rtol 1e-4 / atol 1e-8, is the one identical to 0.005%).
+            pt_ode_rtol=1e-4,
             pt_ode_atol=1e-6,
+            # 4096 was sufficient with Kvaerno5 at rtol 1e-4 / atol 1e-8
+            # (sweep config G4, hierarchy 12/10/17); 8192 carried over from
+            # planck_cl, not measured on this grid (Kvaerno5 here by default).
             ode_max_steps=8192,
         )
 
     @staticmethod
     def planck_cl():
-        """Science preset: TT within 0.26% and EE within 0.31% of CLASS up to
-        l=1000 (massless-RECFAST reference), ~100 s of perturbations plus
-        ~12 s of harmonic on a V100 with compute_cls_all_fast.
+        """Science preset, measured as shipped (rodas5; job 24668, before #53;
+        V100, compute_cls_all_fast at n_k_fine 20000) against CLASS with a
+        massless neutrino and RECFAST: TT within 0.086% (l <= 30), 0.233%
+        (l <= 500), 0.262% (l <= 1000); EE within 0.60% (l = 2-4), 0.46%
+        (l = 5-500), 0.98% (l = 5-1000); TE/sqrt(TT EE) within 0.37% (0.33%
+        in job 24668, 0.37% in job 24639). The 0.98% EE number to l = 1000 is
+        a single multipole at l ~ 526 and is bounded by the sparse-l-grid
+        interpolation of the C_l stage, not by this preset: sparse_l_grid
+        steps by 20 to l = 500 and by 50 from 550, and splining CLASS's own
+        spectra on that grid gives EE 1.13% at l = 526 and TT 0.16% at l = 527
+        from the grid alone (CHANGELOG, Oct 12, 2026, follow-ups). Stages on
+        a V100, cached: thermodynamics ~63 s, perturbations ~30 s massless
+        (~47 s with the preset's 5 neutrino q-bins, which
+        scripts/benchmark_speed.py keeps at m_ncdm = 0), harmonic ~13 s;
+        ~124 s end to end.
 
         Retuned Oct 2026 (docs/precision_sweep_2026-10-10.md). The previous
-        values (l_max 50, rtol 1e-6, atol 1e-11, max_steps 131072) cost
-        4606 s per perturbation solve on a V100 and give the same spectra to
-        0.1%: the solve is step-count-bound and the tolerance ladder is
+        values (Kvaerno5, l_max 50, rtol 1e-6, atol 1e-11, max_steps 131072)
+        cost 4606 s per perturbation solve on a V100 and give the same spectra
+        to 0.1%: the solve is step-count-bound and the tolerance ladder is
         converged at rtol 1e-4 / atol 1e-6 for every hierarchy size, so the
         retune costs nothing at l <= 2000. l_max 17 for all species keeps the
         photon-truncation effect in the reionization EE bump below 0.05%
         (12/10/17 gives 0.18%). hr_n_k_fine 20000 together with the fast
         path's 30-point-per-unit-x Bessel table removes the former -1% TT
         offset at l < 50 and the +20% EE error at l=2. Above l ~ 1000 the
-        C_l stage is percent-level (perturbation k sampling); 120 k/decade
-        halves that at ~1.4x the cost. 300 k-modes.
+        C_l stage is percent-level (TT rms 1.7-2% at l = 1000-2000, EE 3-8%,
+        common to the exact-j_l and table paths: perturbation k sampling /
+        source interpolation); 120 k/decade halves that at ~1.4x the cost.
+        300 k-modes.
         th_n_points: 100000 is kept for the science preset; 20000 (as in
         planck_fast) changes C_l by <= 0.02% to l=500, <= 0.05% to l=1000 and
         ~0.13% above, and cuts thermodynamics from ~59 s to ~13 s on a V100.
@@ -287,14 +320,25 @@ class PrecisionParams:
         1.1e-4 of 100000 over z 200-8000 (largest at z = 200), both 2.0e-4 from
         CLASS (the HeIII-era offset near z ~ 5900); the C_l effect of 20000 on
         the staged recombination is unmeasured.
-        Measured V100 stages (cached, kvaerno5): perturbations 105 s
-        (massless), 189 s (one 0.06 eV neutrino, 5 q-bins); harmonic 13 s.
-        With rodas5 (default since Oct 12, 2026) perturbations are ~30 s
-        massless; thermodynamics (~60 s at th_n_points 100000) then dominates.
+        Sweep history (Kvaerno5 candidate, configs P1/P1m, V100 cached):
+        perturbations 105 s (massless), 189 s (one 0.06 eV neutrino, 5
+        q-bins), harmonic 13 s; TT within 0.26% and EE within 0.31%
+        (l = 30-500) of CLASS massless RECFAST up to l = 1000. rodas5 (default
+        since Oct 12, 2026) matches that candidate to 0.08% at l=2 and
+        <= 0.03% elsewhere at 29.5 s vs 110.6 s of perturbations;
+        thermodynamics (~60 s at th_n_points 100000) then dominates.
+        GPU memory: with n_k_fine 20000 and n_tau 5000 every (n_k, n_tau)
+        working array of the fast C_l path is 1e8 doubles (800 MB) and the
+        stage materialises several of them, so budget of order 10 GB or more;
+        validated only on a 32 GB V100.
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # covers l~2500 with margin
-            pt_k_per_decade=60,      # 0.1% to l~1200, 0.3% to l~2000
+            # 30 / 60 / 120 per decade give identical C_l only to l <= 300
+            # (sweep G6k30 / G6k120); at 60 the C_l stage is at TT rms 1.7-2%
+            # over l = 1000-2000; 120 halves the l > 1000 error at ~1.4x the
+            # perturbation cost.
+            pt_k_per_decade=60,
             pt_tau_n_points=5000,    # 10000 and 20000 identical; 2000 costs 0.6% low-l EE
             th_n_points=100000,      # 20000: <=0.05% to l=1000, 46 s cheaper; not re-tuned for #48
             pt_l_max_g=17,
@@ -302,7 +346,10 @@ class PrecisionParams:
             pt_l_max_ur=17,
             pt_ode_rtol=1e-4,
             pt_ode_atol=1e-6,
-            ode_max_steps=8192,      # 4096 verified sufficient at rtol 1e-4 / atol 1e-8
+            # 4096 was sufficient with Kvaerno5 at rtol 1e-4 / atol 1e-8 (sweep
+            # config G4, hierarchy 12/10/17); rodas5's step count differs, and
+            # the validation of this preset passed at 8192 (job 24668).
+            ode_max_steps=8192,
             hr_n_k_fine=20000,       # 5000 is percent-level above l~500
             # Oct 12, 2026: rodas5 with cubic Hermite dense output (rosenbrock.py)
             # matches kvaerno5 to 0.08% at l=2 and <= 0.03% elsewhere at 3.7x
@@ -312,21 +359,34 @@ class PrecisionParams:
 
     @staticmethod
     def planck_fast():
-        """Planck-quality accuracy with speed optimizations.
+        """planck_cl's perturbation and C_l-stage settings with a cheaper
+        thermodynamics grid and a shorter l range.
 
-        Same perturbation resolution as planck_cl (60 k/decade, l_max=50,
-        tight ODE tolerances) but with:
-        - Table-based Bessel (hr_n_k_fine=5000, hr_l_max=1500): harmonic ~33s → ~5s
-        - th_n_points=20000 (vs 100000): thermo ~53s → ~5s
-        - ode_max_steps=65536 (vs 131072): less vmap padding
+        Same perturbation stage as planck_cl (k_max 1.0, 60 k/decade, 5000
+        tau points, l_max 17/17/17, rtol 1e-4 / atol 1e-6, max_steps 8192,
+        rodas5 with the cubic Hermite dense output) and the same fast-path
+        C_l settings (hr_n_k_fine 20000, 30-point-per-unit-x Bessel table),
+        with two changes:
+        - th_n_points 20000 (planck_cl: 100000): thermodynamics ~13 s instead
+          of ~59-63 s on a V100; C_l differ by <= 0.02% to l=500, <= 0.05%
+          to l=1000 and ~0.13% above (precision-sweep candidate runs, Oct 12,
+          2026, before #53; not re-tuned for the Saha -> ODE recombination
+          staging, see planck_cl).
+        - hr_l_max 1500 (planck_cl: 2500): the table C_l stage scales as
+          n_l x n_k_fine x n_tau, so the shorter l range roughly halves the
+          harmonic work. planck_cl's stage is ~13 s at l_max 2500 with
+          n_k_fine 20000 on a V100; planck_fast's is not separately
+          benchmarked (scripts/benchmark_speed.py has no planck_fast entry).
 
-        l_max capped at 1500 (not 2500) because the table-based approach
-        scales as O(l_max × n_k_fine × n_tau) per scan step. At l_max=2500
-        with 10000 fine k and 5000 tau, harmonic alone takes >1hr on V100.
-        l_max=1500 covers the science-relevant range and keeps harmonic <10s.
-
-        Accuracy matches planck_cl (<0.2% TT/EE) up to l~1200 since the
-        perturbation grid is identical. Table Bessel adds ~0.5pp at most.
+        Accuracy to l=1000 is planck_cl's up to the th_n_points differences
+        above; this preset is not separately validated against CLASS
+        (tests/test_preset_accuracy.py covers planck_cl and fit_cl). It is
+        the --fast preset of the matched-species perturbation comparisons in
+        tests/test_perturbations.py.
+        GPU memory: with n_k_fine 20000 and n_tau 5000 every (n_k, n_tau)
+        working array of the fast C_l path is 1e8 doubles (800 MB) and the
+        stage materialises several of them, so budget of order 10 GB or more;
+        validated only on a 32 GB V100.
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # same as planck_cl
@@ -340,7 +400,7 @@ class PrecisionParams:
             pt_ode_atol=1e-6,        # same as planck_cl
             ode_max_steps=8192,      # same as planck_cl
             hr_n_k_fine=20000,       # same as planck_cl
-            hr_l_max=1500,           # capped for table scalability
+            hr_l_max=1500,           # halves the n_l x n_k_fine x n_tau table work vs 2500
             pt_ode_solver="rodas5",  # same as planck_cl (Oct 12, 2026)
         )
 
@@ -348,23 +408,34 @@ class PrecisionParams:
     def fit_cl():
         """Fast preset for fitting / HMC, targeting <2% C_l accuracy at l<600.
 
-        Aggressively reduces resolution everywhere for speed:
-        - 20 k/decade (vs 60 planck_cl) → ~100 k-modes (vs 300)
-        - l_max=25 hierarchy (vs 50) → smaller state vector
-        - 2000 tau points (vs 5000)
-        - 5000 thermo points (vs 100000)
-        - ode_max_steps=32768 (vs 131072) → less padding in vmap
-        - rtol=1e-4 / atol=1e-6 (Oct 2026): the converged rung of the
-          tolerance ladder; 1e-3 / 1e-4 was never validated at low l
-        - Fast all-l table Bessel (hr_n_k_fine=5000): precomputed j_l(x)
-          and j_l'(x) tables with T0+T1+T2 transfer contributions. Avoids
-          83 separate JIT compilations. ~2.5s harmonic on V100.
+        Reduces resolution everywhere for speed (planck_cl values in
+        parentheses):
+        - 20 k/decade (60) -> ~100 k-modes (300)
+        - l_max 17/17/17 hierarchy (17; the same since the Oct 2026 retune,
+          which moved planck_cl from 50 and fit_cl from 25)
+        - 2000 tau points (5000)
+        - 3000 thermodynamics points (100000)
+        - ncdm_q_size 0: no massive-neutrino hierarchy, the 0.06 eV species
+          is followed as massless (~3x faster perturbations)
+        - ode_max_steps 8192 (8192; was 1024)
+        - rtol 1e-4 / atol 1e-6 (the same; Oct 2026): the converged rung of
+          the tolerance ladder. The old 1e-3 / 1e-4 was never validated at
+          low l and leaves 1.8% TT at l=2 even with the Hermite dense output.
+        - fast all-l table Bessel (hr_n_k_fine 5000, hr_l_max 1500; planck_cl
+          20000, 2500): precomputed j_l(x) and j_l'(x) tables with the
+          T0+T1+T2 transfer contributions, one JIT instead of one per sparse
+          l (83 of them at l_max 1500)
 
-        V100 timing (cached, Oct 12, 2026): BG 0.7 s, TH 2.4 s, PT 9.8 s,
-        HR 3.8 s, about 17 s end to end with rodas5 at rtol 1e-4 / atol 1e-6
-        (kvaerno5: 61 s). Accuracy vs CLASS (massless RECFAST): TT 0.46% at
-        l<=30, 0.69% at l<=500; EE 1.25% at l=5-500 (perturbation k-grid
-        limited above l~500).
+        V100 timings, cached, rodas5 at rtol 1e-4 / atol 1e-6, from two
+        scripts that time the harmonic stage differently (quote the script
+        with the number): diags/diag_preset_solver_choice.py (job 24652,
+        config E; C_l to l_max 1500 with n_k_fine 5000): BG 0.7 s, TH 2.4 s,
+        PT 9.8 s, HR 3.8 s, 16.8 s end to end (kvaerno5: 61.0 s);
+        scripts/benchmark_speed.py (job 24668, hr_l_max 1500, n_k_fine 5000):
+        BG 0.6 s, TH 2.1 s, PT 8.4 s, HR 7.6 s, 18.6 s end to end (job 24621:
+        HR 7.2 s). Accuracy vs CLASS (massless RECFAST; job 24668, before
+        #53): TT 0.46% at l<=30, 0.69% at l<=500; EE 1.25% at l=5-500. The
+        perturbation k-grid limits l > 500 (TT -6.4% at l=1000).
         """
         return PrecisionParams(
             pt_k_max_cl=1.0,         # keep full k range for l coverage
@@ -377,7 +448,10 @@ class PrecisionParams:
             ncdm_q_size=0,           # disable ncdm hierarchy (massless approx, ~3x faster)
             pt_ode_rtol=1e-4,        # Oct 2026: converged rung of the tolerance ladder (was 1e-3)
             pt_ode_atol=1e-6,        # (was 1e-4)
-            ode_max_steps=8192,      # (was 1024; 4096 verified sufficient at 1e-4 / 1e-8)
+            # was 1024; 4096 was sufficient with Kvaerno5 at rtol 1e-4 / atol
+            # 1e-8 (sweep config G4); rodas5's step count differs, and the
+            # validation passed at 8192 (job 24668).
+            ode_max_steps=8192,
             hr_n_k_fine=5000,        # fine k-grid for accurate Bessel integrals
             hr_l_max=1500,           # reduced max multipole
             # rodas5 with cubic Hermite dense output (Oct 12, 2026). With the
