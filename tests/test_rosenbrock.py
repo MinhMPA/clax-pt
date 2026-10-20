@@ -558,49 +558,62 @@ class TestDenseOutput:
     def test_fsal_carry_recomputed_after_jump(self):
         """A vector field that switches sign at t = 5 (``jump_ts=[5.0]``):
         diffrax lands a step on the jump and flags the next step with
-        ``made_jump``, where the carried f(5^-, y) is on the wrong vector
-        field and must be recomputed. Forcing +A -> -A on the relaxing mode,
-        A = lam / 2, so the stale derivative is off by 2A = 1000 on w'.
-        Exact solution: u, v as before; w = w_p + s/lam + (w(t_s) - w_p(t_s)
-        - s/lam) exp(-lam (t - t_s)) with s = +A from t_s = 0 and s = -A from
-        t_s = 5. A solver variant that ignores ``made_jump`` is asserted to
-        fail the same bar, which is what makes the bar meaningful."""
+        ``made_jump``, where the carried f(5, y), evaluated on the old field
+        (the switch is ``t <= 5``), must not be reused. Forcing +A -> -A on
+        the relaxing mode, A = lam / 2, so the stale derivative is off by
+        2A = 1000 on w'. Exact solution: u, v as before; w = w_p + s/lam
+        + (w(t_s) - w_p(t_s) - s/lam) exp(-lam (t - t_s)) with s = +A from
+        t_s = 0 and s = -A from t_s = 5.
+
+        Two checks. End to end: the jump_ts run meets the dense-output bar.
+        At the solver level, where the outcome does not depend on how the
+        step controller reacts to a wrong derivative: ``Rodas5.step`` with a
+        deliberately wrong carried vector returns the fresh-evaluation result
+        when ``made_jump`` is set, and a different one when it is not.
+        """
         f0, exact0, y_init = _stiff_oscillator()
         omega, lam, A, t_jump = 2.0 * jnp.pi, 1000.0, 500.0, 5.0
 
         def f(t, y, p):
-            s = jnp.where(t < t_jump, A, -A)
+            s = jnp.where(t <= t_jump, A, -A)
             return f0(t, y, p) + jnp.array([0.0, 0.0, s])
 
         def exact(ts, w0):
             base = exact0(ts, omega, lam, w0)            # u, v exact; w with s = 0
-            wp = base[:, 2] - (w0 - lam * lam / (lam**2 + omega**2)) * jnp.exp(-lam * ts)
             wp0 = lam * lam / (lam**2 + omega**2)
+            wp = base[:, 2] - (w0 - wp0) * jnp.exp(-lam * ts)
             w_before = wp + A / lam + (w0 - wp0 - A / lam) * jnp.exp(-lam * ts)
             wp5 = lam * (lam * jnp.cos(omega * t_jump) + omega * jnp.sin(omega * t_jump)) / (lam**2 + omega**2)
             w5 = wp5 + A / lam + (w0 - wp0 - A / lam) * jnp.exp(-lam * t_jump)
             w_after = wp - A / lam + (w5 - wp5 + A / lam) * jnp.exp(-lam * (ts - t_jump))
-            w = jnp.where(ts < t_jump, w_before, w_after)
+            w = jnp.where(ts <= t_jump, w_before, w_after)
             return base.at[:, 2].set(w)
-
-        class Rodas5IgnoreJump(Rodas5):
-            def step(self, terms, t0, t1, y0, args, solver_state, made_jump):
-                return Rodas5.step(self, terms, t0, t1, y0, args, solver_state,
-                                   jnp.array(False))
 
         p = jnp.array([omega, lam])
         y0 = y_init(omega, lam)
         ts = jnp.linspace(0.0, self.T1, self.N_TS)
-        ex = exact(ts, y0[2])
         sol = self._solve_osc(Rodas5(), f, y0, p, ts, jump_ts=jnp.array([t_jump]))
-        err = float(jnp.max(jnp.abs(sol.ys - ex)))
-        stale = self._solve_osc(Rodas5IgnoreJump(), f, y0, p, ts, jump_ts=jnp.array([t_jump]))
-        err_stale = float(jnp.max(jnp.abs(stale.ys - ex)))
-        print(f"jump test: max abs err {err:.3e} (carry recomputed), "
-              f"{err_stale:.3e} (made_jump ignored), {int(sol.stats['num_steps'])} steps")
-        assert err < 5e-3, f"Rodas5 after a jump: max abs err {err:.3e}"
-        assert err_stale > 5e-3, (
-            f"a stale carry after the jump should fail this bar: {err_stale:.3e}")
+        err = float(jnp.max(jnp.abs(sol.ys - exact(ts, y0[2]))))
+        print(f"jump test: max abs err {err:.3e}, {int(sol.stats['num_steps'])} steps")
+        assert err < 5e-3, f"Rodas5 across a jump_ts discontinuity: max abs err {err:.3e}"
+
+        # Solver-level check of the predicate, one step starting just after the jump.
+        solver, term = Rodas5(), diffrax.ODETerm(f)
+        t0 = float(jnp.nextafter(jnp.float64(t_jump), jnp.float64(jnp.inf)))
+        t1 = t0 + 0.01
+        y_s = exact(jnp.array([t0]), y0[2])[0]
+        fresh_state = solver.init(term, t0, t1, y_s, p)        # first_step=True: evaluates f(t0, y0)
+        y_fresh = solver.step(term, t0, t1, y_s, p, fresh_state, jnp.array(False))[0]
+        f_wrong = term.vf(t0, y_s, p) + jnp.array([0.0, 0.0, 2.0 * A])   # the old field's value
+        y_jump = solver.step(term, t0, t1, y_s, p, (jnp.array(False), f_wrong), jnp.array(True))[0]
+        y_stale = solver.step(term, t0, t1, y_s, p, (jnp.array(False), f_wrong), jnp.array(False))[0]
+        assert bool(jnp.array_equal(y_jump, y_fresh)), (
+            f"made_jump=True must discard the carried vector: max |diff| "
+            f"{float(jnp.max(jnp.abs(y_jump - y_fresh))):.3e}")
+        d_stale = float(jnp.max(jnp.abs(y_stale - y_fresh)))
+        assert d_stale > 1e-6, (
+            f"made_jump=False must use the carried vector (otherwise the carry is dead code): "
+            f"max |diff| {d_stale:.3e}")
 
     def test_fsal_carry_under_vmap_partial_rejection(self):
         """jax.vmap of the single-mode solve over (omega, lam) pairs whose steps
