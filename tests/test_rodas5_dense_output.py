@@ -44,11 +44,15 @@ PREC_OVERRIDES = dict(
     ncdm_q_size=0, pt_l_max_g=12, pt_l_max_pol_g=10, pt_l_max_ur=17,
     pt_ode_rtol=1e-4, pt_ode_atol=1e-6, ode_max_steps=32768,
 )
+# Measured on the five LCDM grid points after the #53 recombination rewrite
+# (job 26998, Oct 20, 2026): TT l=2 0.069-0.088% (the l=2 band maximum), TT
+# 31-500 0.002-0.003% (at l=41-44), EE 0.030-0.033% (l=14-16). Bars: 2.3x,
+# 7x and 9x those maxima; the linear dense output read 54%, 0.77% and 0.88%.
 # (name, l_lo, l_hi, bar): |rodas5/kvaerno5 - 1| per band; TE is normalised
 # by sqrt(TT*EE) of the reference (zero crossings make a plain ratio useless).
 BARS = [
     ("tt", 2, 30, 0.002),
-    ("tt", 31, L_MAX, 0.001),
+    ("tt", 31, L_MAX, 0.0002),
     ("ee", 2, L_MAX, 0.003),
     ("ten", 2, L_MAX, 0.003),
 ]

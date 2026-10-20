@@ -60,7 +60,10 @@ the old solver):
   unlensed TT <= 0.2% (l=2-30) / 0.1% (31-500), EE and TE/sqrt(TT EE)
   <= 0.3%: 5 passed in 32 min on a V100 at both the Hermite and the FSAL
   commit (TT at l=2 within 0.072-0.086% across the grid, l=31-500
-  <= 0.003%, EE <= 0.047%, TEn <= 0.056%).
+  <= 0.003%, EE <= 0.047%, TEn <= 0.056%). Re-run after the rebase onto
+  main 7d23008 (#53 recombination rewrite; job 26998, Oct 20, 2026): 5 passed,
+  TT at l=2 0.069-0.088%, l=31-500 <= 0.003%, EE <= 0.033%; the 31-500 bar is
+  now 0.02% (was 0.1%).
 - Fast suite (`pytest tests/ --fast -q`, V100, the known pre-existing
   `test_pk_rosenbrock_vs_kvaerno5` deselected): 328 passed, 72 skipped,
   1 deselected in 1:01:10 at the Hermite commit and 328 passed, 72 skipped,
