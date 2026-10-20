@@ -99,7 +99,8 @@ class TestPlanckClPreset:
         }
         _report("planck_cl vs CLASS massless RECFAST", got)
         # measured 0.091 / 0.220 / 0.254 / 0.60 / 0.48 / 0.98 / 0.37 percent (P1); bars ~1.5x
-        # (job 24668, before #53: 0.086 / 0.233 / 0.262 / 0.60 / 0.46 / 0.98 / 0.33;
+        # (job 27000, after #53: 0.086 / 0.238 / 0.271 / 0.596 / 0.455 / 0.981 / 0.327;
+        # job 24668, before #53: 0.086 / 0.233 / 0.262 / 0.60 / 0.46 / 0.98 / 0.33;
         # the 0.98 is the l ~ 526 sparse-l-grid point, see the module docstring)
         assert got["TT 2-30"] < 0.0015
         assert got["TT 2-500"] < 0.0035
@@ -126,7 +127,9 @@ class TestPlanckClPreset:
         }
         _report(f"planck_cl vs CLASS ({name}, massive, HyRec)", got)
         # fiducial measured 0.26 / 0.75 / 0.36 percent (P1m). Over the five grid
-        # points (jobs 24639 / 24668, before #53): TT <= 0.43% (omega_b_high),
+        # points after #53 (job 27000): TT 0.228-0.424%, EE 0.755-1.038%, TEn
+        # 0.297-0.417% (bars 1.9x / 1.45x / 1.9x); before #53
+        # (jobs 24639 / 24668): TT <= 0.43% (omega_b_high),
         # EE <= 1.03% (h_high), TE <= 0.44% (omega_b_high, omega_cdm_low); the
         # bars 0.8 / 1.5 / 0.8% are 1.9x / 1.45x / 1.8x those maxima.
         assert got["TT 2-1000"] < 0.008
@@ -150,7 +153,8 @@ class TestFitClPreset:
             "EE 5-500": _band_max(cls["ee"], ref["ee"], 5, 500),
         }
         _report("fit_cl vs CLASS massless RECFAST", got)
-        # measured 0.46 / 0.69 / 1.25 percent (job 24668, before #53); bars 3.3x / 2.9x / 1.6x
+        # measured 0.461 / 0.461 / 1.194 percent after #53 (job 27000; 0.46 / 0.69 / 1.25
+        # before, job 24668); bars 3.3x / 4.3x / 1.7x
         assert got["TT 2-30"] < 0.015
         assert got["TT 2-500"] < 0.02
         assert got["EE 5-500"] < 0.02

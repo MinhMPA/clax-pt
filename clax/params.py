@@ -295,7 +295,11 @@ class PrecisionParams:
         a V100, cached: thermodynamics ~63 s, perturbations ~30 s massless
         (~47 s with the preset's 5 neutrino q-bins, which
         scripts/benchmark_speed.py keeps at m_ncdm = 0), harmonic ~13 s;
-        ~124 s end to end.
+        ~124 s end to end. After the #53 recombination rewrite (job 27000,
+        Oct 20, 2026): TT 0.086 / 0.238 / 0.271%, EE 0.596 / 0.455 / 0.981%,
+        TE/sqrt(TT EE) 0.327%, within 0.01 pp of the above; stages
+        thermodynamics 59.6 s, perturbations 27.8 s, harmonic 13.5 s,
+        101.5 s end to end.
 
         Retuned Oct 2026 (docs/precision_sweep_2026-10-10.md). The previous
         values (Kvaerno5, l_max 50, rtol 1e-6, atol 1e-11, max_steps 131072)
@@ -441,7 +445,8 @@ class PrecisionParams:
         scripts/benchmark_speed.py (job 24668, hr_l_max 1500, n_k_fine 5000):
         BG 0.6 s, TH 2.1 s, PT 8.4 s, HR 7.6 s, 18.6 s end to end (job 24621:
         HR 7.2 s). Accuracy vs CLASS (massless RECFAST; job 24668, before
-        #53): TT 0.46% at l<=30, 0.69% at l<=500; EE 1.25% at l=5-500. The
+        #53): TT 0.46% at l<=30, 0.69% at l<=500; EE 1.25% at l=5-500; after
+        #53 (job 27000): 0.46% / 0.46% / 1.19%, 16.9 s end to end. The
         perturbation k-grid limits l > 500 (TT -6.4% at l=1000).
         """
         return PrecisionParams(

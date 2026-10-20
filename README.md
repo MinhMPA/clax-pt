@@ -338,7 +338,7 @@ pk_direct = compute_pk(params, prec_direct, k=0.05)
 | **`planck_fast()`**| 60  | 17    | 1.0    | planck_cl with th_n_points 20000, l_max 1500 |
 | `fast_cl()`   | 15       | 25    | 0.15   | Quick iteration, testing |
 | `medium_cl()` | 20       | 50    | 0.3    | Moderate accuracy        |
-| `planck_cl()` | 60       | 17    | 1.0    | Science-grade (~124 s V100) |
+| `planck_cl()` | 60       | 17    | 1.0    | Science-grade (~100 s V100) |
 | `science_cl()`| 200      | 50    | 0.35   | Sub-percent C_l          |
 
 For science-grade results, use `compute_cl_tt_interp` / `compute_cl_ee_interp` which interpolate source functions to a fine k-grid (10000 points) before computing the transfer integral. This is robust regardless of the perturbation k-density.

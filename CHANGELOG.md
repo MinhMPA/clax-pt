@@ -16,7 +16,7 @@ branch `exp/precision-sweep`). Branch `fix/preset-retune`. The "~45x" in the
 title is the perturbation-stage ratio of the sweep's Kvaerno5 candidate
 (4606 s -> 100 s on a V100, massless); the shipped rodas5 preset is ~150x on
 that stage (~30 s massless) and ~38x end to end (`benchmark_speed.py` cached,
-4679 s -> 124 s, job 24668, before #53).
+4679 s -> 124 s, job 24668, before #53; 101.5 s after #53, job 27000).
 
 - `PrecisionParams.planck_cl()`: l_max 17/17/17, rtol 1e-4, atol 1e-6,
   max_steps 8192, hr_n_k_fine 20000 (was l_max 50, 1e-6, 1e-11, 131072,
@@ -103,6 +103,15 @@ that stage (~30 s massless) and ~38x end to end (`benchmark_speed.py` cached,
   (rtol 1e-4 / atol 1e-6, were 1e-6 / 1e-11) this entry loosened; they
   pass, but the comparison against the CLASS perturbation references is
   looser than its authors intended.
+
+- Re-validated after the rebase onto main 7d23008 (#53 recombination rewrite;
+  job 27000, igpu V100, Oct 20, 2026): 11/11 accuracy tests. planck_cl vs CLASS
+  massless RECFAST TT 0.086 / 0.238 / 0.271% (l <= 30 / 500 / 1000), EE 0.596 /
+  0.455 / 0.981% (2-4 / 5-500 / 5-1000), TEn 0.327%; LCDM grid TT 0.228-0.424%,
+  EE 0.755-1.038%, TEn 0.297-0.417%; fit_cl vs massless RECFAST TT 0.461% (l <=
+  30 and <= 500; was 0.69% to 500), EE 1.194%. Cached V100 stages: planck_cl bg
+  0.6 / th 59.6 / pt 27.8 / hr 13.5 s = 101.5 s (was 124 s: the smoother x_e
+  costs fewer perturbation steps), fit_cl 16.9 s. Fast suite: 462 passed, 989 skipped, 1 deselected, 0 failed in 1:23:27 (job 27000).
 
 **Follow-ups.** The sparse l grid's 500 -> 550 step is the next C_l-stage
 item. `sparse_l_grid` (clax/bessel.py) steps by 20 to l = 500 and by 50 from
