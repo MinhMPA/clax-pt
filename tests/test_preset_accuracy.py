@@ -137,6 +137,33 @@ class TestFitClPreset:
             "EE 5-500": _band_max(cls["ee"], ref["ee"], 5, 500),
         }
         _report("fit_cl vs CLASS massless RECFAST", got)
+        # measured 0.46 / 0.69 / 1.25 percent (job 24668, before #53); bars 3.3x / 2.9x / 1.6x
         assert got["TT 2-30"] < 0.015
         assert got["TT 2-500"] < 0.02
         assert got["EE 5-500"] < 0.02
+
+    def test_lcdm_grid_massive(self, lcdm_cosmology):
+        """fit_cl on the LCDM grid against CLASS's default references (HyRec,
+        one 0.06 eV neutrino that fit_cl's ncdm_q_size=0 follows as massless):
+        the HMC preset is evaluated away from fiducial by construction, so its
+        bars are measured there too. They include the RECFAST-vs-HyRec and
+        ncdm systematics on top of fit_cl's own coarseness."""
+        name, params = lcdm_cosmology
+        ref_dir = os.path.join(REFERENCE_DIR, name)
+        if not os.path.isdir(ref_dir):
+            pytest.skip(f"no CLASS reference for {name}")
+        ref = dict(np.load(os.path.join(ref_dir, "cls.npz")))
+        cls = _cls(params, PrecisionParams.fit_cl())
+        got = {
+            "TT 2-30": _band_max(cls["tt"], ref["tt"], 2, 30),
+            "TT 2-500": _band_max(cls["tt"], ref["tt"], 2, 500),
+            "EE 5-500": _band_max(cls["ee"], ref["ee"], 5, 500),
+            "TEn 2-500": _te_norm_max(cls, ref, 2, 500),
+        }
+        _report(f"fit_cl vs CLASS ({name}, massive, HyRec)", got)
+        # PROVISIONAL bars (3x the fiducial massless numbers) until the grid
+        # measurement on this branch is recorded here.
+        assert got["TT 2-30"] < 0.03
+        assert got["TT 2-500"] < 0.03
+        assert got["EE 5-500"] < 0.04
+        assert got["TEn 2-500"] < 0.03
