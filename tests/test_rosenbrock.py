@@ -410,6 +410,9 @@ class TestDenseOutput:
     atol 1e-6 (precision sweep of Oct 10-11, 2026, finding 5).  The fix is
     diffrax's ``ThirdOrderHermitePolynomialInterpolation`` from (y, dt*f) at
     both step ends, the same dense output Kvaerno5 uses.
+
+    Exempt from the multi-cosmology rule: toy ODEs with closed-form solutions,
+    no cosmology enters.
     """
 
     T1 = 10.0           # ten oscillation periods at omega = 2*pi
@@ -510,3 +513,116 @@ class TestDenseOutput:
             f"Rodas5 AD through dense output: d/domega AD {grad_ad:.6f} vs "
             f"exact {grad_exact:.6f}, rel err {rel_err:.3e}"
         )
+
+    # --- the FSAL-style carry of f(t1, y1) (commit ab668ae): the three ways
+    # the carried derivative could go stale, each pinned by a test.
+
+    def _solve_osc(self, solver, f, y0, p, ts, t1=None, **kw):
+        return diffrax.diffeqsolve(
+            diffrax.ODETerm(f), solver, t0=0.0, t1=self.T1 if t1 is None else t1,
+            dt0=1e-3, y0=y0, args=p,
+            stepsize_controller=diffrax.PIDController(rtol=self.RTOL, atol=self.ATOL, **kw),
+            max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+        )
+
+    def test_fsal_carry_bit_identical_to_recompute(self):
+        """The carried f(t1, y1) is the next step's f(t0, y0) exactly, so a
+        solver that re-evaluates f(t0, y0) on every step takes the same steps
+        (accepted and rejected) and returns the same outputs to the bit. The
+        stiff oscillator at the module tolerances rejects ~40 of ~150 steps,
+        so the rejected-step path (diffrax keeps the previous solver_state
+        with jnp.where(keep_step, ...)) is exercised."""
+        class Rodas5Recompute(Rodas5):
+            def step(self, terms, t0, t1, y0, args, solver_state, made_jump):
+                _, f_carry = solver_state
+                return Rodas5.step(self, terms, t0, t1, y0, args,
+                                   (jnp.array(True), f_carry), made_jump)
+
+        f, exact, y_init = _stiff_oscillator()
+        omega, lam = 2.0 * jnp.pi, 1000.0
+        p = jnp.array([omega, lam])
+        y0 = y_init(omega, lam)
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        a = self._solve_osc(Rodas5(), f, y0, p, ts)
+        b = self._solve_osc(Rodas5Recompute(), f, y0, p, ts)
+        n_rej = int(a.stats["num_rejected_steps"])
+        assert n_rej > 0, "the check needs rejected steps to exercise the carry"
+        assert int(a.stats["num_steps"]) == int(b.stats["num_steps"])
+        assert n_rej == int(b.stats["num_rejected_steps"])
+        max_diff = float(jnp.max(jnp.abs(a.ys - b.ys)))
+        assert bool(jnp.array_equal(a.ys, b.ys)), (
+            f"FSAL carry vs recompute: max |diff| {max_diff:.3e} over "
+            f"{int(a.stats['num_steps'])} steps ({n_rej} rejected)"
+        )
+
+    def test_fsal_carry_recomputed_after_jump(self):
+        """A vector field that switches sign at t = 5 (``jump_ts=[5.0]``):
+        diffrax lands a step on the jump and flags the next step with
+        ``made_jump``, where the carried f(5^-, y) is on the wrong vector
+        field and must be recomputed. Forcing +A -> -A on the relaxing mode,
+        A = lam / 2, so the stale derivative is off by 2A = 1000 on w'.
+        Exact solution: u, v as before; w = w_p + s/lam + (w(t_s) - w_p(t_s)
+        - s/lam) exp(-lam (t - t_s)) with s = +A from t_s = 0 and s = -A from
+        t_s = 5. A solver variant that ignores ``made_jump`` is asserted to
+        fail the same bar, which is what makes the bar meaningful."""
+        f0, exact0, y_init = _stiff_oscillator()
+        omega, lam, A, t_jump = 2.0 * jnp.pi, 1000.0, 500.0, 5.0
+
+        def f(t, y, p):
+            s = jnp.where(t < t_jump, A, -A)
+            return f0(t, y, p) + jnp.array([0.0, 0.0, s])
+
+        def exact(ts, w0):
+            base = exact0(ts, omega, lam, w0)            # u, v exact; w with s = 0
+            wp = base[:, 2] - (w0 - lam * lam / (lam**2 + omega**2)) * jnp.exp(-lam * ts)
+            wp0 = lam * lam / (lam**2 + omega**2)
+            w_before = wp + A / lam + (w0 - wp0 - A / lam) * jnp.exp(-lam * ts)
+            wp5 = lam * (lam * jnp.cos(omega * t_jump) + omega * jnp.sin(omega * t_jump)) / (lam**2 + omega**2)
+            w5 = wp5 + A / lam + (w0 - wp0 - A / lam) * jnp.exp(-lam * t_jump)
+            w_after = wp - A / lam + (w5 - wp5 + A / lam) * jnp.exp(-lam * (ts - t_jump))
+            w = jnp.where(ts < t_jump, w_before, w_after)
+            return base.at[:, 2].set(w)
+
+        class Rodas5IgnoreJump(Rodas5):
+            def step(self, terms, t0, t1, y0, args, solver_state, made_jump):
+                return Rodas5.step(self, terms, t0, t1, y0, args, solver_state,
+                                   jnp.array(False))
+
+        p = jnp.array([omega, lam])
+        y0 = y_init(omega, lam)
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        ex = exact(ts, y0[2])
+        sol = self._solve_osc(Rodas5(), f, y0, p, ts, jump_ts=jnp.array([t_jump]))
+        err = float(jnp.max(jnp.abs(sol.ys - ex)))
+        stale = self._solve_osc(Rodas5IgnoreJump(), f, y0, p, ts, jump_ts=jnp.array([t_jump]))
+        err_stale = float(jnp.max(jnp.abs(stale.ys - ex)))
+        print(f"jump test: max abs err {err:.3e} (carry recomputed), "
+              f"{err_stale:.3e} (made_jump ignored), {int(sol.stats['num_steps'])} steps")
+        assert err < 5e-3, f"Rodas5 after a jump: max abs err {err:.3e}"
+        assert err_stale > 5e-3, (
+            f"a stale carry after the jump should fail this bar: {err_stale:.3e}")
+
+    def test_fsal_carry_under_vmap_partial_rejection(self):
+        """jax.vmap of the single-mode solve over (omega, lam) pairs whose steps
+        are accepted and rejected on different iterations (the predicate
+        ``unvmap_any(first_step | made_jump)`` is shared, the carried vector
+        and ``keep_step`` are per member): every member must reproduce its own
+        unvmapped solve."""
+        f, exact, y_init = _stiff_oscillator()
+        omegas = jnp.array([2.0 * jnp.pi, 3.0 * jnp.pi, 1.0 * jnp.pi])
+        lams = jnp.array([1000.0, 300.0, 3000.0])
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+
+        def solve_one(omega, lam):
+            p = jnp.array([omega, lam])
+            sol = self._solve_osc(Rodas5(), f, y_init(omega, lam), p, ts)
+            return sol.ys, sol.stats["num_steps"]
+
+        ys_v, n_v = jax.vmap(solve_one)(omegas, lams)
+        for i in range(3):
+            ys_i, n_i = solve_one(omegas[i], lams[i])
+            diff = float(jnp.max(jnp.abs(ys_v[i] - ys_i)))
+            assert diff < 1e-9, (
+                f"member {i}: vmapped vs unvmapped Rodas5 differ by {diff:.3e} "
+                f"({int(n_v[i])} vs {int(n_i)} steps)")
+        assert len(set(int(n) for n in n_v)) > 1, "members should take different step counts"

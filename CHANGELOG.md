@@ -25,11 +25,11 @@ max at l=31-500 (l=44), 0.75% at l=2000, 1.09% at l=2500; EE 0.88% (l=13);
 TE/sqrt(TT EE) 48% (l=2). The sweep's "tolerance-driven residual above
 l=1000" (0.36% at rtol 1e-5 / atol 1e-10) was the same defect.
 
-**Fix.** `d34b501`: `interpolation_cls = ThirdOrderHermitePolynomialInterpolation`
+**Fix.** `fcd2eea`: `interpolation_cls = ThirdOrderHermitePolynomialInterpolation`
 (the dense output diffrax's Kvaerno5 uses) with
 `dense_info = dict(y0, y1, k0=dt*f(t0,y0), k1=dt*f(t1,y1))` in both classes;
 f(t1,y1) is one extra RHS evaluation per step (stage 8 is evaluated at
-u8 != y1, so no stage value can be reused). `56b4ff9`: FSAL-style carry of
+u8 != y1, so no stage value can be reused). `ab668ae`: FSAL-style carry of
 f(t1,y1) in `solver_state` as the next step's f(t0,y0), re-evaluated only on
 the first step or after a jump (`eqxi.unvmap_any(first_step | made_jump)` +
 `lax.cond`, as diffrax's Runge-Kutta solvers do; a rejected step keeps the
@@ -73,8 +73,8 @@ Hermite 25.48 s (+11.7%), Hermite + FSAL carry 24.88 s (+9.1%). The carry
 recovers only 0.6 s of the 2.7 s, so the RHS evaluation is not the main cost
 of the dense output (the remainder is the interpolant evaluation and the
 extra loop-carried arrays inside the vmapped step loop); kept because it is
-bit-identical and measurably faster -- revert `56b4ff9` for the simpler
-version if preferred. Single-job timings from different igpu nodes differed
+bit-identical and measurably faster -- revert `ab668ae` (the FSAL-carry
+commit) for the simpler version if preferred. Single-job timings from different igpu nodes differed
 by 20% in the identical thermodynamics stage, which is why the interleaved
 mode exists; the earlier single-job numbers (24.8 / 26.4 / 30.6 s) are
 node noise.
@@ -112,10 +112,17 @@ to the directory named in the sbatch header.
 `docs/adr/0003-recombination-staging.md` (section "C_l": TT 84% -> 94% at
 l = 2-30, unfixed -> fixed recombination) were measured with the linear dense
 output this entry replaces, at fit_cl's then rtol 1e-3 / atol 1e-4, where that
-output alone puts the Rosenbrock path tens of percent off at l < 5 (-46% at
-l = 2 at rtol 1e-4 / atol 1e-6 above); the ADR's two candidate causes do not
+output alone is expected, from the step-size-squared scaling of the defect,
+to put the Rosenbrock path tens of percent off at l < 5 (measured: -46% at
+l = 2 at rtol 1e-4 / atol 1e-6 above; not measured at fit_cl's tolerances); the ADR's two candidate causes do not
 include it. The retuned `fit_cl` of the next entry (Hermite output, rtol 1e-4)
-carries the numbers to use.
+carries the numbers to use. ADR 0003 now points here.
+
+**Also exposed, unmeasured.** `Rodas5Batched` is the production P(k) solver
+under fit_cl and saves on `tau_grid` (`perturbations_solve_mpk`), so P(k, z)
+at interior z (between accepted steps) was also piecewise-linear before this
+fix. The C_l tests above do not cover it; a P(k, z) result computed on the
+Rosenbrock path at interior z should be re-run on this branch.
 
 ### Oct 11, 2026: Recombination follows CLASS's Saha -> ODE staging; thermodynamics gradients are smooth (#48)
 

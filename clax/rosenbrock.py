@@ -29,8 +29,8 @@ sweep of Oct 10-11, 2026, finding 5; error scaling as the square of the
 late-time step).  Cubic Hermite error scales as the fourth power.
 The extra evaluation is recovered FSAL-style: f(t1, y1) is carried in
 ``solver_state`` and reused as the next step's f(t0, y0), recomputed only on
-the first step or after a jump (``made_jump``), exactly as diffrax's
-Runge-Kutta solvers do.  A rejected step keeps the previous ``solver_state``
+the first step or after a jump (``made_jump``), with the same predicate as
+diffrax's Runge-Kutta solvers.  A rejected step keeps the previous ``solver_state``
 so the carried value stays f(t0, y0) of the retried step.
 Measured on a V100 (Oct 12, 2026; 300 k-modes, planck_cl with ncdm_q_size 0,
 hierarchy 12/10/17, rtol 1e-4 / atol 1e-6, 5000 tau points): rodas5 vs
@@ -51,7 +51,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 import jax.scipy.linalg as jla
 from diffrax import AbstractAdaptiveSolver, AbstractTerm, ODETerm, RESULTS
-from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolation
+from diffrax import ThirdOrderHermitePolynomialInterpolation
 
 
 # ===========================================================================

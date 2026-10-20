@@ -363,7 +363,11 @@ correction at z ~ 1560-1650 on the 3000-point grid; (ii) noise at `fit_cl`'s
 20 k/decade grid and rtol = 1e-3. The `planck_cl` shift of 3e-6 at l <= 30 does
 not discriminate between them. A test would be to feed the fixed and unfixed
 tables through `fit_cl`'s perturbation solve with a finer k grid and a tighter
-tolerance.
+tolerance. *Added Oct 20, 2026:* a third candidate, not known when the above
+was written, is the Rosenbrock solver's linear dense output, which at these
+tolerances is off by tens of percent at l < 5 on its own (CHANGELOG, "Oct 12,
+2026: Rodas5 dense output is cubic Hermite"); the `fit_cl` numbers above were
+measured with that output.
 
 Absolute errors against CLASS are a **pre-existing baseline at the preset
 defaults, not an effect of this change**. `planck_cl` with its default

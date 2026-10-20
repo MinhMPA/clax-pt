@@ -19,6 +19,8 @@ python diags/diag_cl_comprehensive.py
 | `diag_pert_vars.py` | Compare raw perturbation variables against CLASS at specific k |
 | `diag_source_decomp_v2.py` | Decompose TT error into SW+Doppler vs ISW contributions |
 | `timing_test.py` | JIT compilation and execution timing benchmarks |
+| `diag_rodas5_dense_output.py` | Rodas5 dense-output fix (Oct 2026): rodas5 vs kvaerno5 C_l, interleaved same-GPU timing of solver variants (`--abc`) |
+| `diag_preset_solver_choice.py` | Preset solver choice A-F (kvaerno5 / rodas5 at two tolerance rungs, planck- and fit-like settings) vs the CLASS massless reference |
 
 ## AD diagnostics (May 2026 investigation, PR #16)
 
