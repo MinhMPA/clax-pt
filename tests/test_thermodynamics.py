@@ -12,6 +12,7 @@ Notes:
 - These tests use CLASS-generated reference data for forward assertions plus narrow FD spot checks for the repaired thermodynamics AD paths.
 """
 
+import dataclasses
 import os
 
 import jax
@@ -113,10 +114,17 @@ class TestThermoScalars:
         reaching it was the partial through the opacity table's n_H_0 rescale,
         +698 Mpc per unit omega_b against -545 by finite differences (wrong
         sign). Exempt from the multi-cosmology rule: a stop_gradient is a
-        structural property, identical at every cosmology."""
+        structural property, identical at every cosmology.
+
+        ``ode_adjoint="direct"`` as in tests/test_pk_forward_mode.py: the
+        production RecursiveCheckpointAdjoint of the background solve is a
+        custom_vjp, which jax.jvp cannot cross; the adjoint only selects how
+        derivatives propagate, not the primal."""
+        prec_fwd = dataclasses.replace(PREC, ode_adjoint="direct")
+
         def f(omega_b):
             params = CosmoParams(omega_b=omega_b)
-            return thermodynamics_solve(params, PREC, background_solve(params, PREC)).tau_free_streaming
+            return thermodynamics_solve(params, prec_fwd, background_solve(params, prec_fwd)).tau_free_streaming
         omega_b0 = jnp.asarray(CosmoParams().omega_b, dtype=jnp.float64)
         val, dot = jax.jvp(f, (omega_b0,), (jnp.ones_like(omega_b0),))
         assert float(val) > 0.0
