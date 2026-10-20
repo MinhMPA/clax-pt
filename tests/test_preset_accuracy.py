@@ -120,8 +120,7 @@ class TestPlanckClPreset:
         assert got["TEn 2-1000"] < 0.006
 
     def test_fiducial_massless_recfast_high_l(self):
-        """The damping tail, l = 1000-2500 (docs/highl_residual_2026-10-12.md,
-        branch exp/highl-investigation). Before the RSA-trigger fix the preset
+        """The damping tail, l = 1000-2500 (docs/highl_residual_2026-10-12.md). Before the RSA-trigger fix the preset
         read TT rms 1.7% / 2.0% and EE 3.0% / 8.2% over l = 1000-2000 /
         2000-2500 (the photon quadrupole source was zeroed at tau ~ 296 Mpc for
         k > 0.15/Mpc); with CLASS's tau_free_streaming criterion, 60 k per
@@ -129,7 +128,13 @@ class TestPlanckClPreset:
         the preset's hr_l_max (2500) with the sparse-l spline padded past it
         (L_SPLINE_PAD), so the single-l maximum covers the whole band. What
         remains is a smooth +0.3% to +0.5% from the helium-era opacity
-        (k_D +0.12%)."""
+        (k_D +0.12%).
+
+        Fiducial massless-RECFAST only: it is the one RECFAST-matched C_l
+        reference; the grid cls.npz are HyRec + BBN Y_He and would need looser
+        bars above l = 1000 from the recombination-code offset. The trigger's
+        multi-cosmology coverage is tests/test_sources_vs_class.py::test_lcdm_grid
+        and TestThermoScalars::test_tau_free_streaming_grid."""
         ref = dict(np.load(os.path.join(REFERENCE_DIR, "cls_massless_recfast.npz")))
         params = CosmoParams(m_ncdm=0.0)
         prec = dataclasses.replace(PrecisionParams.planck_cl(), ncdm_q_size=0)

@@ -85,7 +85,11 @@ class TestThermoScalars:
         assert rel_err < 0.02, f"z_rec: {val:.1f} vs CLASS {ref:.1f}, err={rel_err:.2%}"
 
     def test_tau_free_streaming(self, th, bg):
-        """``tau_free_streaming`` matches CLASS's definition to 0.5%.
+        """``tau_free_streaming`` matches CLASS's definition to 0.05% (0.18 Mpc).
+
+        Floor: the linear-in-log-a interpolation of the crossing (~0.01 Mpc on
+        this 10000-point grid) and CLASS's 0.023 Mpc table-point ambiguity;
+        measured 0.0003% at all five LCDM grid points after #53 (job 27002).
 
         CLASS (thermodynamics.c, ``tau_free_streaming``) switches the photon
         radiation-streaming approximation on at the first conformal time after
@@ -104,34 +108,34 @@ class TestThermoScalars:
         rel_err = abs(val - ref) / ref
         assert np.isfinite(val)
         assert val > float(th.tau_star), f"tau_free_streaming {val:.2f} must follow the visibility peak {float(th.tau_star):.2f}"
-        assert rel_err < 0.005, f"tau_free_streaming: {val:.2f} vs CLASS {ref:.2f} Mpc, err={rel_err:.2%}"
+        assert rel_err < 0.0005, f"tau_free_streaming: {val:.3f} vs CLASS {ref:.3f} Mpc, err={rel_err:.3%}"
 
     def test_tau_free_streaming_no_gradient(self):
         """``tau_free_streaming`` carries no gradient: the switch location is
-        held fixed under AD (stop_gradient), like CLASS's table point and the
-        fixed stage-switch redshifts of ADR 0003. Forward mode along omega_b
-        must return exactly zero. Before the stop_gradient the only derivative
-        reaching it was the partial through the opacity table's n_H_0 rescale,
-        +698 Mpc per unit omega_b against -545 by finite differences (wrong
-        sign). Exempt from the multi-cosmology rule: a stop_gradient is a
-        structural property, identical at every cosmology.
-
-        ``ode_adjoint="direct"`` as in tests/test_pk_forward_mode.py: the
-        production RecursiveCheckpointAdjoint of the background solve is a
-        custom_vjp, which jax.jvp cannot cross; the adjoint only selects how
-        derivatives propagate, not the primal."""
-        prec_fwd = dataclasses.replace(PREC, ode_adjoint="direct")
-
-        def f(omega_b):
+        held fixed under AD (stop_gradient), like CLASS's table point. Without
+        it two partials would reach it: the one through the opacity table's
+        n_H_0 rescale (+698 Mpc per unit omega_b against -545 by finite
+        differences, the wrong sign) and the background-time partial through
+        tau(z) (incomplete on its own); the dropped term is <= 3e-5 on
+        d ln C_l / d ln theta. Forward mode (direct adjoint, as in
+        tests/test_pk_forward_mode.py: the production checkpointed adjoint is
+        a custom_vjp that jax.jvp cannot cross) and reverse mode (production
+        adjoint, what inference runs) along omega_b must both return exactly
+        zero. Exempt from the multi-cosmology rule: a stop_gradient is a
+        structural property, identical at every cosmology."""
+        def f(omega_b, prec):
             params = CosmoParams(omega_b=omega_b)
-            return thermodynamics_solve(params, prec_fwd, background_solve(params, prec_fwd)).tau_free_streaming
+            return thermodynamics_solve(params, prec, background_solve(params, prec)).tau_free_streaming
         omega_b0 = jnp.asarray(CosmoParams().omega_b, dtype=jnp.float64)
-        val, dot = jax.jvp(f, (omega_b0,), (jnp.ones_like(omega_b0),))
+        prec_fwd = dataclasses.replace(PREC, ode_adjoint="direct")
+        val, dot = jax.jvp(lambda ob: f(ob, prec_fwd), (omega_b0,), (jnp.ones_like(omega_b0),))
         assert float(val) > 0.0
-        assert float(dot) == 0.0, f"d tau_free_streaming/d omega_b = {float(dot):+.3e}, expected exactly 0"
+        assert float(dot) == 0.0, f"jvp: d tau_free_streaming/d omega_b = {float(dot):+.3e}, expected exactly 0"
+        grad = float(jax.grad(lambda ob: f(ob, PREC))(omega_b0))
+        assert grad == 0.0, f"grad: d tau_free_streaming/d omega_b = {grad:+.3e}, expected exactly 0"
 
     def test_tau_free_streaming_grid(self, lcdm_cosmology):
-        """Multi-cosmology: ``tau_free_streaming`` within 0.5% of CLASS at every
+        """Multi-cosmology: ``tau_free_streaming`` within 0.05% of CLASS at every
         LCDM grid point (fiducial only under --fast), and it moves with the
         cosmology in the same direction as in CLASS (omega_cdm_low: later by
         19 Mpc; omega_b_high: earlier by 2.4 Mpc; h and n_s: unchanged)."""
@@ -144,7 +148,7 @@ class TestThermoScalars:
         val = float(th_i.tau_free_streaming)
         rel_err = abs(val - ref) / ref
         print(f"tau_free_streaming {name}: clax {val:.3f} vs CLASS {ref:.3f} Mpc ({100 * (val / ref - 1):+.3f}%)")
-        assert rel_err < 0.005, f"{name}: tau_free_streaming {val:.2f} vs CLASS {ref:.2f} Mpc, err={rel_err:.2%}"
+        assert rel_err < 0.0005, f"{name}: tau_free_streaming {val:.3f} vs CLASS {ref:.3f} Mpc, err={rel_err:.3%}"
         ref_fid = _class_tau_free_streaming('lcdm_fiducial')
         if abs(ref - ref_fid) > 1.0:
             bg_f = background_solve(CosmoParams(), PREC)

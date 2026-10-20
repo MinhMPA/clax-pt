@@ -28,9 +28,10 @@ branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
   measured against CLASS `get_sources()` at matched (k, tau)); the C_l residual set in
   at l ~ k chi_* ~ 1700. Every sweep knob (hierarchy size, tolerances, tau and k grids,
   Bessel path) acted before or after the switch, which is why none of them moved it.
-- **Fix.** `ThermoResult.tau_free_streaming` (traced leaf; the tau_c/tau crossing
-  interpolated linearly in log a on the thermodynamics table, tau from the background
-  spline; -0.003% vs CLASS 3.3.4 on the LCDM grid) and
+- **Fix.** `ThermoResult.tau_free_streaming` (held fixed under AD, see the Oct 20
+  addendum below; the tau_c/tau crossing interpolated linearly in log a on the
+  thermodynamics table, tau from the background spline; +0.000% vs CLASS 3.3.4 at
+  every LCDM grid point after #53, -0.003% before it) and
   `PrecisionParams.pt_rsa_trigger_tau_over_tau_k = 45`,
   `pt_rsa_trigger_tau_c_over_tau = 5`. The Einstein substitution, the hierarchy
   relaxation and the source assembly in `clax/perturbations.py` now use
@@ -52,7 +53,7 @@ branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
   harmonic 20 s).
 - **Tests (written first, red on the old code):** `tests/test_thermodynamics.py`
   `tau_free_streaming` vs CLASS at the fiducial and on the LCDM grid (0.5% bar,
-  measured -0.003%); `tests/test_sources_vs_class.py` (slow) S_T0 and g*Pi vs CLASS
+  measured +0.000% after #53, -0.003% before it); `tests/test_sources_vs_class.py` (slow) S_T0 and g*Pi vs CLASS
   `get_sources()` at k = 0.15, 0.212, 0.30 /Mpc on a 3-mode grid with exactly those
   nodes, rms <= 0.5% of peak at k <= 0.25 and 0.75% at 0.30 (measured 0.05-0.08%,
   0.11-0.21%, 0.22-0.51%; before the fix 4.6-7.9%, 2.4-3.5%, 0.6-1.0% in g*Pi),
@@ -77,11 +78,13 @@ branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
   perturbation stage 201 s first call / 41 s cached on the V100.
 - **Decisions to review.** (1) The reference k triple is geometric (0.15, 0.15 sqrt 2,
   0.30) rather than (0.15, 0.20, 0.30) so that all three are exact log-grid nodes and
-  no interpolation in k enters the test. (2) `tau_free_streaming` follows the opacity
-  splines' AD convention (`_kd_safe`: only the n_H_0 path of kappa' carries gradient),
-  so d tau_free_streaming / d omega_b is +698 Mpc per unit omega_b by AD against -545
-  from CLASS finite differences; the switch time has ~1e-4 relative leverage on C_l
-  gradients per Planck sigma, so this was left as is (alternative: stop_gradient).
+  no interpolation in k enters the test. (2) `tau_free_streaming` is held fixed under AD
+  (stop_gradient; Oct 20 addendum below). What would otherwise reach it: the partial
+  through the opacity splines' n_H_0 rescale (`_kd_safe`; +698 Mpc per unit omega_b
+  by AD against -545 from CLASS finite differences, the wrong sign) and the
+  background-time partial through tau(z) (incomplete on its own). The switch time
+  has ~1e-4 relative leverage on C_l, so the dropped term is <= 3e-5 on
+  d ln C_l / d ln theta for omega_b and omega_cdm.
   (3) The blend width 2.5 Mpc is fixed, not scaled with the cosmology.
 - **Documentation discrepancy (not edited):** CLAUDE.md "Approximation-free
   perturbations: full Boltzmann hierarchy at all times, no TCA/RSA/UFA switching" and
@@ -89,16 +92,20 @@ branch `exp/highl-investigation`); fix on branch `fix/rsa-trigger` (based on
   nor the RSA that `clax/perturbations.py` has carried; the module docstring now says
   what the code does.
 
-**AD convention for the switch time (Oct 20, 2026).** `tau_free_streaming` is
-wrapped in `stop_gradient`. CLASS's switch is a table point with no derivative,
-and ADR 0003 holds the recombination stage-switch redshifts fixed for the same
-reason. Without it the only derivative that reached the switch time was the
-partial through the opacity table's n_H_0 rescale (`_kd_safe`, #45), which has
-the wrong sign: d tau_fs / d omega_b = +698 Mpc per unit omega_b by AD against
--545 by finite differences. The term it feeds is small either way
-(d ln C_l / d ln tau_fs ~ 1e-4, so the dropped contribution to
-d ln C_l / d ln omega_b is ~ 3e-6). `tests/test_thermodynamics.py` pins the
-zero derivative.
+**AD convention for the switch time (Oct 20, 2026 addendum).**
+`tau_free_streaming` is wrapped in `stop_gradient`, like CLASS's switch, which
+is a table point with no derivative. Two partials would otherwise reach it:
+the one through the opacity table's n_H_0 rescale (`_kd_safe`, #45), which has
+the wrong sign (d tau_fs / d omega_b = +698 Mpc per unit omega_b by AD against
+-545 by finite differences), and the background-time partial through tau(z),
+which on its own is incomplete (for omega_cdm it is most of the physical
+sensitivity: omega_cdm_low moves the switch by +19 Mpc by finite differences).
+The term they feed is small: d ln C_l / d ln tau_fs ~ 1e-4 and
+d ln tau_fs / d ln theta <= 0.26 (omega_cdm; 0.03 for omega_b), so the dropped
+contribution to d ln C_l / d ln theta is <= 3e-5. `tests/test_thermodynamics.py`
+pins the zero derivative in forward mode (direct adjoint) and reverse mode
+(production checkpointed adjoint). After #53 the switch time is 364.768 Mpc at
+fiducial against CLASS's 364.767 (+0.000% at all five grid points, job 27002).
 
 ### Oct 12, 2026: Preset retune (planck_cl ~45x faster at equal accuracy), fast-path Bessel table fix, presets on the Hermite rodas5
 

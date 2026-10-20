@@ -69,6 +69,7 @@ def tau_free_streaming(th):
     ipk = int(np.argmax(g))
     f = 1.0 / (kd * tau)
     i = int(np.argmax((np.arange(len(tau)) > ipk) & (f >= RSA_TAU_C_OVER_TAU)))
+    assert i > ipk, "no tau_c/tau crossing after the visibility peak (argmax of an all-False mask is 0)"
     w = (RSA_TAU_C_OVER_TAU - f[i - 1]) / (f[i] - f[i - 1])
     return float(tau[i - 1] + w * (tau[i] - tau[i - 1])), float(tau[i]), float(tau[ipk])
 

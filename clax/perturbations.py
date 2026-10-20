@@ -65,7 +65,12 @@ _RSA_DAMPING_ENABLED = True
 # RHS smooth in tau and in the cosmological parameters (AD). 2.5 Mpc is the
 # local width in tau that the former kappa'/(aH)-based sigmoid had at the
 # fiducial cosmology (tau_c/tau grows by e per ~25 Mpc near tau ~ 365 Mpc) and
-# is short against the relaxation time 1/k (>= 3 Mpc for k <= 0.3/Mpc).
+# is short against the relaxation time 1/k (>= 3 Mpc for k <= 0.3/Mpc). For
+# planck_cl's k up to 1.0/Mpc, 1/k = 1 Mpc < 2.5 Mpc, so there the hierarchy
+# follows the ramp rather than the reverse; those modes feed l > 4000 and the
+# visibility is at 2.4% of its peak at the switch, so it is immaterial. The
+# sigmoid is centred on tau_free_streaming (half-on at the switch, ~12% on
+# 5 Mpc before it); CLASS turns on strictly after.
 _RSA_TAU_BLEND_WIDTH = 2.5
 
 # Width of the sigmoid used for the ncdm fluid approximation transition.

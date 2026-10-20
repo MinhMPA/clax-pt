@@ -218,9 +218,9 @@ class ThermoResult:
     ``PrecisionParams.pt_rsa_trigger_tau_c_over_tau`` (= 5) conformal times.
     Together with k*tau > ``pt_rsa_trigger_tau_over_tau_k`` it switches the
     photon radiation streaming approximation on in perturbations.py. It
-    carries no gradient (``stop_gradient``): like CLASS's table point and the
-    fixed stage-switch redshifts of ADR 0003, the switch location is not
-    differentiated.
+    carries no gradient (``stop_gradient``): like CLASS's table point, the
+    switch location is not differentiated (the dropped term is <= 3e-5 on
+    d ln C_l / d ln theta; see the comment where it is computed).
     """
     xe_of_loga: CubicSpline
     Tb_of_loga: CubicSpline
@@ -1056,16 +1056,18 @@ def thermodynamics_solve(
     # which the Thomson mean free path tau_c = 1/kappa' exceeds
     # radiation_streaming_trigger_tau_c_over_tau (= 5) conformal times. CLASS
     # takes the table point itself; here the crossing is interpolated linearly
-    # in log a between the two bracketing points (364.8 Mpc, z = 760 at the
+    # in log a between the two bracketing points (364.77 Mpc, z = 760 at the
     # fiducial cosmology, visibility at 2.4% of its peak; CLASS's table point
-    # is 0.03 Mpc later). The switch time is held fixed under AD
-    # (stop_gradient), like CLASS's table point and the fixed stage-switch
-    # redshifts of ADR 0003: the only derivative that would reach it is the
-    # partial through _kd_safe's n_H_0 rescale, which has the wrong sign
-    # (d tau_fs/d omega_b: AD +698 vs finite differences -545 Mpc per unit
-    # omega_b), and the term it feeds is small (d ln C_l/d ln tau_fs ~ 1e-4).
+    # is 364.767 Mpc). The switch time is held fixed under AD (stop_gradient),
+    # like CLASS's table point, which has no derivative. What would otherwise
+    # reach it: the partial through _kd_safe's n_H_0 rescale (wrong sign:
+    # d tau_fs/d omega_b AD +698 vs finite differences -545 Mpc per unit
+    # omega_b) and the background-time partial through tau(z) (incomplete on
+    # its own). With d ln C_l/d ln tau_fs ~ 1e-4 and d ln tau_fs/d ln theta
+    # <= 0.26 (omega_cdm) the dropped term is <= 3e-5 on d ln C_l/d ln theta.
     # tau from the background spline, as for tau_star. If no crossing exists
-    # (never for a recombining universe) the switch is pushed past the table.
+    # (never for a recombining universe) the switch is set to the end of the
+    # table.
     _tau_grid_bg = jax.vmap(bg.tau_of_loga.evaluate)(loga_grid_sg)
     _tau_c_over_tau = 1.0 / jnp.maximum(_kd_safe * _tau_grid_bg, 1e-300)
     _after_peak = jnp.arange(loga_grid_sg.shape[0]) > idx_star
