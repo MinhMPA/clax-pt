@@ -10,8 +10,9 @@ power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 
 ### Oct 12, 2026: Preset retune (planck_cl ~45x faster at equal accuracy), fast-path Bessel table fix, presets on the Hermite rodas5
 
-Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`
-on branch `exp/precision-sweep`). Branch `fix/preset-retune`.
+Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`;
+its apparatus, `diags/diag_precision_sweep.py` and the sweep sbatch, stays on
+branch `exp/precision-sweep`). Branch `fix/preset-retune`.
 
 - `PrecisionParams.planck_cl()`: l_max 17/17/17, rtol 1e-4, atol 1e-6,
   max_steps 8192, hr_n_k_fine 20000 (was l_max 50, 1e-6, 1e-11, 131072,

@@ -281,6 +281,12 @@ class PrecisionParams:
         th_n_points: 100000 is kept for the science preset; 20000 (as in
         planck_fast) changes C_l by <= 0.02% to l=500, <= 0.05% to l=1000 and
         ~0.13% above, and cuts thermodynamics from ~59 s to ~13 s on a V100.
+        Both numbers predate the Saha -> ODE recombination staging (#48, Oct
+        2026): 100000 was chosen for the former explicit Heun stepping and is
+        not re-tuned for the staging, where x_e at 20000 points is within
+        1.1e-4 of 100000 over z 200-8000 (largest at z = 200), both 2.0e-4 from
+        CLASS (the HeIII-era offset near z ~ 5900); the C_l effect of 20000 on
+        the staged recombination is unmeasured.
         Measured V100 stages (cached, kvaerno5): perturbations 105 s
         (massless), 189 s (one 0.06 eV neutrino, 5 q-bins); harmonic 13 s.
         With rodas5 (default since Oct 12, 2026) perturbations are ~30 s
@@ -290,7 +296,7 @@ class PrecisionParams:
             pt_k_max_cl=1.0,         # covers l~2500 with margin
             pt_k_per_decade=60,      # 0.1% to l~1200, 0.3% to l~2000
             pt_tau_n_points=5000,    # 10000 and 20000 identical; 2000 costs 0.6% low-l EE
-            th_n_points=100000,      # 20000: <=0.05% to l=1000, 46 s cheaper (see docstring)
+            th_n_points=100000,      # 20000: <=0.05% to l=1000, 46 s cheaper; not re-tuned for #48
             pt_l_max_g=17,
             pt_l_max_pol_g=17,
             pt_l_max_ur=17,
