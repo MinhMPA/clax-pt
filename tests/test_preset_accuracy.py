@@ -155,12 +155,25 @@ class TestFitClPreset:
         assert got["TT 2-500"] < 0.02
         assert got["EE 5-500"] < 0.02
 
+    @pytest.mark.xfail(strict=True, reason=(
+        "fit_cl's ncdm_q_size=0 drops the massive-neutrino hierarchy; with the"
+        " default 0.06 eV neutrino TT is 14.6-15.4% off CLASS at l <= 30 at every"
+        " LCDM grid point (job 27008, Oct 20, 2026). Strict: starts failing when"
+        " fit_cl's neutrino treatment is fixed, so the bars get re-measured."))
     def test_lcdm_grid_massive(self, lcdm_cosmology):
         """fit_cl on the LCDM grid against CLASS's default references (HyRec,
-        one 0.06 eV neutrino that fit_cl's ncdm_q_size=0 follows as massless):
-        the HMC preset is evaluated away from fiducial by construction, so its
-        bars are measured there too. They include the RECFAST-vs-HyRec and
-        ncdm systematics on top of fit_cl's own coarseness."""
+        one 0.06 eV neutrino): the HMC preset is evaluated away from fiducial by
+        construction, so it must be measured there too. Measured Oct 20, 2026
+        (job 27008, max |C_l / C_CLASS - 1|): TT 2-30 14.6-15.4%, TT 2-500 the
+        same (the error is concentrated at low l), EE 5-500 3.1-4.1%,
+        TE/sqrt(TT EE) 16.8-19.4% over fiducial / h_high / omega_b_high /
+        omega_cdm_low / ns_high, against 0.46% / 0.69% / 1.25% for the same
+        preset at the massless-RECFAST fiducial and 0.26% / 0.75% / 0.36% for
+        planck_cl (5 q-bins) on this grid. The cause is the preset's
+        ncdm_q_size=0 ("disable ncdm hierarchy, massless approx"): the
+        background carries a 0.06 eV neutrino that the perturbations do not.
+        Pre-existing; not changed by the Oct 2026 retune. The bars below are
+        the planck_cl-grid bars and will fail until that is fixed."""
         name, params = lcdm_cosmology
         ref_dir = os.path.join(REFERENCE_DIR, name)
         if not os.path.isdir(ref_dir):
@@ -174,9 +187,10 @@ class TestFitClPreset:
             "TEn 2-500": _te_norm_max(cls, ref, 2, 500),
         }
         _report(f"fit_cl vs CLASS ({name}, massive, HyRec)", got)
-        # PROVISIONAL bars (3x the fiducial massless numbers) until the grid
-        # measurement on this branch is recorded here.
-        assert got["TT 2-30"] < 0.03
-        assert got["TT 2-500"] < 0.03
-        assert got["EE 5-500"] < 0.04
-        assert got["TEn 2-500"] < 0.03
+        # Target once the neutrino treatment is fixed: the planck_cl grid bars
+        # (measured there TT <= 0.43%, EE <= 1.03%, TE <= 0.44%) plus fit_cl's
+        # own coarseness; to be re-measured then.
+        assert got["TT 2-30"] < 0.02
+        assert got["TT 2-500"] < 0.02
+        assert got["EE 5-500"] < 0.03
+        assert got["TEn 2-500"] < 0.02

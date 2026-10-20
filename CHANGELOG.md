@@ -121,6 +121,23 @@ TT at both and 0.09% EE at 1500 with the pad; larger pads gain nothing (the
 synthetic test in `tests/test_bessel_table.py` measures ~1e-3 padded against
 its 2e-3 bar, which is that model's own interior spline error).
 
+**Finding (Oct 20, 2026, job 27008): fit_cl with the default 0.06 eV neutrino
+is 15% off CLASS at low l.** The multi-cosmology rule asked for a fit_cl test
+on the LCDM grid (`TestFitClPreset::test_lcdm_grid_massive`, CLASS HyRec
+references with one 0.06 eV neutrino): max |C_l / C_CLASS - 1| TT 14.6-15.4%
+at l = 2-30 (the same maximum over 2-500, so the error is at low l), EE
+3.1-4.1% (5-500), TE/sqrt(TT EE) 16.8-19.4%, at fiducial / h_high /
+omega_b_high / omega_cdm_low / ns_high alike. The same preset at the
+massless-RECFAST fiducial reads 0.46% / 0.69% / 1.25%, and planck_cl (5
+q-bins) on this grid 0.26% / 0.75% / 0.36%, so the harness is not the cause:
+it is fit_cl's `ncdm_q_size=0` ("disable ncdm hierarchy, massless approx"),
+which leaves the 0.06 eV species in the background but not in the
+perturbations. Pre-existing; the retune did not change it. Recorded as a
+strict xfail with the planck_cl-grid bars as the target, so the test starts
+failing when the treatment is fixed and the bars get re-measured. The
+decision on fit_cl's neutrino treatment (q-bins at some cost, or a documented
+massless-only scope) is open.
+
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 
 **Defect.** `clax/rosenbrock.py` (`Rodas5`, `Rodas5Batched`) reconstructed the

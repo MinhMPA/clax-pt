@@ -406,7 +406,8 @@ class PrecisionParams:
 
     @staticmethod
     def fit_cl():
-        """Fast preset for fitting / HMC, targeting <2% C_l accuracy at l<600.
+        """Fast preset for fitting / HMC, targeting <2% C_l accuracy at l<600
+        with a massless neutrino (see the ncdm_q_size caveat below).
 
         Reduces resolution everywhere for speed (planck_cl values in
         parentheses):
@@ -416,7 +417,13 @@ class PrecisionParams:
         - 2000 tau points (5000)
         - 3000 thermodynamics points (100000)
         - ncdm_q_size 0: no massive-neutrino hierarchy, the 0.06 eV species
-          is followed as massless (~3x faster perturbations)
+          is followed as massless (~3x faster perturbations). Measured cost
+          (job 27008, Oct 20, 2026): against CLASS with the default 0.06 eV
+          neutrino, TT is 14.6-15.4% off at l <= 30 at every LCDM grid point
+          (EE 3-4%, TE/sqrt(TT EE) 17-19%), against 0.46% / 1.25% with
+          m_ncdm = 0. Until that treatment is changed this is a
+          massless-neutrino preset; tests/test_preset_accuracy.py records the
+          grid numbers as a strict expected failure.
         - ode_max_steps 8192 (8192; was 1024)
         - rtol 1e-4 / atol 1e-6 (the same; Oct 2026): the converged rung of
           the tolerance ladder. The old 1e-3 / 1e-4 was never validated at
