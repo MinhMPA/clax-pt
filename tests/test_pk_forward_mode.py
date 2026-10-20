@@ -134,7 +134,14 @@ _FD_STEP = 1.0e-3  # matches diags/diag_grad_*.py FD_STEPS["omega_cdm"]
 # across two independent GPU runs (1.05e-3, run 2 jvp-vs-grad(recursive)).
 # See module docstring for both runs' full numbers.
 _AD_MUTUAL_REL_TOL = 5.0e-3
-_FD_REL_TOL = 0.01  # CLAUDE.md gradient accuracy target
+# AD against central FD: 2x the worst |jvp/FD - 1| over the five LCDM grid points
+# at steps 1e-3 and 5e-4 on the fixed tree (8.6e-4, lcdm_fiducial and ns_high at
+# 5e-4; the FD itself moves by 6e-4 to 1e-3 between the two steps at this
+# precision block), ceiled to two figures (job 27177, Oct 20, 2026). On main the
+# same quantity sat +0.59% to +0.76% above FD at every grid point (job 27176):
+# the opacity tables' stop_gradient cut, smsharma/clax#55, ADR 0004. The
+# CLAUDE.md target is 1%.
+_FD_REL_TOL = 1.8e-3
 
 
 class TestComputePkForwardMode:
@@ -144,21 +151,23 @@ class TestComputePkForwardMode:
     """
 
     @pytest.mark.slow
-    def test_jvp_matches_grad_and_fd_for_omega_cdm(self, fast_mode):
+    def test_jvp_matches_grad_and_fd_for_omega_cdm(self, fast_mode, lcdm_cosmology):
         """``jvp(compute_pk)``, ``grad(compute_pk)`` (DirectAdjoint), and
         ``grad(compute_pk)`` (RecursiveCheckpointAdjoint) mutually agree
         (<0.5%, see module docstring for why this bound and not a tighter
         same-pair one), and each agrees with central finite differences
-        (<1%, CLAUDE.md target), at ``k=0.1 Mpc^-1``, ``d/d omega_cdm``.
+        (``_FD_REL_TOL``, set from the measurement above), at
+        ``k=0.1 Mpc^-1``, ``d/d omega_cdm``, at the five LCDM grid points
+        (multi-cosmology rule; smsharma/clax#55).
 
-        This is a single dedicated 4-solve AD probe (grad-recursive,
+        This is a dedicated 4-solve AD probe per cosmology (grad-recursive,
         grad-direct, jvp-direct, central-FD), not a --fast-subsamplable
         sweep, so it is full-mode only.
         """
         if fast_mode:
             pytest.skip("heavy dedicated AD probe -- full mode only, see docstring")
 
-        params = CosmoParams()
+        _, params = lcdm_cosmology
         p0 = float(getattr(params, _PARAM_NAME))
 
         def f_direct(v):
@@ -222,5 +231,5 @@ class TestComputePkForwardMode:
             rel_fd = abs(val - fd) / (abs(fd) + 1e-30)
             assert rel_fd < _FD_REL_TOL, (
                 f"{name}={val:.8e} vs central FD={fd:.8e} rel={rel_fd:.2%} "
-                f"(expected <{_FD_REL_TOL:.0%}, CLAUDE.md gradient target)"
+                f"(expected <{_FD_REL_TOL:.2%}, 2x the measured worst; see _FD_REL_TOL)"
             )

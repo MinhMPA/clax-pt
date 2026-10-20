@@ -33,12 +33,12 @@ PREC = PrecisionParams(
     bg_n_points=400, ncdm_bg_n_points=200, bg_tol=1e-8,
     # NOTE: intentionally 5e3, not the 5e4 floor (see PrecisionParams.th_z_max).
     # This module never runs perturbations, so the CubicSpline boundary-clip
-    # bug that motivates the 5e4 floor cannot bite here. Raising to 5e4 was
-    # tried and reverted: it breaks
-    # TestThermoGradients::test_opacity_logderivative_gradient_matches_fd_for_omega_b
-    # (rel err 8.14% vs 1% tolerance, dkappa_dot_dloga AD=-3.346399e+02 vs
-    # FD=-3.642966e+02 at loga=-8) by shifting the th_n_points=10000 grid
-    # spacing near recombination. Do not loosen the tolerance to compensate.
+    # bug that motivates the 5e4 floor cannot bite here. Before #55 raising it
+    # to 5e4 broke the omega_b dkappa_dot/dlna gradient check at loga = -8 by 8%
+    # (AD -3.346399e+02 vs FD -3.642966e+02): that was the opacity tables'
+    # stop_gradient cut, whose error changed with the grid spacing. With the
+    # full tangents (ADR 0004) the same check agrees with FD to 4e-10 at both
+    # 5e3 and 5e4 (probe of Oct 20, 2026, job 27170); 5e3 is kept as is.
     th_n_points=10000, th_z_max=5e3,
 )
 
@@ -336,50 +336,68 @@ class TestThermoGradients:
             f"xe(loga=-2) grad {param_name}: AD={xe_ad:.6e} FD={xe_fd:.6e} rel={xe_rel:.2%}"
         )
 
-    def test_opacity_logderivative_gradient_matches_fd_for_omega_b(self):
-        """Stored ``dκ̇/dloga`` table remains differentiable through recombination."""
+    # Reverse-mode AD of the opacity tables against finite differences at fixed
+    # ln a (smsharma/clax#55). loga = -8 is the fully ionised plasma (z ~ 2980,
+    # x_e constant), -7 is recombination (z ~ 1095), -6 the freeze-out tail
+    # (z ~ 402) and -5 the residual-ionisation plateau (z ~ 147). Until #55 the
+    # tables carried a stop_gradient with an n_H_0 rescale (d127731), exact
+    # only where x_e is constant: along omega_b the recombination-era gradient
+    # was 10-30% off and along omega_cdm it was exactly zero, so only the
+    # loga = -8, omega_b case was tested.
+    _OPACITY_SAMPLES = [(-8.0, "omega_b"), (-7.0, "omega_b"), (-6.0, "omega_b"),
+                        (-7.0, "omega_cdm"), (-6.0, "omega_cdm")]
+    # exp(-kappa) along omega_b is sampled at loga = -5 instead of -6: at z ~ 402
+    # its omega_b derivative passes through zero (x_e n_H goes as H in the
+    # freeze-out tail and the reionisation depth is pinned by tau_reio), and the
+    # single-step finite difference there is set by the grid-scale jumps of the
+    # T_b Taylor switch at f_e < 1e-3 (ADR 0003): FD -3.98e-4, -9.86e-5, -7.72e-5
+    # on 3000, 10000, 20000 points against AD -6.44e-5, -6.87e-5, -6.97e-5
+    # (job 27172, Oct 20, 2026), i.e. the FD converges onto AD with the grid.
+    _EXP_M_KAPPA_SAMPLES = [(-8.0, "omega_b"), (-7.0, "omega_b"), (-5.0, "omega_b"),
+                            (-7.0, "omega_cdm"), (-6.0, "omega_cdm")]
+
+    @pytest.mark.parametrize("loga,param_name", _OPACITY_SAMPLES)
+    def test_opacity_logderivative_gradient_matches_fd(self, loga, param_name):
+        """Stored ``dκ̇/dloga`` table is differentiable through recombination."""
         ad, fd = _thermo_ad_fd_pair(
-            "omega_b", lambda th: th.dkappa_dot_dloga_of_loga.evaluate(jnp.array(-8.0))
+            param_name, lambda th: th.dkappa_dot_dloga_of_loga.evaluate(jnp.array(loga))
         )
         rel = abs(ad - fd) / (abs(fd) + 1e-30)
         assert rel < 0.01, (
-            f"dkappa_dot_dloga(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+            f"dkappa_dot_dloga(loga={loga}) grad {param_name}: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
         )
 
-    def test_kappa_dot_gradient_matches_fd_for_omega_b(self):
-        """AD gradient of kappa_dot_of_loga must not blow up from Friedmann scan."""
+    @pytest.mark.parametrize("loga,param_name", _OPACITY_SAMPLES)
+    def test_kappa_dot_gradient_matches_fd(self, loga, param_name):
+        """AD gradient of kappa_dot_of_loga matches FD at fixed ln a, finite."""
         ad, fd = _thermo_ad_fd_pair(
-            "omega_b", lambda th: th.kappa_dot_of_loga.evaluate(jnp.array(-8.0))
+            param_name, lambda th: th.kappa_dot_of_loga.evaluate(jnp.array(loga))
         )
         rel = abs(ad - fd) / (abs(fd) + 1e-30)
         assert rel < 0.01, (
-            f"kappa_dot(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+            f"kappa_dot(loga={loga}) grad {param_name}: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
         )
 
-    def test_exp_m_kappa_gradient_matches_fd_for_omega_b(self):
-        """AD gradient of exp_m_kappa_of_loga must match FD at loga=-8."""
+    @pytest.mark.parametrize("loga,param_name", _EXP_M_KAPPA_SAMPLES)
+    def test_exp_m_kappa_gradient_matches_fd(self, loga, param_name):
+        """AD gradient of exp_m_kappa_of_loga matches FD at fixed ln a."""
         ad, fd = _thermo_ad_fd_pair(
-            "omega_b", lambda th: th.exp_m_kappa_of_loga.evaluate(jnp.array(-8.0))
-        )
-        rel = abs(ad - fd) / (abs(fd) + 1e-30)
-        assert rel < 0.05, (
-            f"exp_m_kappa(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
-        )
-
-    def test_g_gradient_matches_fd_for_omega_b(self):
-        """AD gradient of g_of_loga (visibility) must match FD at loga=-8.
-
-        Tests at loga=-8 (early universe, x_e~const, kappa~0) where the
-        n_H_0 rescaling approximation is exact. Near recombination (loga~-7)
-        the approximation has 10-30% error from d(xe)/d(omega_b), but remains
-        finite versus the current 10^8x blowup.
-        """
-        ad, fd = _thermo_ad_fd_pair(
-            "omega_b", lambda th: th.g_of_loga.evaluate(jnp.array(-8.0))
+            param_name, lambda th: th.exp_m_kappa_of_loga.evaluate(jnp.array(loga))
         )
         rel = abs(ad - fd) / (abs(fd) + 1e-30)
         assert rel < 0.01, (
-            f"g(loga=-8) grad omega_b: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+            f"exp_m_kappa(loga={loga}) grad {param_name}: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
+        )
+
+    @pytest.mark.parametrize("loga,param_name", _OPACITY_SAMPLES)
+    def test_g_gradient_matches_fd(self, loga, param_name):
+        """AD gradient of g_of_loga (visibility) matches FD at fixed ln a."""
+        ad, fd = _thermo_ad_fd_pair(
+            param_name, lambda th: th.g_of_loga.evaluate(jnp.array(loga))
+        )
+        rel = abs(ad - fd) / (abs(fd) + 1e-30)
+        assert rel < 0.01, (
+            f"g(loga={loga}) grad {param_name}: AD={ad:.6e} FD={fd:.6e} rel={rel:.2%}"
         )
 
 

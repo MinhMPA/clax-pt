@@ -1,4 +1,5 @@
-"""S1 (smsharma/clax#48): thermodynamics tables and their forward tangents.
+"""S1 (smsharma/clax#48): thermodynamics tables and their forward tangents, and
+the opacity tables' tangents (smsharma/clax#55).
 Primary oracle: CLASS RECFAST recfast_Heswitch=1 (reference_data/<name>/
 thermo_recfast_hesw1.npz). Bars are the code-accuracy gates set for #48.
 Multi-cosmology: recomb_cosmology (11 points; fiducial only under --fast)."""
@@ -12,9 +13,9 @@ import pytest
 from clax.background import background_solve
 from clax.interpolation import CubicSpline
 from clax.thermodynamics import thermodynamics_solve
-from tests.recomb_test_utils import (QS, THETAS, THERMO_GRIDS, as_traced, load_ref,
-                                     spike_ratio, tables, tangent_tables, thermo_prec,
-                                     xe_on_ref_grid, z_of)
+from tests.recomb_test_utils import (QS, QS_OPACITY, THETAS, THERMO_GRIDS, as_traced,
+                                     load_ref, spike_ratio, tables, tables_opacity,
+                                     tangent_tables, thermo_prec, xe_on_ref_grid, z_of)
 
 _CACHE = {}
 # Under --fast the 3000-point (fit_cl) grid runs at fiducial; the default 20000-point
@@ -30,9 +31,10 @@ def _prim_tan(name, p, n, theta="h"):
     return _CACHE[key]
 
 
-def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
-    """Forward tangent vs central finite differences of the tables, at the FIXED
-    sample redshifts zs (smsharma/clax#48).
+def _fd_check(recomb_cosmology, theta, zs, floor=1e-8, qs=QS, tables_fn=tables, b_bar=1e-6):
+    """Forward tangent vs central finite differences of the tables qs (built by
+    tables_fn), at the FIXED sample redshifts zs (smsharma/clax#48; the opacity
+    tables of #55 go through the same check, some with their own floor and b_bar).
 
     The jvp is the tangent of the spline-evaluated values at ln a = log(1/(1+z)):
     the thermodynamics ln a knots move with theta, so the per-knot tangent table
@@ -42,7 +44,7 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
       A (resolved):  |f1/Q| > floor, |f3/Q| > floor and |f1 - f3| <= 1e-4 |f1|;
                      assert |jvp/f1 - 1| <= 1e-3.
       B (at the table's rounding floor): |f1/Q| <= floor and |f3/Q| <= floor, i.e.
-                     the true derivative vanishes to rounding; assert |jvp/Q| <= 1e-6,
+                     the true derivative vanishes to rounding; assert |jvp/Q| <= b_bar,
                      so a tangent spike where the derivative vanishes still fails.
       C: everything else, skipped and counted in the printout.
     """
@@ -52,8 +54,8 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
     loga_s = jnp.log(1.0 / (1.0 + jnp.asarray(zs)))
 
     def sampled(x):
-        tab = tables(replace(as_traced(p), **{theta: x}), prec)
-        return {q: CubicSpline(tab["loga"], tab[q]).evaluate(loga_s) for q in QS}
+        tab = tables_fn(replace(as_traced(p), **{theta: x}), prec)
+        return {q: CubicSpline(tab["loga"], tab[q]).evaluate(loga_s) for q in qs}
 
     prim, tan = jax.jit(lambda x: jax.jvp(sampled, (x,), (jnp.ones_like(x),)))(jnp.asarray(th0, jnp.float64))
     g = jax.jit(sampled)
@@ -62,11 +64,11 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
         hstep = rel_step * abs(th0)
         fp = g(jnp.asarray(th0 + hstep, jnp.float64))
         fm = g(jnp.asarray(th0 - hstep, jnp.float64))
-        fds.append({q: (np.asarray(fp[q]) - np.asarray(fm[q])) / (2 * hstep) for q in QS})
+        fds.append({q: (np.asarray(fp[q]) - np.asarray(fm[q])) / (2 * hstep) for q in qs})
     n_a = n_b = n_c = 0
     worst_a, worst_b = 0.0, 0.0
     loc_b = None
-    for q in QS:
+    for q in qs:
         Q, jv = np.asarray(prim[q]), np.asarray(tan[q])
         f1, f3 = fds[0][q], fds[1][q]
         # Reject non-finite values first: Python max() drops NaN, so a NaN tangent would pass.
@@ -84,7 +86,7 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
             r = abs(jv[i] / Q[i])
             if r > worst_b:
                 worst_b, loc_b = float(r), (q, float(zs[i]))
-    print(f"{name} d/d{theta}: A {n_a} B {n_b} C {n_c} of {len(zs) * len(QS)}, "
+    print(f"{name} d/d{theta}: A {n_a} B {n_b} C {n_c} of {len(zs) * len(qs)}, "
           f"worst A |jvp/FD-1| {worst_a:.3e}, worst B |jvp/Q| {worst_b:.3e}")
     # Minimum resolved points: a third of the sample must be in class A, except
     # theta = h. At fixed z >= 400 with omega_b and omega_cdm fixed, h enters the
@@ -92,13 +94,13 @@ def _fd_check(recomb_cosmology, theta, zs, floor=1e-8):
     # floor, class B, and the h tangent is checked there instead. A third of the
     # sample must still be classified (A or B), so an h test cannot pass with
     # every point skipped in class C.
-    n_min = len(zs) * len(QS) // 3
+    n_min = len(zs) * len(qs) // 3
     min_a = 0 if theta == "h" else n_min
     assert n_a >= min_a, f"ERROR resolved FD points {n_a} < {min_a} ({name}, {theta})"
     assert n_a + n_b >= n_min, f"ERROR classified FD points {n_a + n_b} < {n_min} ({name}, {theta})"
     assert worst_a <= 1e-3, f"ERROR tangent vs FD {worst_a:.3e} > 1e-3 ({name}, {theta})"
-    assert worst_b <= 1e-6, (f"ERROR tangent where the derivative vanishes: |jvp/Q| {worst_b:.3e} > 1e-6 "
-                             f"at {loc_b} ({name}, {theta})")
+    assert worst_b <= b_bar, (f"ERROR tangent where the derivative vanishes: |jvp/Q| {worst_b:.3e} > {b_bar:.0e} "
+                              f"at {loc_b} ({name}, {theta})")
 
 
 @pytest.mark.parametrize("n", GRIDS)
@@ -214,6 +216,53 @@ ZS_H = np.array([1800., 1600., 1550., 1300., 1100., 800., 400.])
 @pytest.mark.parametrize("theta", THETAS)
 def test_tangents_match_converged_fd_hydrogen(recomb_cosmology, theta):
     _fd_check(recomb_cosmology, theta, ZS_H)
+
+
+# ---- Opacity tables: kappa_dot, exp(-kappa), g, dkappa_dot/dlna, g' (smsharma/clax#55) ----
+# The tables perturbations.py reads. Until #55 they carried a stop_gradient with an
+# n_H_0 rescale (d127731): along omega_cdm and N_ur their tangents were exactly zero at
+# every z, and along omega_b and Y_He only the n_H_0 path survived, which is what put
+# the P(k) derivatives 4% (omega_b) and +0.66% (omega_cdm) off converged finite
+# differences. The samples span the fully ionised plasma, recombination, freeze-out
+# and reionisation; the check is the one x_e, c_s^2 and T_b pass above.
+# 1650 and 1550 straddle the hydrogen hand-over at z = 1600 (ZS_H samples it): the
+# derivative tables dkappa_dot/dlna and g' have a kink at each end of the smoothstep
+# window, where a finite difference measures the grid's position against the kink.
+ZS_OP = np.array([3000., 2000., 1650., 1550., 1400., 1200., 1100., 1000., 900., 800., 600.,
+                  400., 200., 100., 30., 10., 7., 3., 1., 0.3, 0.])
+# omega_b: the classifier gates z >= 900. Below the T_b Taylor switch (f_e < 1e-3,
+# z ~ 620; ADR 0003 Known limitations) the primal's omega_b dependence is a dense
+# staircase, one step per knot the switch crosses, so a finite difference at any
+# step measures the staircase's mean slope rather than the derivative: 1e-3 of
+# kappa_dot and g, 1.1e-2 of exp(-kappa) at its zero crossing near z = 400 at
+# omega_b + 20% (ADR 0004; the bias scales with the grid and vanishes onto AD as
+# the grid is refined). kappa integrates upward from z = 0, so exp(-kappa) carries
+# the same absolute bias at every z: 8e-4 of its derivative at z = 800 at omega_b
+# + 20%, 2e-4 or less from z = 900 up. Below 900 the spot checks of
+# tests/test_thermodynamics.py::TestThermoGradients gate the tables at 1%.
+ZS_OP_OMEGA_B = ZS_OP[ZS_OP >= 900.0]
+# h at fixed omega_b, omega_cdm: the tables respond at z <= 10 (Lambda in H(z) and the
+# reionisation epoch), where AD and FD agree to 1e-6. Above z = 1400 exp(-kappa) is
+# below 1e-5 and its h tangent is the trapezoid sum's sensitivity to knot phase
+# (1e-5 to 1e-3 of the value, step-unstable in FD too), so those samples are dropped;
+# between z = 30 and 600 the derivatives are 1e-7 to 1e-5 of the value and sit under
+# the staircase above, so the floor is 1e-5; class B then asserts |jvp/Q| <= 1.4e-5,
+# twice the worst measured over the 11 cosmologies (6.7e-6 at omega_cdm - 20%,
+# job 27184, Oct 20, 2026). Worst resolved errors in that run: 1.8e-4 (h),
+# 2.0e-4 (omega_b), 1.8e-4 (omega_cdm), 9.7e-5 (Y_He), 1.8e-4 (N_ur).
+ZS_OP_H = ZS_OP[ZS_OP <= 1200.0]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("theta", THETAS)
+def test_opacity_tangents_match_converged_fd(recomb_cosmology, theta):
+    if theta == "h":
+        _fd_check(recomb_cosmology, theta, ZS_OP_H, floor=1e-5, qs=QS_OPACITY,
+                  tables_fn=tables_opacity, b_bar=1.4e-5)
+    elif theta == "omega_b":
+        _fd_check(recomb_cosmology, theta, ZS_OP_OMEGA_B, qs=QS_OPACITY, tables_fn=tables_opacity)
+    else:
+        _fd_check(recomb_cosmology, theta, ZS_OP, qs=QS_OPACITY, tables_fn=tables_opacity)
 
 
 # ---- Robustness checks: bounds, T_cmb, coarser grid, jit vs eager, vmap ----
