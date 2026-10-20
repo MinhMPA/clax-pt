@@ -360,3 +360,282 @@ class TestRodas5Batched:
             assert rel_err < 1e-5, (
                 f"Rodas5Batched saveat mode {i}: rel err {rel_err:.3e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Dense output (state between steps) tests
+# ---------------------------------------------------------------------------
+
+def _stiff_oscillator():
+    """Stiff system: an undamped oscillation driving a fast relaxing mode.
+
+        u' = omega v,   v' = -omega u,   w' = -lam (w - u)
+
+    Eigenvalues +-i*omega and -lam.  Exact solution for u(0)=1, v(0)=0:
+        u = cos(omega t),  v = -sin(omega t),
+        w = w_p(t) + (w(0) - w_p(0)) exp(-lam t),
+        w_p = lam (lam cos(omega t) + omega sin(omega t)) / (lam^2 + omega^2).
+    All three components have O(1) amplitude, so absolute errors are
+    directly comparable.
+    """
+    def f(t, y, p):
+        omega, lam = p[0], p[1]
+        return jnp.array([omega * y[1], -omega * y[0], -lam * (y[2] - y[0])])
+
+    def exact(t, omega, lam, w0):
+        u = jnp.cos(omega * t)
+        v = -jnp.sin(omega * t)
+        wp = lam * (lam * jnp.cos(omega * t) + omega * jnp.sin(omega * t)) \
+            / (lam**2 + omega**2)
+        wp0 = lam * lam / (lam**2 + omega**2)
+        w = wp + (w0 - wp0) * jnp.exp(-lam * t)
+        return jnp.stack([u, v, w], axis=-1)
+
+    def y_init(omega, lam):
+        # w starts one unit off its slow manifold: a genuine stiff transient
+        return jnp.array([1.0, 0.0, lam * lam / (lam**2 + omega**2) + 1.0])
+
+    return f, exact, y_init
+
+
+class TestDenseOutput:
+    """The solver's local interpolation between accepted steps.
+
+    The perturbation solve saves sources on a dense conformal-time grid
+    (``SaveAt(ts=tau_grid)``), so the state at most output times comes from
+    the solver's ``interpolation_cls``, not from a step endpoint.  Until
+    Oct 12, 2026 Rodas5/Rodas5Batched used ``LocalLinearInterpolation``,
+    which with late-time steps of hundreds of Mpc put the late-ISW source
+    (hence TT at l<30) off by up to 46% relative to Kvaerno5 at rtol 1e-4 /
+    atol 1e-6 (precision sweep of Oct 10-11, 2026, finding 5).  The fix is
+    diffrax's ``ThirdOrderHermitePolynomialInterpolation`` from (y, dt*f) at
+    both step ends, the same dense output Kvaerno5 uses.
+
+    Exempt from the multi-cosmology rule: toy ODEs with closed-form solutions,
+    no cosmology enters.
+    """
+
+    T1 = 10.0           # ten oscillation periods at omega = 2*pi
+    N_TS = 2001         # output times, ~13 per solver step
+    RTOL, ATOL = 1e-4, 1e-7   # loose: 148 steps over T1, omega*h ~ 0.4
+
+    def test_rodas5_dense_output_stiff_oscillator(self):
+        """Interpolated state between large Rodas5 steps vs the exact solution.
+
+        Measured max |y - exact| over 2001 output times (148 steps):
+        5.4e-2 with LocalLinearInterpolation (before the fix),
+        8.0e-4 with the cubic Hermite dense output.  Bar: 5e-3, an order of
+        magnitude below the linear number.
+        """
+        f, exact, y_init = _stiff_oscillator()
+        omega, lam = 2.0 * jnp.pi, 1000.0
+        p = jnp.array([omega, lam])
+        y0 = y_init(omega, lam)
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        sol = diffrax.diffeqsolve(
+            diffrax.ODETerm(f), Rodas5(), t0=0.0, t1=self.T1, dt0=1e-3,
+            y0=y0, args=p,
+            stepsize_controller=diffrax.PIDController(rtol=self.RTOL, atol=self.ATOL),
+            max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+        )
+        err = float(jnp.max(jnp.abs(sol.ys - exact(ts, omega, lam, y0[2]))))
+        n_steps = int(sol.stats["num_steps"])
+        assert err < 5e-3, (
+            f"Rodas5 dense output: max abs err {err:.3e} over {self.N_TS} "
+            f"output times, {n_steps} steps (linear interpolation gives 5.4e-2)"
+        )
+
+    def test_rodas5_batched_dense_output_stiff_oscillator(self):
+        """Same check for Rodas5Batched (two modes sharing one step size).
+
+        Modes omega = (2pi, 3pi), lam = (1000, 300).  Measured max |y - exact|
+        over 2001 output times (186 shared steps): 7.1e-2 with
+        LocalLinearInterpolation (before the fix), 1.5e-3 with the cubic
+        Hermite dense output.  Bar: 7e-3.
+        """
+        f, exact, y_init = _stiff_oscillator()
+        omegas = jnp.array([2.0 * jnp.pi, 3.0 * jnp.pi])
+        lams = jnp.array([1000.0, 300.0])
+        params = jnp.stack([omegas, lams], axis=-1)       # (batch, 2)
+        y0 = jnp.stack([y_init(omegas[i], lams[i]) for i in range(2)])
+
+        def vf_batched(t, y_batch, args):
+            if isinstance(args, tuple) and len(args) == 2:
+                return jax.tree_util.tree_map(jnp.zeros_like, y_batch)
+            return jax.vmap(f, in_axes=(None, 0, 0))(t, y_batch, args)
+
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        sol = diffrax.diffeqsolve(
+            diffrax.ODETerm(vf_batched), Rodas5Batched(),
+            t0=0.0, t1=self.T1, dt0=1e-3, y0=y0, args=(f, params),
+            stepsize_controller=diffrax.PIDController(rtol=self.RTOL, atol=self.ATOL),
+            max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+        )
+        ex = jnp.stack([exact(ts, omegas[i], lams[i], y0[i, 2]) for i in range(2)],
+                       axis=1)                                # (n_ts, batch, 3)
+        err = float(jnp.max(jnp.abs(sol.ys - ex)))
+        n_steps = int(sol.stats["num_steps"])
+        assert err < 7e-3, (
+            f"Rodas5Batched dense output: max abs err {err:.3e} over {self.N_TS} "
+            f"output times, {n_steps} steps (linear interpolation gives 7.1e-2)"
+        )
+
+    def test_rodas5_ad_through_dense_output(self):
+        """Reverse-mode AD through SaveAt(ts=...) vs the analytic derivative.
+
+        Objective: sum_i u(t_i) with u = cos(omega t_i) exactly, so
+        d/d omega = -sum_i t_i sin(omega t_i).  The gradient flows through the
+        dense-output coefficients (and, after the fix, through the extra RHS
+        evaluation per step) under RecursiveCheckpointAdjoint.  Measured rel
+        err: 4.5e-3 with LocalLinearInterpolation (the interpolant's shape is
+        wrong), 4.9e-6 with the cubic Hermite dense output.  Bar: 1e-3.
+        """
+        f, exact, y_init = _stiff_oscillator()
+        lam = 1000.0
+        ts = jnp.linspace(0.0, 3.0, 301)
+
+        def objective(omega):
+            p = jnp.array([omega, lam])
+            sol = diffrax.diffeqsolve(
+                diffrax.ODETerm(f), Rodas5(), t0=0.0, t1=3.0, dt0=1e-3,
+                y0=y_init(omega, lam), args=p,
+                stepsize_controller=diffrax.PIDController(rtol=1e-6, atol=1e-9),
+                max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+                adjoint=diffrax.RecursiveCheckpointAdjoint(),
+            )
+            return jnp.sum(sol.ys[:, 0])
+
+        omega = 2.0 * jnp.pi
+        grad_ad = float(jax.grad(objective)(omega))
+        grad_exact = float(-jnp.sum(ts * jnp.sin(omega * ts)))
+        rel_err = abs(grad_ad / grad_exact - 1)
+        assert rel_err < 1e-3, (
+            f"Rodas5 AD through dense output: d/domega AD {grad_ad:.6f} vs "
+            f"exact {grad_exact:.6f}, rel err {rel_err:.3e}"
+        )
+
+    # --- the FSAL-style carry of f(t1, y1) (commit ab668ae): the three ways
+    # the carried derivative could go stale, each pinned by a test.
+
+    def _solve_osc(self, solver, f, y0, p, ts, t1=None, **kw):
+        return diffrax.diffeqsolve(
+            diffrax.ODETerm(f), solver, t0=0.0, t1=self.T1 if t1 is None else t1,
+            dt0=1e-3, y0=y0, args=p,
+            stepsize_controller=diffrax.PIDController(rtol=self.RTOL, atol=self.ATOL, **kw),
+            max_steps=100000, saveat=diffrax.SaveAt(ts=ts),
+        )
+
+    def test_fsal_carry_bit_identical_to_recompute(self):
+        """The carried f(t1, y1) is the next step's f(t0, y0) exactly, so a
+        solver that re-evaluates f(t0, y0) on every step takes the same steps
+        (accepted and rejected) and returns the same outputs to the bit. The
+        stiff oscillator at the module tolerances rejects ~40 of ~150 steps,
+        so the rejected-step path (diffrax keeps the previous solver_state
+        with jnp.where(keep_step, ...)) is exercised."""
+        class Rodas5Recompute(Rodas5):
+            def step(self, terms, t0, t1, y0, args, solver_state, made_jump):
+                _, f_carry = solver_state
+                return Rodas5.step(self, terms, t0, t1, y0, args,
+                                   (jnp.array(True), f_carry), made_jump)
+
+        f, exact, y_init = _stiff_oscillator()
+        omega, lam = 2.0 * jnp.pi, 1000.0
+        p = jnp.array([omega, lam])
+        y0 = y_init(omega, lam)
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        a = self._solve_osc(Rodas5(), f, y0, p, ts)
+        b = self._solve_osc(Rodas5Recompute(), f, y0, p, ts)
+        n_rej = int(a.stats["num_rejected_steps"])
+        assert n_rej > 0, "the check needs rejected steps to exercise the carry"
+        assert int(a.stats["num_steps"]) == int(b.stats["num_steps"])
+        assert n_rej == int(b.stats["num_rejected_steps"])
+        max_diff = float(jnp.max(jnp.abs(a.ys - b.ys)))
+        assert bool(jnp.array_equal(a.ys, b.ys)), (
+            f"FSAL carry vs recompute: max |diff| {max_diff:.3e} over "
+            f"{int(a.stats['num_steps'])} steps ({n_rej} rejected)"
+        )
+
+    def test_fsal_carry_recomputed_after_jump(self):
+        """A vector field that switches sign at t = 5 (``jump_ts=[5.0]``):
+        diffrax lands a step on the jump and flags the next step with
+        ``made_jump``, where the carried f(5, y), evaluated on the old field
+        (the switch is ``t <= 5``), must not be reused. Forcing +A -> -A on
+        the relaxing mode, A = lam / 2, so the stale derivative is off by
+        2A = 1000 on w'. Exact solution: u, v as before; w = w_p + s/lam
+        + (w(t_s) - w_p(t_s) - s/lam) exp(-lam (t - t_s)) with s = +A from
+        t_s = 0 and s = -A from t_s = 5.
+
+        Two checks. End to end: the jump_ts run meets the dense-output bar.
+        At the solver level, where the outcome does not depend on how the
+        step controller reacts to a wrong derivative: ``Rodas5.step`` with a
+        deliberately wrong carried vector returns the fresh-evaluation result
+        when ``made_jump`` is set, and a different one when it is not.
+        """
+        f0, exact0, y_init = _stiff_oscillator()
+        omega, lam, A, t_jump = 2.0 * jnp.pi, 1000.0, 500.0, 5.0
+
+        def f(t, y, p):
+            s = jnp.where(t <= t_jump, A, -A)
+            return f0(t, y, p) + jnp.array([0.0, 0.0, s])
+
+        def exact(ts, w0):
+            base = exact0(ts, omega, lam, w0)            # u, v exact; w with s = 0
+            wp0 = lam * lam / (lam**2 + omega**2)
+            wp = base[:, 2] - (w0 - wp0) * jnp.exp(-lam * ts)
+            w_before = wp + A / lam + (w0 - wp0 - A / lam) * jnp.exp(-lam * ts)
+            wp5 = lam * (lam * jnp.cos(omega * t_jump) + omega * jnp.sin(omega * t_jump)) / (lam**2 + omega**2)
+            w5 = wp5 + A / lam + (w0 - wp0 - A / lam) * jnp.exp(-lam * t_jump)
+            w_after = wp - A / lam + (w5 - wp5 + A / lam) * jnp.exp(-lam * (ts - t_jump))
+            w = jnp.where(ts <= t_jump, w_before, w_after)
+            return base.at[:, 2].set(w)
+
+        p = jnp.array([omega, lam])
+        y0 = y_init(omega, lam)
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+        sol = self._solve_osc(Rodas5(), f, y0, p, ts, jump_ts=jnp.array([t_jump]))
+        err = float(jnp.max(jnp.abs(sol.ys - exact(ts, y0[2]))))
+        print(f"jump test: max abs err {err:.3e}, {int(sol.stats['num_steps'])} steps")
+        assert err < 5e-3, f"Rodas5 across a jump_ts discontinuity: max abs err {err:.3e}"
+
+        # Solver-level check of the predicate, one step starting just after the jump.
+        solver, term = Rodas5(), diffrax.ODETerm(f)
+        t0 = float(jnp.nextafter(jnp.float64(t_jump), jnp.float64(jnp.inf)))
+        t1 = t0 + 0.01
+        y_s = exact(jnp.array([t0]), y0[2])[0]
+        fresh_state = solver.init(term, t0, t1, y_s, p)        # first_step=True: evaluates f(t0, y0)
+        y_fresh = solver.step(term, t0, t1, y_s, p, fresh_state, jnp.array(False))[0]
+        f_wrong = term.vf(t0, y_s, p) + jnp.array([0.0, 0.0, 2.0 * A])   # the old field's value
+        y_jump = solver.step(term, t0, t1, y_s, p, (jnp.array(False), f_wrong), jnp.array(True))[0]
+        y_stale = solver.step(term, t0, t1, y_s, p, (jnp.array(False), f_wrong), jnp.array(False))[0]
+        assert bool(jnp.array_equal(y_jump, y_fresh)), (
+            f"made_jump=True must discard the carried vector: max |diff| "
+            f"{float(jnp.max(jnp.abs(y_jump - y_fresh))):.3e}")
+        d_stale = float(jnp.max(jnp.abs(y_stale - y_fresh)))
+        assert d_stale > 1e-6, (
+            f"made_jump=False must use the carried vector (otherwise the carry is dead code): "
+            f"max |diff| {d_stale:.3e}")
+
+    def test_fsal_carry_under_vmap_partial_rejection(self):
+        """jax.vmap of the single-mode solve over (omega, lam) pairs whose steps
+        are accepted and rejected on different iterations (the predicate
+        ``unvmap_any(first_step | made_jump)`` is shared, the carried vector
+        and ``keep_step`` are per member): every member must reproduce its own
+        unvmapped solve."""
+        f, exact, y_init = _stiff_oscillator()
+        omegas = jnp.array([2.0 * jnp.pi, 3.0 * jnp.pi, 1.0 * jnp.pi])
+        lams = jnp.array([1000.0, 300.0, 3000.0])
+        ts = jnp.linspace(0.0, self.T1, self.N_TS)
+
+        def solve_one(omega, lam):
+            p = jnp.array([omega, lam])
+            sol = self._solve_osc(Rodas5(), f, y_init(omega, lam), p, ts)
+            return sol.ys, sol.stats["num_steps"]
+
+        ys_v, n_v = jax.vmap(solve_one)(omegas, lams)
+        for i in range(3):
+            ys_i, n_i = solve_one(omegas[i], lams[i])
+            diff = float(jnp.max(jnp.abs(ys_v[i] - ys_i)))
+            assert diff < 1e-9, (
+                f"member {i}: vmapped vs unvmapped Rodas5 differ by {diff:.3e} "
+                f"({int(n_v[i])} vs {int(n_i)} steps)")
+        assert len(set(int(n) for n in n_v)) > 1, "members should take different step counts"
