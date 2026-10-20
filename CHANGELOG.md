@@ -1,12 +1,151 @@
 # clax Development Progress
 
-## Status: Speed-optimized fit_cl preset (34s V100) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
+## Status: Retuned presets (fit_cl ~17-19 s, planck_cl ~124 s end to end on a V100, job 24668) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 `jax.jvp` (forward-mode AD) now works through the full pipeline. One-loop EFTofLSS
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
+
+### Oct 12, 2026: Preset retune (planck_cl ~45x faster at equal accuracy), fast-path Bessel table fix, presets on the Hermite rodas5
+
+Follows the Oct 10-11 precision sweep (`docs/precision_sweep_2026-10-10.md`;
+its apparatus, `diags/diag_precision_sweep.py` and the sweep sbatch, stays on
+branch `exp/precision-sweep`). Branch `fix/preset-retune`. The "~45x" in the
+title is the perturbation-stage ratio of the sweep's Kvaerno5 candidate
+(4606 s -> 100 s on a V100, massless); the shipped rodas5 preset is ~150x on
+that stage (~30 s massless) and ~38x end to end (`benchmark_speed.py` cached,
+4679 s -> 124 s, job 24668, before #53; 101.5 s after #53, job 27000).
+
+- `PrecisionParams.planck_cl()`: l_max 17/17/17, rtol 1e-4, atol 1e-6,
+  max_steps 8192, hr_n_k_fine 20000 (was l_max 50, 1e-6, 1e-11, 131072,
+  5000). The sweep measured the same spectra to 0.1% (0.09% at l=2, 0.05%
+  elsewhere) at 100 s instead of 4606 s per perturbation solve on a V100
+  (massless); 169 s instead of 7006 s with a 0.06 eV neutrino (5 q-bins,
+  l_max_ncdm 17; l_max_ncdm 50 is identical). `planck_fast` follows;
+  `science_cl` / `medium_cl` move to the same tolerance rung.
+- `compute_cls_all_fast`: Bessel table at `JL_TABLE_X_PER_UNIT = 30` points
+  per unit x (was 3; new kwarg `x_per_unit`). Linear interpolation of the
+  table biased every C_l by ~ -h^2/12 in amplitude: -1% TT at l < 50, +20%
+  EE at l=2, and a k_max dependence. With the finer table and n_k_fine
+  20000 the fast path matches the exact-j_l path to 0.011% (l <= 500),
+  0.024% (l <= 1000), 0.17% (l <= 2000); against CLASS (massless RECFAST):
+  TT within 0.08% (l < 30), 0.23% (l <= 500), 0.26% (l <= 1000), EE within
+  0.31%. Cost: harmonic ~12 s instead of ~4 s, table ~0.7 GB at l_max 2500.
+- Solver: `planck_cl`, `planck_fast` and `fit_cl` use rodas5 with the cubic
+  Hermite dense output of the entry below (this branch stacks on
+  `fix/rodas5-dense-output`). Solver-choice measurement (V100, job 24652,
+  massless, l<=1000 vs CLASS, differentials rodas5 - kvaerno5 at identical
+  settings): planck-like at rtol 1e-4 / atol 1e-6: TT 0.077% (l=2), EE 0.03%,
+  TE 0.05%, perturbations 29.5 s vs 110.6 s; fit_cl-like: TT 0.080% (l=2),
+  EE 0.03%, TE 0.05%, 9.8 s vs 54.7 s (16.8 s vs 61.0 s end to end). The old
+  fit_cl tolerances rtol 1e-3 / atol 1e-4 with the Hermite output: TT 1.8% at
+  l=2, 1.3% at l=3, < 0.2% from l=5, for 4.2 s; kept at 1e-4 / 1e-6. With
+  the earlier linear dense output rodas5 was off by -46% at l=2 at these
+  tolerances, which the preset's spot checks at l=20,100,500,1000 never saw.
+- Tests: `tests/test_bessel_table.py` (table bias law -h^2/12, module
+  default, fast-path default) and `tests/test_preset_accuracy.py` (slow:
+  planck_cl vs CLASS massless-RECFAST with the measured bars x1.5; the LCDM
+  grid vs CLASS default references with looser bars; fit_cl low-l guard).
+- Candidate measured before validation (sweep configs P1/P1m, V100 cached):
+  perturbations 105 s massless / 189 s massive, harmonic 13 s; vs CLASS
+  massless RECFAST TT 0.09 / 0.22 / 0.25% (l<30 / <=500 / <=1000), EE 0.60 /
+  0.48 / 0.98% (l=2-4 / 5-500 / 5-1000, the last a single l near 526 that
+  is the sparse l grid of the C_l stage, not the preset -- see follow-ups;
+  rms 0.28%), TE/sqrt(TT EE) 0.37%; vs CLASS fiducial (massive, HyRec) TT 0.20 /
+  0.23 / 0.26%, EE 0.52 / 0.49 / 0.75%. th_n_points 20000 vs 100000: <=0.02%
+  to l=500, <=0.05% to l=1000, ~0.13% above; 13 s vs 59 s (planck_cl keeps
+  100000; planck_fast uses 20000).
+- Sparse-l spline end condition (found by the validation run): the dense
+  C_l of all three `compute_cls_all*` paths come from a cubic spline over
+  `sparse_l_grid(l_max)`, whose end condition put ~2% errors in the last ~50
+  multipoles (1.87% at l=983 for l_max=1000). `L_SPLINE_PAD = 100` extends
+  the sparse grid (and the fast path's table rows) past l_max; the returned
+  range is unchanged. Test in `tests/test_bessel_table.py`.
+- Validation (igpu V100, job 24639, full mode, `tests/test_preset_accuracy.py`
+  computing to the preset's hr_l_max): all 7 accuracy tests pass. planck_cl vs
+  CLASS massless RECFAST: TT 0.083 / 0.233 / 0.265% (l<=30 / 500 / 1000), EE
+  0.60 / 0.48 / 0.98% (2-4 / 5-500 / 5-1000), TE/sqrt(TT EE) 0.37%. planck_cl
+  (0.06 eV neutrino) vs the CLASS default (HyRec) references over l<=1000:
+  TT 0.27 / 0.24 / 0.42 / 0.26 / 0.22%, EE 0.75 / 1.03 / 0.84 / 0.78 / 0.99%,
+  TE 0.37 / 0.35 / 0.44 / 0.44 / 0.31% for fiducial / h_high / omega_b_high /
+  omega_cdm_low / ns_high. fit_cl vs CLASS massless RECFAST: TT 0.46% (l<=30),
+  0.69% (l<=500), EE 1.25% (5-500).
+- Timings (job 24621, `scripts/benchmark_speed.py`, V100, cached second
+  call; note the script keeps the preset's 5 neutrino q-bins at m_ncdm=0, so
+  this is the massive-like cost): planck_cl thermodynamics 58.7 s,
+  perturbations 174.0 s, harmonic 12.7 s, total 246 s (was 4679 s with the
+  previous settings in the Oct 2026 sweep); fit_cl 1.8 / 51.9 / 7.2 s, total
+  61.5 s (was 34 s with rodas5 at rtol 1e-3 / atol 1e-4). Spot checks at
+  l=20/100/500/1000: planck_cl TT -0.07/+0.05/+0.20/+0.14%, EE -0.44/-0.28/
+  -0.10/+0.27%; fit_cl TT -0.37/+0.05/-0.32/-6.4% (20 k/decade limits l>500).
+- Fast suite (job 24621, `--fast`, known `test_pk_rosenbrock_vs_kvaerno5`
+  deselected): 326 passed, 74 skipped, 2 failed, both in
+  `tests/test_solver_selection.py`, which pinned the previous fit_cl solver
+  and tolerance (that run was the interim kvaerno5 fit_cl); the tests now
+  assert rodas5 for planck_cl / planck_fast / fit_cl and rtol 1e-4 /
+  atol 1e-6 for fit_cl.
+- Final validation of the stack (job 24668 at 9cb9bc1, igpu V100): all 11
+  accuracy tests pass (planck_cl vs CLASS massless RECFAST TT 0.086 / 0.233
+  / 0.262%, EE 0.60 / 0.46 / 0.98% (the l ~ 526 sparse-l-grid point, see
+  follow-ups), TE 0.33%; LCDM grid TT <= 0.43%, EE <=
+  1.03%, TE <= 0.42% at l<=1000; fit_cl TT 0.46% at l<=30, 0.69% at l<=500,
+  EE 1.25%). `benchmark_speed.py` cached: planck_cl thermodynamics 63.1 s,
+  perturbations 47.2 s (with the 5 neutrino q-bins at m=0), harmonic 13.4 s,
+  total 124 s (4679 s before the retune, 38x); fit_cl 2.1 / 8.4 / 7.6 s,
+  total 18.6 s. Fast suite: 333 passed, 79 skipped, 1 deselected, 0 failed.
+  Note on that suite: the `--fast` variants of the matched-species
+  perturbation comparisons in `tests/test_perturbations.py`
+  (`_matched_species_results` and
+  `test_ncdm_observable_projection_matches_integrated_moments`) run on
+  `planck_fast()`, whose hierarchy (17/17/17, was 50) and tolerances
+  (rtol 1e-4 / atol 1e-6, were 1e-6 / 1e-11) this entry loosened; they
+  pass, but the comparison against the CLASS perturbation references is
+  looser than its authors intended.
+
+- Re-validated after the rebase onto main 7d23008 (#53 recombination rewrite;
+  job 27000, igpu V100, Oct 20, 2026): 11/11 accuracy tests. planck_cl vs CLASS
+  massless RECFAST TT 0.086 / 0.238 / 0.271% (l <= 30 / 500 / 1000), EE 0.596 /
+  0.455 / 0.981% (2-4 / 5-500 / 5-1000), TEn 0.327%; LCDM grid TT 0.228-0.424%,
+  EE 0.755-1.038%, TEn 0.297-0.417%; fit_cl vs massless RECFAST TT 0.461% (l <=
+  30 and <= 500; was 0.69% to 500), EE 1.194%. Cached V100 stages: planck_cl bg
+  0.6 / th 59.6 / pt 27.8 / hr 13.5 s = 101.5 s (was 124 s: the smoother x_e
+  costs fewer perturbation steps), fit_cl 16.9 s. Fast suite: 462 passed, 989 skipped, 1 deselected, 0 failed in 1:23:27 (job 27000).
+
+**Follow-ups.** The sparse l grid's 500 -> 550 step is the next C_l-stage
+item. `sparse_l_grid` (clax/bessel.py) steps by 20 to l = 500 and by 50 from
+550, and the cubic spline across that first wide interval is the worst place
+on the grid. Splining CLASS's own massless-RECFAST spectra on the padded
+sparse grid and comparing with CLASS's dense output gives, from the l grid
+alone: EE 1.13% at l = 526, TT 0.16% at l = 527; EE 0.43% at l = 832, 0.32%
+at 1425, 0.30% at 1776; TT about 0.10% over l = 680-1580; TE/sqrt(TT EE)
+0.22% at l = 570; below l = 500 the grid contributes <= 0.03% TT and <= 0.11%
+EE. The 0.98% EE excursion of the validation runs is this grid point, not the
+preset. Not refined in this PR: a physics-facing change that would reopen
+every bar. The same measurement bounds the spline end condition that
+`L_SPLINE_PAD = 100` removes: over the last 50 multipoles the residual is
+1.94% TT / 1.80% EE at l_max = 1000 and 0.26% / 2.7% at 1500 unpadded, 0.03%
+TT at both and 0.09% EE at 1500 with the pad; larger pads gain nothing (the
+synthetic test in `tests/test_bessel_table.py` measures ~1e-3 padded against
+its 2e-3 bar, which is that model's own interior spline error).
+
+**Finding (Oct 20, 2026, job 27008): fit_cl with the default 0.06 eV neutrino
+is 15% off CLASS at low l.** The multi-cosmology rule asked for a fit_cl test
+on the LCDM grid (`TestFitClPreset::test_lcdm_grid_massive`, CLASS HyRec
+references with one 0.06 eV neutrino): max |C_l / C_CLASS - 1| TT 14.6-15.4%
+at l = 2-30 (the same maximum over 2-500, so the error is at low l), EE
+3.1-4.1% (5-500), TE/sqrt(TT EE) 16.8-19.4%, at fiducial / h_high /
+omega_b_high / omega_cdm_low / ns_high alike. The same preset at the
+massless-RECFAST fiducial reads 0.46% / 0.69% / 1.25%, and planck_cl (5
+q-bins) on this grid 0.26% / 0.75% / 0.36%, so the harness is not the cause:
+it is fit_cl's `ncdm_q_size=0` ("disable ncdm hierarchy, massless approx"),
+which leaves the 0.06 eV species in the background but not in the
+perturbations. Pre-existing; the retune did not change it. Recorded as a
+strict xfail with the planck_cl-grid bars as the target, so the test starts
+failing when the treatment is fixed and the bars get re-measured. The
+decision on fit_cl's neutrino treatment (q-bins at some cost, or a documented
+massless-only scope) is open.
 
 ### Oct 12, 2026: Rodas5 dense output is cubic Hermite (was linear): the Rosenbrock path's 46% low-l TT error is gone
 

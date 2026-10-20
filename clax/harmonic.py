@@ -671,7 +671,7 @@ def compute_cls_all(
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
     """
-    l_sparse = sparse_l_grid(l_max)
+    l_sparse = _sparse_l_padded(l_max)
 
     cl_tt_sparse = compute_cl_tt(pt, params, bg, tuple(l_sparse.tolist()),
                                  k_interp_factor, l_switch, delta_l,
@@ -720,7 +720,7 @@ def compute_cls_all_interp(
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
     """
-    l_sparse = sparse_l_grid(l_max)
+    l_sparse = _sparse_l_padded(l_max)
 
     cl_tt_sparse = compute_cl_tt_interp(pt, params, bg, tuple(l_sparse.tolist()),
                                          n_k_fine=n_k_fine, tt_mode=tt_mode,
@@ -757,11 +757,39 @@ def compute_cls_all_interp(
 # _build_jl_table is now build_jl_table, imported from clax.bessel
 _build_jl_table = build_jl_table
 
+# The sparse-l grid is extended this far beyond the requested l_max so that
+# the cubic spline's end condition sits outside the returned range. Without
+# the pad the last ~50 multipoles are off by up to 2% (1.87% at l=983 for
+# l_max=1000; precision sweep follow-up, Oct 12, 2026). Measured by splining
+# CLASS's own spectra on the sparse grid: the end-condition residual over the
+# last 50 multipoles is 1.94% TT / 1.80% EE at l_max=1000 and 0.26% / 2.7%
+# at 1500 unpadded, 0.03% TT at both l_max and 0.09% EE at 1500 with the
+# pad; larger pads gain nothing. The whole-range spline error is a separate
+# matter, set by the grid's 500 -> 550 step: EE 1.13% at l=526, TT 0.16% at
+# l=527, EE 0.43% at l=832, TT ~0.10% over l=680-1580; <= 0.03% TT and
+# <= 0.11% EE below l=500 (CHANGELOG, Oct 12, 2026, follow-ups). Costs two
+# extra l rows.
+L_SPLINE_PAD = 100
+
+
+def _sparse_l_padded(l_max):
+    return sparse_l_grid(l_max + L_SPLINE_PAD)
+
+# Bessel lookup-table resolution (points per unit x). Linear interpolation of
+# j_l at spacing h biases the amplitude by ~ -h^2/12 on average; the historical
+# 3 points per unit x (h ~ 0.33 at k_max = 1/Mpc) gave a -1% TT offset at
+# l < 50 and +20% in EE at l = 2 (precision sweep, Oct 2026,
+# docs/precision_sweep_2026-10-10.md finding 6). At 30 the fast path matches
+# the exact-j_l path to 0.01% for l <= 500; the table costs ~0.7 GB at
+# l_max 2500 and the harmonic stage ~12 s instead of ~4 s on a V100.
+JL_TABLE_X_PER_UNIT = 30.0
+
 
 def compute_cls_all_fast(
     pt, params, bg, l_max=1500,
     n_k_fine=5000, tt_mode=None,
     k_interp_method="spline",
+    x_per_unit=JL_TABLE_X_PER_UNIT,
 ):
     """Fast C_l computation using precomputed j_l/j_l' tables + source interpolation.
 
@@ -793,6 +821,15 @@ def compute_cls_all_fast(
             the perturbation solve to have used pt_k_grid_type="chebyshev"
             (Lobatto nodes in log k) -- the barycentric weights assume
             Lobatto spacing.
+        x_per_unit: Bessel-table points per unit x (default
+            JL_TABLE_X_PER_UNIT = 30). Values below ~10 bias C_l low by
+            ~ -h^2/12 per unit amplitude; see the module constant.
+
+    Accuracy (Oct 2026 sweep, massless RECFAST reference, planck_cl-class
+    perturbations): with n_k_fine 20000 and the default table this path
+    matches the exact-j_l path (compute_cls_all_interp) to 0.011% for
+    l <= 500, 0.024% for l <= 1000, 0.17% for l <= 2000; n_k_fine 5000 is
+    percent-level above l ~ 500.
 
     Returns:
         dict with 'ell', 'tt', 'ee', 'te' (arrays of length l_max+1)
@@ -834,8 +871,8 @@ def compute_cls_all_fast(
 
     # 3. Build j_l and j_l' tables for all sparse l-values
     x_max = float(jnp.max(k_fine) * tau_0 * 1.05)
-    n_x = max(30000, int(x_max * 3))  # ~3 points per unit x
-    x_table, jl_table, jlp_table = _build_jl_table(l_max, n_x=n_x, x_max=x_max)
+    n_x = max(30000, int(x_max * x_per_unit))  # see JL_TABLE_X_PER_UNIT
+    x_table, jl_table, jlp_table = _build_jl_table(l_max + L_SPLINE_PAD, n_x=n_x, x_max=x_max)  # rows match _sparse_l_padded
 
     # 4. Precompute interpolation indices (shared across all l and both tables)
     idx_right = jnp.searchsorted(x_table, x_flat_query)
@@ -847,7 +884,7 @@ def compute_cls_all_fast(
     frac = jnp.clip(frac, 0.0, 1.0)
 
     # 5. Compute transfer functions via table lookup (scan over l)
-    l_sparse = sparse_l_grid(l_max)
+    l_sparse = _sparse_l_padded(l_max)
     n_l = len(l_sparse)
     l_sparse_jnp = jnp.array(l_sparse, dtype=jnp.float64)
 
