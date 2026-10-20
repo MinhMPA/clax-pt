@@ -67,7 +67,8 @@ the old solver):
 - Fast suite (`pytest tests/ --fast -q`, V100, the known pre-existing
   `test_pk_rosenbrock_vs_kvaerno5` deselected): 328 passed, 72 skipped,
   1 deselected in 1:01:10 at the Hermite commit and 328 passed, 72 skipped,
-  1 deselected in 1:04:41 at the FSAL commit (both V100).
+  1 deselected in 1:04:41 at the FSAL commit (both V100). After the rebase onto
+  main 7d23008 (#53 added its own test files; job 26999, Oct 20, 2026): 457 passed, 977 skipped, 1 deselected, 0 failed in 1:23:48 (the fast suite now carries #53's test files).
 
 **Cost** (`diags/diag_rodas5_dense_output.py --abc`: the three solver
 versions interleaved in one process on one V100, 4 rounds, scatter
