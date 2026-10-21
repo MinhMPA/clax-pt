@@ -154,7 +154,14 @@ at this precision block, so the remaining 1e-4 to 9e-4 is their scatter. The
 primal P(k) values are identical on both trees. This block has `ncdm_q_size = 0`,
 so #45's massive-neutrino residual does not enter; with the neutrino
 gravitationally negligible #45 had attributed the whole omega_cdm bias to the
-cut, which this confirms. The omega_b P(k) numbers are in CHANGELOG.md.
+cut, which this confirms.
+
+P(k) level, omega_b: dP(k = 0.05 Mpc^-1)/d omega_b at fiducial, the quantity
+of `test_public_table_partials_match_fd_full` (production reverse mode through
+`compute_pk_table`), on this change (job 27333): AD -3.52446e5 against central
+finite differences -3.52533e5 at the test's step (2e-5) and -3.52458e5 at twice
+it, i.e. -0.025% and -0.004%; the two finite differences differ by 0.02%. On
+main the same AD was 4.0% off (jobs 24324, 24429).
 
 ## Tests
 

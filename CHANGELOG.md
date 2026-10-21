@@ -87,7 +87,9 @@ smoothness along h at the three downstream cosmologies): 12 passed (job 27168,
 2:37). `test_pk_gradients.py::TestPkPublicTableGradients::test_public_table_partials_match_fd_full`,
 the test #55 reported failing (dP(k = 0.05 Mpc^-1)/d omega_b 4.0% off, bar 1%):
 passed (job 27167, CPU, 5:13 for the one reverse-mode table gradient and six
-finite-difference table solves).
+finite-difference table solves); the residual itself is -0.025% at the test's
+step and -0.004% at twice it, the finite differences differing by 0.02% (job
+27333).
 
 **Discovered, pre-existing.** Below the T_b Taylor switch (f_e < 1e-3, z ~ 620;
 ADR 0003 Known limitations) the primal's dependence on omega_b carries grid-scale
