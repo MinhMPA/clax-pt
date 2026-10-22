@@ -1,12 +1,121 @@
 # clax Development Progress
 
-## Status: Retuned presets (fit_cl ~17-19 s, planck_cl ~124 s end to end on a V100, job 24668) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
+## Status: Retuned presets (fit_cl ~20 s with its massive-neutrino hierarchy, job 27173; planck_cl ~124 s end to end on a V100, job 24668) + full accuracy pipeline + forward-mode AD + one-loop EPT (clax-pt)
 
 **End-to-end differentiable pipeline from cosmological parameters to P(k),
 C_l^TT/EE/TE/BB, and lensed C_l^TT/EE/TE/BB. AD gradients verified to 0.03%.
 `jax.jvp` (forward-mode AD) now works through the full pipeline. One-loop EFTofLSS
 power spectra (`clax.ept`, CLASS-PT port) and EPT-corrected C_l^phiphi via
 `compute_cl_pp(... nonlinear="ept")`.**
+
+### Oct 22, 2026: fit_cl gets a massive-neutrino hierarchy (5 q-bins, l_max_ncdm 8, no fluid approximation; #57)
+
+Branch `fix/fitcl-ncdm-qgrid` (PR #58). Sweep scripts `diags/diag_fitcl_qgrid.py` and
+`diags/diag_pk_batched_steps.py`; every report verbatim in
+`docs/fitcl_qgrid_2026-10-20.md` (jobs 27173, 27187, 27200, 27685, 27686, 27711, 27746,
+27762, V100; main 99b62fe, then 5ac3df3). New CLASS references:
+`reference_data/massive_nu_030` (checked in; `scripts/generate_class_reference.py
+--model <name>`, CLASS 3.3.4 defaults, HyRec, the file set of `massive_nu_015`), and
+three decision-only ones that are not checked in: `massive_nu_050`, and
+`massive_nu_030_ncdmtight` / `lcdm_fiducial_ncdmtight` with CLASS's own ncdm
+quadrature tolerances tightened by two orders of magnitude.
+
+- **Bug (#57).** `fit_cl` set `ncdm_q_size=0`. The background still integrates the
+  default 0.06 eV species as massive (`ncdm_bg_q_size` 30, `background.py`), but the
+  perturbation right-hand side, with no ncdm variables, substitutes the
+  massless-neutrino perturbations for it (`_perturbation_rhs`, the `n_q == 0` branch:
+  delta_ur, theta_ur, F_ur,2 / 2 and a radiation pressure perturbation delta_ur / 3),
+  so the Einstein equations saw a matter-like density with a free-streaming,
+  pressure-carrying perturbation. Against CLASS (HyRec, 0.06 eV) TT was 14.6-15.4%
+  off at l <= 30 at all five LCDM grid points (job 27008; EE 3-4%, TE/sqrt(TT EE)
+  17-19%).
+- **Fix.** `ncdm_q_size=5`, `pt_l_max_ncdm=8`, `ncdm_fluid_approximation="none"`:
+  61 -> 106 state variables (154 at CLASS's l_max 17 with the fluid variables).
+- **Measured against CLASS (HyRec)**, max |C_l / C_CLASS - 1| as TT 2-30 / TT 2-500 /
+  EE 5-500 / TEn 2-500, percent (LCDM grid: maximum over its five points; the other
+  columns at the fiducial cosmology with that mass):
+
+  | hierarchy (q, l_max, fluid approx.) | n_eq | PT / total, V100 | 0.06 eV (LCDM grid) | 0.15 eV | 0.30 eV | 0.50 eV |
+  |---|---|---|---|---|---|---|
+  | q 0, l_max 17, class (shipped until now) | 61 | 7.2 / 19.1 s | 15.4 / 15.4 / 4.09 / 19.4 | not run | not run | not run |
+  | **q 5, l_max 8, none (shipped now)** | 106 | 8.9-11.0 / 18.5-21.6 s | 0.54 / 0.69 / 1.65 / 1.13 | 0.48 / 0.52 / 1.18 / 0.87 | 0.52 / 0.64 / 1.16 / 0.86 | 0.53 / 0.63 / 1.19 / 0.85 |
+  | q 12, l_max 8, none | 169 | 12.4 / 23.1 s | 0.49 / 0.60 / 1.19 / 0.86 (fid.) | 0.48 / 0.50 / 1.17 / 0.87 | 0.50 / 0.64 / 1.14 / 0.85 | 0.50 / 0.63 / 1.18 / 0.84 |
+  | q 3, l_max 8, none | 88 | 9.5 / 20.3 s | 0.40 / 0.60 / 1.15 / 0.82 (fid.) | 0.33 / 0.49 / 1.13 / 0.75 | 0.52 / 0.63 / 1.11 / 0.93 | 0.93 / 0.93 / 1.11 / 1.38 |
+  | q 3, l_max 8, class | 91 | 9.3 / 19.8 s | 0.53 / 0.70 / 1.60 / 1.08 | 0.48 / 0.50 / 1.14 / 0.75 | 0.47 / 0.64 / 1.12 / 0.93 | 0.61 / 0.61 / 1.13 / 1.37 |
+  | q 5, l_max 8, class | 109 | 11.0 / 21.1 s | 0.62 / 0.70 / 1.65 / 1.13 | 0.71 / 0.71 / 1.19 / 0.86 | 0.98 / 0.98 / 1.17 / 0.84 | 1.29 / 1.29 / 1.21 / 0.82 |
+  | q 5, l_max 17, class (CLASS defaults) | 154 | 13.5 / 23.5 s | 0.62 / 0.69 / 1.65 / 1.13 | 0.71 / 0.71 / 1.19 / 0.86 | 0.98 / 0.98 / 1.17 / 0.84 | 1.29 / 1.29 / 1.21 / 0.82 |
+  | q 8 / q 12, l_max 8, class | 136 / 172 | 12.1 / 22.4, 14.4 / 25.0 s | 0.58 / 0.60 / 1.19 / 0.85 (fid.) | 0.70 / 0.70 / 1.17 / 0.86 | 0.96 / 0.96 / 1.16 / 0.83 | 1.26 / 1.26 / 1.20 / 0.81 |
+
+  Massless fiducial vs CLASS RECFAST with the shipped hierarchy: 0.48 / 0.48 / 1.21%.
+  Timings are cached medians; the shipped row spans two nodes (jobs 27746 and 27711),
+  the others are job 27173 (fluid on, q <= 5), 27686 (q 8, 12) and 27711 (fluid off).
+- **Why 5 q-bins.** The Gauss-Laguerre momentum grid is converged at 5: 8 and 12 bins
+  reproduce it to 0.02% at every mass (job 27686). 3 bins sit closer to CLASS *with*
+  the fluid approximation (0.53 / 0.48 / 0.47 / 0.61% at 0.06 / 0.15 / 0.30 / 0.50 eV)
+  only because two errors cancel: with it off they read 0.40 / 0.33 / 0.52 / 0.93%,
+  worse than 5 bins at 0.50 eV. The Oct 20 choice of 3 bins is withdrawn.
+- **Why the fluid approximation is off (finding; planck_cl shares it).** With
+  `ncdm_fluid_approximation="class"` TT at l <= 30 carries a deficit that grows with
+  the mass, 0.60 / 0.71 / 0.98 / 1.29% at 0.06 / 0.15 / 0.30 / 0.50 eV (-0.7 to -1.0% at
+  l = 2-10 at 0.30 eV), and linear P_m is -0.94% off CLASS at k = 4e-3 Mpc^-1 at
+  0.30 eV. With the hierarchy followed to today both read 0.5% (flat in mass) and
+  <= 0.1% across #46's band (job 27711). CLASS itself is converged here: references
+  with its ncdm tolerances tightened by two orders of magnitude move CLASS's TT by
+  <= 0.03% at l <= 30 and EE by <= 0.16% (jobs 27687 / 27688). The late ISW at l = 2-30
+  is sourced at k ~ 1e-3-1e-2 Mpc^-1 below z ~ 2, where k tau > 31 and the switch is
+  on, so this is #46's implementation discrepancy seen in the C_l. planck_cl uses
+  the "class" mode with 5 bins and carries the same deficit at heavy masses; the
+  follow-up is to fix the closure (#46) or measure the cost of "none" there. (The
+  Oct 20 statement that the approximation "never switches on at these k" was wrong.)
+- **Why l_max_ncdm 8.** C_l agree with l_max 17 to 0.011% at l <= 500 at every measured
+  point with the approximation on and to 0.010% with it off (job 27766,
+  `test_lmax_ncdm_truncation`); the saving is 2.1-2.4 s per solve. In linear P_m the
+  truncation raises the small-scale power by +0.04% at k = 0.05 rising to +0.6% at
+  k = 1 Mpc^-1 with the approximation on and +0.9% as shipped, the same at every mass
+  and solver tolerance (see next item).
+- **Finding settled: the batched P(k) does not move with the solver; it moves with
+  the hierarchy's relativistic-era physics.** The Oct 20 attribution to the batched
+  solver's shared step control was wrong. `diags/diag_pk_batched_steps.py` (jobs
+  27685, 27762, fiducial): the hierarchy-to-hierarchy P_m differences are identical to
+  three decimals at rtol 1e-4, 1e-5 and 1e-6; the batched solve, mirrored chunk by
+  chunk, takes exactly 324 steps (39 rejected) for state dimensions 61, 91, 109 and
+  154 (its filtered error norm holds eta, delta_cdm, delta_b, F_g_0, theta_b, F_g_1
+  and no ncdm variable); and against a per-mode Kvaerno5 reference (rtol 1e-6) the
+  batched run's own error is below 0.004% for the shipped hierarchy and 0.006% for the
+  old one. What remains is deterministic and mass-independent:
+  truncating the hierarchy at l = 8 (+0.9% at k = 1 as shipped, +0.6% with the
+  approximation on) or integrating it on 3 momenta (+1.0%) alters the species' free streaming while it is still relativistic, which
+  sets the small-scale matter transfer function and is finished before the mass
+  matters. The CMB sees <= 0.03% of it at l <= 500 because its k range ends where
+  this begins. The lensing spectra: the lensing potential's linear source is
+  `source_phi_plus_psi` from the C_l solve, and the batched solve enters only the
+  halofit / EPT modulator sqrt(P_NL / P_lin) when `nonlinear` is set (default
+  "none"); measured at fiducial (job 27762): between l_max_ncdm 8 and 17, both without the
+  approximation, C_l^phiphi differs by 0.23% at l = 1000 with the linear source and
+  0.12% with the halofit modulator, and the lensed TT and EE by <= 0.07%; between 3
+  and 5 q-bins by 0.46% / 0.41%, and the lensed spectra by <= 0.18%, which is the
+  low-l TT difference itself. Against CLASS the fit_cl lensing potential is limited
+  by the preset's own coarseness (10.6% at l = 2; lensed TT 4.4% at l = 1000 from the
+  k grid), far above these.
+- **Also recorded.** fit_cl's linear P_m is 1.2-1.5% off CLASS near k = 0.2 Mpc^-1 for
+  every hierarchy and both fluid settings (the 20 k per decade); not changed here.
+- **Tests.** `tests/test_preset_accuracy.py::TestFitClPreset`: the strict xfail
+  `test_lcdm_grid_massive` is a passing test with bars TT 0.9 / 1.1%, EE 2.5%, TEn 1.7%
+  (1.7x / 1.6x / 1.5x / 1.5x the maxima of jobs 27746 / 27711); `test_nulcdm_grid_massive`
+  runs fiducial, 0.15 and 0.30 eV against CLASS (the 0.06 eV duplicate of fiducial
+  skips); new `test_lmax_ncdm_truncation` holds fit_cl within 0.1% of the same preset
+  at l_max_ncdm 17 in TT and EE to l = 500 at every massive-neutrino point (measured
+  <= 0.010%); `test_low_l_within_fit_budget` re-measured 0.48 / 0.48 / 1.21% (bars
+  unchanged). Validation at the final tree: full-mode `TestFitClPreset` 13 passed,
+  1 skipped (job 27766); fast suite 484 passed, 1067 skipped, 1 failed (job 27767), the
+  failure being the pre-existing `TestRosenbrockPk::test_pk_rosenbrock_vs_kvaerno5`
+  step-limit failure that `slurm/*-v100.sbatch` deselect by name. `tests/conftest.py` note on
+  reference data updated; `scripts/generate_class_reference.py` gained `--model`.
+- **Cost.** 18.5-21.6 s end to end on a V100 across two nodes (PT 8.9-11.0 s), first
+  call 85 s; 19.1 s with the broken treatment, 19.8 s with 3 bins and the
+  approximation, 23.5 s at l_max_ncdm 17. README and the fit_cl docstring updated;
+  CLAUDE.md's performance table still shows the Mar 2026 presets (not edited by
+  agents).
 
 ### Oct 20, 2026: The opacity tables carry their full tangents; dP(k)/d omega_b and d omega_cdm follow finite differences (#55, #45)
 

@@ -338,8 +338,14 @@ def generate_perturbations(cosmo, outdir, params):
         print(f"  (This requires CLASS compiled with perturbation output support)")
 
 
-def generate_model(params, name, outdir_base):
-    """Generate all reference data for a single cosmological model."""
+def generate_model(params, name, outdir_base, perturbations=True):
+    """Generate all reference data for a single cosmological model.
+
+    ``perturbations=False`` skips the per-k perturbation time series (the
+    second CLASS run with ``k_output_values``), which only the fiducial
+    point's source-function tests read; the grid points carry background,
+    thermodynamics and spectra, as ``massive_nu_015`` does.
+    """
     from classy import Class
 
     outdir = os.path.join(outdir_base, name)
@@ -358,7 +364,8 @@ def generate_model(params, name, outdir_base):
     cosmo.empty()
 
     # Generate perturbation time-series (separate run with k_output_values)
-    generate_perturbations(None, outdir, params)
+    if perturbations:
+        generate_perturbations(None, outdir, params)
 
     print(f"  Done: {name}")
 
@@ -438,8 +445,36 @@ def generate_recfast_hesw1_thermo(name, overrides, outdir_base):
     print(f"  {name}: x_e(z=2500)={np.interp(2500.0, z_out, on_grid('x_e')):.6f}")
 
 
+# Named grid points generated with CLASS defaults (HyRec), the same settings as
+# the fiducial point, at ``reference_data/<name>/`` without the perturbation
+# time series: ``python scripts/generate_class_reference.py --model <name> ...``.
+# Names and offsets match tests/conftest.py COSMOLOGY_GRID_NULCDM (0.15, 0.30 eV);
+# 0.50 eV is outside the test grid and its files are not checked in.
+MODELS = {
+    "massive_nu_015": {"m_ncdm": 0.15},
+    "massive_nu_030": {"m_ncdm": 0.30},   # added Oct 20, 2026 (smsharma/clax#57 follow-up)
+    "massive_nu_050": {"m_ncdm": 0.50},   # beyond the test grid; fit_cl q-bin decision only (not shipped)
+    # CLASS's own ncdm momentum quadrature tightened far past its defaults
+    # (tol_ncdm_synchronous 1e-3 -> 1e-5, tol_ncdm 1e-3 -> 1e-5, tol_ncdm_newtonian
+    # 1e-5 -> 1e-6, tol_ncdm_bg 1e-5 -> 1e-7, l_max_ncdm 17 -> 25): how converged the
+    # oracle itself is in this sector (Oct 22, 2026, #57 follow-up; not shipped).
+    "massive_nu_030_ncdmtight": {"m_ncdm": 0.30, "tol_ncdm_synchronous": 1e-5, "tol_ncdm": 1e-5,
+                                 "tol_ncdm_newtonian": 1e-6, "tol_ncdm_bg": 1e-7, "l_max_ncdm": 25},
+    "lcdm_fiducial_ncdmtight": {"tol_ncdm_synchronous": 1e-5, "tol_ncdm": 1e-5,
+                                "tol_ncdm_newtonian": 1e-6, "tol_ncdm_bg": 1e-7, "l_max_ncdm": 25},
+}
+
+
 def main():
     outdir = os.path.join(os.path.dirname(__file__), '..', 'reference_data')
+    if '--model' in sys.argv:
+        names = [a for a in sys.argv[sys.argv.index('--model') + 1:] if not a.startswith('--')]
+        unknown = sorted(set(names) - set(MODELS))
+        if unknown or not names:
+            sys.exit(f"ERROR --model needs names from {sorted(MODELS)}; got {names}")
+        for name in names:
+            generate_model(dict(FIDUCIAL_PARAMS, **MODELS[name]), name, outdir, perturbations=False)
+        return
     if '--recfast-hesw1-thermo' in sys.argv:
         # Optional cosmology names after the flag restrict the run to those points.
         only = [a for a in sys.argv[1:] if not a.startswith('--')]
