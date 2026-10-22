@@ -142,7 +142,7 @@ remaining residual is from photon-hierarchy and IC corrections at next order.
 | Module | Accuracy | Notes |
 |--------|----------|-------|
 | Background (H, D_A, r_s) | < 0.01% | 6+ significant digits |
-| Thermodynamics (x_e) | 2e-5 (20000-point grid) / 1.1e-4 (`fit_cl`, 3000 points) over z 800-5000 vs CLASS RECFAST (Heswitch=1), 11 cosmologies | CLASS's Saha -> ODE staging, advanced by an L-stable ROS2 step; 2.4e-4 above z = 5000 (HeIII stage) |
+| Thermodynamics (x_e, T_b) | x_e 2e-5 (20000-point grid) / 1.1e-4 (`fit_cl`, 3000 points) over z 800-5000, and x_e 2e-5 / 7.4e-5 with T_b 6e-5 / 1.7e-4 over z 100-700, vs CLASS RECFAST (Heswitch=1), 11 cosmologies | CLASS's Saha -> ODE staging, advanced by an L-stable ROS2 step; 2.4e-4 above z = 5000 (HeIII stage) |
 | Visibility function g(tau) | **0.04%** | Bisection reionization, corrected kappa |
 | Perturbation ODE (Phi, Psi) | 0.01-0.25% | Gauge-corrected at recombination |
 | AD gradients (dP(k)/d(params)) | omega_cdm: within 0.1% at five LCDM points (k = 0.1 Mpc^-1, forward and both reverse modes equal to 1e-8); omega_b: within 0.03% (k = 0.05 Mpc^-1, production reverse mode) | vs central finite differences; the finite differences themselves scatter by ~0.1% between steps. Before #55 (ADR 0004) AD was +0.6-0.8% off along omega_cdm and 4% along omega_b |
