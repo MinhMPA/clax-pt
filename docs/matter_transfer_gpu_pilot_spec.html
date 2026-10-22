@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fast Differentiable Matter Transfer on GPUs — Pilot Specification</title>
+<style>
+:root{--ink:#172b3a;--muted:#536777;--line:#d7e2e8;--navy:#11283e;--teal:#007b81;--pale:#ecf7f6;--warm:#fdf3e7;--paper:#fff;--bg:#f4f7f9}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,"Avenir Next",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px;line-height:1.55}
+main{max-width:1050px;margin:32px auto 70px;background:var(--paper);box-shadow:0 12px 48px #16374b12;border:1px solid #e7edf0}
+header{background:var(--navy);color:white;padding:40px 48px 35px;position:relative;overflow:hidden}
+header:after{content:"";height:240px;width:240px;border:1px solid #ffffff26;border-radius:50%;position:absolute;right:-40px;top:-75px;box-shadow:0 0 0 38px #ffffff0a,0 0 0 76px #ffffff08;pointer-events:none}
+.kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#93d2d0;font-weight:800}
+h1{font-size:34px;line-height:1.13;letter-spacing:-.03em;margin:13px 0 13px;max-width:700px}
+.subtitle{color:#cad9e3;font-size:16px;max-width:780px;margin:0}
+.meta{display:flex;gap:10px;margin-top:23px;flex-wrap:wrap}.pill{padding:5px 10px;border:1px solid #7f9aae77;border-radius:40px;font-size:11px;letter-spacing:.03em;color:#e3eff6}
+.content{padding:32px 48px 50px}.section{padding:20px 0 13px;border-bottom:1px solid var(--line)}.section:last-child{border:0}
+.eyebrow{font-size:11px;font-weight:800;text-transform:uppercase;color:var(--teal);letter-spacing:.11em;margin-bottom:6px}
+h2{font-size:21px;letter-spacing:-.025em;margin:0 0 10px;line-height:1.22}h3{font-size:15px;margin:0 0 8px}p{margin:0 0 11px}p:last-child{margin-bottom:0}
+strong{color:#142d3d}a{color:#006d79;text-decoration:none;border-bottom:1px solid #81bdc0}a:hover{color:#064b51}
+.lede{font-size:17px;line-height:1.55;max-width:850px}.formula{font-family:Cambria,"Times New Roman",serif;text-align:center;background:#f1f6f8;border-left:4px solid var(--teal);padding:16px 20px;margin:17px 0;color:#12313e;font-size:21px;letter-spacing:.02em}
+.caption{font-size:12px;color:var(--muted)}
+.diagram{display:grid;grid-template-columns:1fr 27px 1fr 27px 1fr;gap:7px;align-items:center;margin:17px 0 13px}.node{border:1px solid #c8dce0;background:#f3f9fa;padding:13px 11px;border-radius:9px;text-align:center;min-height:84px}.node b{display:block;font-size:13px;line-height:1.25}.node span{font-size:11px;color:var(--muted);display:block;margin-top:6px}.arrow{text-align:center;font-weight:800;color:var(--teal);font-size:22px}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{border:1px solid var(--line);border-radius:10px;padding:19px 20px;background:#fff}.card.a{border-top:4px solid #007c87}.card.b{border-top:4px solid #a66b24}.tag{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#047e80}.card.b .tag{color:#a66b24}.card h3{font-size:18px;letter-spacing:-.02em;margin:4px 0 8px}.card p{font-size:13.5px}.card ul{margin:8px 0 9px;padding-left:20px;font-size:13.5px}.card li{margin:4px 0}.smallmeta{border-top:1px solid var(--line);padding-top:11px;margin-top:10px;color:var(--muted);font-size:12px}
+.scope{display:grid;grid-template-columns:1fr 1fr;gap:17px}.scope h3{margin:0 0 7px}.scope ul{padding-left:18px;margin:0}.scope li{margin:4px 0}
+.bench{width:100%;border-collapse:collapse;margin:8px 0 12px;font-size:13.5px}.bench th{background:#e8f1f3;text-align:left;font-weight:750;padding:10px 11px;border-bottom:2px solid #bdd5dc}.bench td{padding:9px 11px;vertical-align:top;border-bottom:1px solid var(--line)}.bench th:first-child,.bench td:first-child{width:27%}
+.note{background:var(--warm);border-left:3px solid #d19c55;padding:12px 15px;border-radius:2px;font-size:13px}.note.teal{background:var(--pale);border-color:var(--teal)}
+.steps{counter-reset:s;display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:13px}.step{border:1px solid var(--line);padding:13px 11px;border-radius:8px;font-size:12px;position:relative}.step:before{counter-increment:s;content:counter(s,decimal-leading-zero);display:block;color:var(--teal);font-weight:900;font-size:13px;margin-bottom:7px}.step b{display:block;font-size:12.5px;margin-bottom:3px}.step span{color:var(--muted)}
+pre{background:#11283e;color:#e8f2f8;padding:16px;border-radius:8px;overflow-x:auto;font:12.5px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;margin:12px 0}code{font:12.5px ui-monospace,SFMono-Regular,Consolas,monospace;background:#edf2f5;padding:1px 3px;border-radius:3px}pre code{background:none;padding:0;color:inherit}
+.foot{font-size:12px;color:var(--muted);line-height:1.5;padding-top:15px}.foot a{overflow-wrap:anywhere}.foot ul{padding-left:20px;margin:7px 0}
+@media(max-width:780px){main{margin:0;border:none}.content{padding:24px}header{padding:32px 24px}h1{font-size:27px}.twocol,.scope{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.diagram{grid-template-columns:1fr;gap:6px}.arrow{transform:rotate(90deg)}.node{min-height:auto}.bench{font-size:12px}}
+@media print{@page{size:A4;margin:13mm}body{background:white;font-size:11px}main{margin:0;max-width:none;box-shadow:none;border:0}header{padding:25px 29px 23px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:28px}.content{padding:16px 29px}.section{padding:12px 0}.twocol,.card,.bench,.scope,.steps,.node{break-inside:avoid}.card{padding:13px}.card h3{font-size:14px}.card p,.card ul{font-size:11px}.formula{padding:12px;font-size:18px}.bench{font-size:10.5px}.bench td,.bench th{padding:6px 7px}.steps{gap:5px}.step{padding:9px}.foot{font-size:10px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="kicker">Technical research brief · feasibility-first</div>
+  <h1>Fast Differentiable Matter Transfer on GPUs</h1>
+  <p class="subtitle">A controlled first pilot comparing a GPU-native sparse ODE backend with a structure-aware pure-JAX backend for linear Einstein–Boltzmann perturbations.</p>
+  <div class="meta"><span class="pill">Draft v1 · 22 October 2026</span><span class="pill">Target: linear <i>P</i><sub>m</sub>(<i>k</i>, <i>z</i>)</span><span class="pill">No emulators</span><span class="pill">Decision: A vs B</span></div>
+</header>
+<div class="content">
+<section class="section">
+  <div class="eyebrow">01 / Central idea</div>
+  <h2>Exploit physics-derived matrix structure, not just GPU batching</h2>
+  <p class="lede">For each Fourier mode <i>k</i>, first-order cosmological perturbation evolution is a <strong>linear system</strong> at fixed background cosmology. Its Jacobian is organized into a compact metric–fluid core plus largely nearest-neighbor photon/neutrino multipole hierarchies. Generic dense-Jacobian, dense-LU time-stepping may waste most of this structure.</p>
+  <div class="formula">d<b>y</b><sub>k</sub>/dx = <b>A</b>(k, x; θ) <b>y</b><sub>k</sub> + <b>s</b>(k, x; θ), &nbsp; x ≡ ln a</div>
+  <p class="caption">The source <b>s</b> permits affine formulations or approximation-specific terms; verify exact linearity and sparsity against the implementation, including tight-coupling and radiation-streaming branches. Do not presume a simple banded-plus-low-rank decomposition without measuring fill-in.</p>
+  <div class="diagram" aria-label="Computation architecture">
+    <div class="node"><b>Background + thermodynamics</b><span>shared coefficients; parameter derivatives</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>GPU evolution of independent k-modes</b><span>structured sparse implicit integration</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>T<sub>c</sub>, T<sub>b</sub>, T<sub>cb</sub> → P<sub>lin</sub>(k,z)</b><span>values and stable Jacobians</span></div>
+  </div>
+  <p><strong>Hypothesis:</strong> sparse structure, better GPU execution and reuse of an implicit factorization for physical state and parameter sensitivities can reduce the dominant perturbation cost. This is a <em>measurement to establish</em>, not an assumed speedup.</p>
+</section>
+<section class="section">
+  <div class="eyebrow">02 / Deliberately limited scope</div>
+  <div class="scope">
+    <div>
+      <h3>In scope for the first pilot</h3>
+      <ul>
+        <li>Flat ΛCDM with <strong>massless neutrinos</strong> (retain relativistic massless-neutrino perturbations).</li>
+        <li>Clax's existing background, thermodynamics, gauge, adiabatic initial conditions, TCA/RSA and photon polarization treatment.</li>
+        <li>Exact same perturbation right-hand side in both pilots; initially no physical truncation beyond existing Clax approximations.</li>
+        <li>Linear density transfers <i>T</i><sub>c</sub>, <i>T</i><sub>b</sub>, <i>T</i><sub>cb</sub>; linear <i>P</i><sub>cb</sub>(<i>k</i>, <i>z</i>) at selected redshifts.</li>
+        <li>Forward and differentiable outputs; separately measure perturbation-only and full-pipeline costs.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Out of scope (initially)</h3>
+      <ul>
+        <li>CMB angular spectra, line-of-sight/harmonic integration and CMB lensing.</li>
+        <li>Massive-neutrino momentum hierarchies, non-standard cosmologies and non-linear corrections.</li>
+        <li>A new recombination solver or redesigned tight-coupling equations.</li>
+        <li>Neural surrogates, learned regressions, fitting formulae or a wholesale new Boltzmann formalism.</li>
+        <li>A production HMC sampler until value/gradient correctness and performance are demonstrated.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="note teal"><strong>Normalization contract:</strong> fix synchronous-gauge conventions, <i>k</i> units (Mpc<sup>−1</sup>), primordial-curvature normalization, density-transfer conventions, and the precise definition of matter. With massless neutrinos, late-time clustering matter is CDM+baryons; adding massive neutrinos later requires reporting both <i>P</i><sub>cb</sub> and <i>P</i><sub>mm</sub>.</p>
+</section>
+<section class="section">
+  <div class="eyebrow">03 / Two competing pilot options</div>
+  <h2>Change one numerical layer at a time</h2>
+  <div class="twocol">
+    <article class="card a">
+      <div class="tag">Option A · GPU-native</div>
+      <h3>Clax RHS → modax</h3>
+      <p><strong>Question:</strong> Can a fused CUDA Rosenbrock solver exploit per-<i>k</i> adaptivity and sparse LU sufficiently well at realistic ensemble sizes?</p>
+      <ul>
+        <li>Extract a minimal Clax perturbation RHS, state ordering, initial conditions and consistent coefficient interpolation.</li>
+        <li>Port the RHS to modax's Numba-CUDA-MLIR-compatible callable; provide a conservative, regime-union Jacobian sparsity mask.</li>
+        <li>Run <strong>Rodas5P</strong> with independent per-mode stepping; compare 32, 128, 256 and 1024 modes.</li>
+        <li>Demonstrate <i>first</i> numerical equivalence with frozen coefficient tables, <i>then</i> the full derivative path through cosmological parameters.</li>
+      </ul>
+      <p class="smallmeta"><strong>Main upside:</strong> GPU-oriented kernel, sparse factorization and continuous forward sensitivities already exist. <strong>Main risk:</strong> porting/compile constraints, interpolation tables and chain-rule sensitivity across the XLA/Numba boundary; limited occupancy for small mode counts.</p>
+    </article>
+    <article class="card b">
+      <div class="tag">Option B · Native JAX</div>
+      <h3>Structure-aware Clax Rosenbrock</h3>
+      <p><strong>Question:</strong> How much of Clax's cost comes from constructing dense Jacobians, dense LU and shared batched step control, without leaving JAX?</p>
+      <ul>
+        <li>Instrument <code>Rodas5Batched</code>: RHS evaluation, <code>jacfwd</code> for state/time, factorization/solves, accepted/rejected steps.</li>
+        <li>Assemble the <strong>analytic linear Jacobian</strong>, compare entries with automatic differentiation, and measure cost with the existing dense LU.</li>
+        <li>Test <em>only if justified</em> block/sparse/banded or Schur-complement solves and grouping modes by step difficulty.</li>
+        <li>Retain the established JAX differentiation path; check accuracy and gradient stability after every change.</li>
+      </ul>
+      <p class="smallmeta"><strong>Main upside:</strong> lowest integration risk and native AD. <strong>Main risk:</strong> JAX sparse kernels/structured solves may underperform optimized batched dense LU for small systems; shared step control can still dominate.</p>
+    </article>
+  </div>
+  <p class="note" style="margin-top:13px"><strong>Comparison rule:</strong> identical physics, initial conditions, floating-point precision, output redshifts and numerical accuracy. A faster but less accurate solver is not a pilot success. Neither approach should borrow accuracy from an emulator or changed physical approximations.</p>
+</section>
+<section class="section">
+  <div class="eyebrow">04 / Measurement plan</div>
+  <h2>Baseline first; performance claims last</h2>
+  <table class="bench">
+    <thead><tr><th>Test</th><th>Minimum evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Baseline</td><td>Pin Clax/modax/DISCO-EB versions and hardware; reproduce a Clax matter-table solve. Profile background, recombination, perturbations, post-processing, compilation and device synchronization separately.</td></tr>
+      <tr><td>Mathematics</td><td>Check that ∂f/∂y equals the candidate analytic Jacobian; build the <em>union</em> of nonzeros across times, modes, parameters and TCA/RSA regimes. Quantify sparse fill-in and pivot/conditioning hazards.</td></tr>
+      <tr><td>Physics accuracy</td><td>Validate density transfers and <i>P</i><sub>cb</sub> against the same Clax equations, then high-accuracy CLASS. Proposed science goal: ≤0.2% relative error in <i>P</i> over the accepted <i>k</i>–<i>z</i> domain, away from transfer-function zeros.</td></tr>
+      <tr><td>Gradients</td><td>Verify <i>∂P/∂θ</i> for ω<sub>b</sub>, ω<sub>c</sub> and <i>h</i> against high-accuracy finite differences / existing JAX AD; sweep finite-difference step sizes. Use absolute or scaled residuals near zero crossings, not unbounded relative errors.</td></tr>
+      <tr><td>Throughput</td><td>Time synchronized, warmed/JIT-cached forward and <code>value_and_grad</code> runs; report median and spread. Include 32–1024 <i>k</i>-mode scaling, GPU memory, kernel compilation and step-count distributions.</td></tr>
+      <tr><td>Robustness</td><td>Test a fiducial model plus ≳30 parameter draws spanning a declared ΛCDM box; check low-<i>k</i> horizon scales, BAO oscillations and regime-switch derivatives.</td></tr>
+    </tbody>
+  </table>
+  <p class="caption">Suggested first working grid: 128–256 logarithmically spaced modes across 10<sup>−4</sup> ≤ <i>k</i> ≤ 1 Mpc<sup>−1</sup>; <i>z</i> = 0, 1, 2, 3. Treat ≤0.2% in <i>P</i> as a proposed acceptance target, not a claim about either current implementation. Time both perturbations alone and the full <i>P</i> pipeline; an ODE-only speedup can be erased by thermodynamics.</p>
+</section>
+<section class="section">
+  <div class="eyebrow">05 / Design gates</div>
+  <h2>What must be resolved before a full implementation?</h2>
+  <div class="twocol">
+    <div class="card">
+      <h3>Scientific & numerical blockers</h3>
+      <p>Does the Clax RHS remain linear in the chosen state through TCA/RSA? Are its interpolation and regime switches differentiable enough for inference? Is the sparse pattern fixed and complete? Does unpivoted GPU sparse LU remain stable across the parameter box? Can derivatives of the <em>background and thermodynamics</em> be correctly propagated through the external-kernel interface?</p>
+    </div>
+    <div class="card">
+      <h3>Pragmatic stop/go rule</h3>
+      <p><strong>Continue</strong> with the fastest option that matches the required physics and gradients and shows a reproducible ≳2× perturbation-stage acceleration under matched accuracy. <strong>Defer or stop</strong> a route that cannot preserve the derivative chain, fails robustness tests, or yields no significant gain at realistic <i>k</i>-grid sizes. Record end-to-end speed separately.</p>
+    </div>
+  </div>
+  <p style="margin-top:12px">A forward <i>P</i> runtime of ~0.2–0.5 s and forward-plus-gradient of ~0.5–1 s are <strong>aspirational later milestones</strong>, not acceptance criteria for this pilot. Mathematical validity and profiling take priority over an advertised speed number.</p>
+</section>
+<section class="section">
+  <div class="eyebrow">06 / Execution sequence & interfaces</div>
+  <h2>Smallest meaningful deliverables</h2>
+  <div class="steps">
+    <div class="step"><b>Reproduce</b><span>Lock versions; baseline Clax/CLASS, runtime split and benchmark harness.</span></div>
+    <div class="step"><b>Characterize</b><span>Inspect RHS, state dimensions, sparsity, LU fill, step distributions and AD path.</span></div>
+    <div class="step"><b>Two micro-spikes</b><span>Option A: one-mode → ensemble modax port. Option B: analytic Jacobian within JAX.</span></div>
+    <div class="step"><b>Decision report</b><span>Accuracy, derivative correctness, speed, bottleneck after optimization, next milestone.</span></div>
+  </div>
+  <pre><code># Illustrative contract, not an existing function signature
+out = matter_transfer(params, k_mpc, redshifts, backend="modax" | "jax")
+# out: T_cdm, T_baryon, T_cb, P_cb_linear
+# Must support: jax.jit, value_and_grad(scalar_loss)
+# Validation: compare value & derivatives to pinned Clax/CLASS</code></pre>
+</section>
+<section class="section">
+  <div class="eyebrow">07 / Codebases & provenance</div>
+  <div class="foot">
+    <p><strong>Inspect live code before implementing:</strong> this spec sketches a pilot and does not assert that an end-to-end differentiable modax–Clax coupling already exists.</p>
+    <ul>
+      <li><a href="https://github.com/smsharma/clax">Clax</a> — <a href="https://github.com/smsharma/clax/blob/main/clax/perturbations.py">perturbation equations</a>, <a href="https://github.com/smsharma/clax/blob/main/clax/rosenbrock.py">Rodas5Batched</a> and <a href="https://github.com/smsharma/clax">matter-table API</a> (MIT).</li>
+      <li><a href="https://github.com/lawrenceberry/modax">modax</a> — <a href="https://lawrenceberry.github.io/modax/usage/sparse/">sparsity and GPU LU</a>; <a href="https://lawrenceberry.github.io/modax/usage/gradients/">continuous forward sensitivities</a> (MIT).</li>
+      <li><a href="https://github.com/ohahn/DISCO-EB">DISCO-EB</a> — independent differentiable Einstein–Boltzmann implementation and structural reference (GPL-3.0; do not copy its code into differently licensed projects without checking compatibility).</li>
+      <li><a href="https://github.com/lesgourg/class_public">CLASS</a> — high-accuracy cosmology reference; <a href="https://arxiv.org/abs/2609.35661">Berry et al. (2026)</a> — modax research context.</li>
+    </ul>
+  </div>
+</section>
+</div>
+</main>
+</body>
+</html>
