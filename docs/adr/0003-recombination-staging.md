@@ -195,7 +195,8 @@ The stage-switch redshifts (2870, 1600) are fixed numbers, independent of the
 parameters, as in CLASS, so no derivative passes through a switch location.
 
 **Unchanged:** the background; the kappa_dot / visibility construction including
-its `stop_gradient` (see #45 under "Not done"); reionisation; the T_b update; the
+its `stop_gradient` (see #45 under "Not done"; removed afterwards by #55, ADR 0004);
+reionisation; the T_b update; the
 `custom_vjp` entry `solve_background_and_thermo` and its forward-mode basis
 (ADR 0001); the HeIII stage, apart from D4's f_He inside `_ionHe`.
 
@@ -487,7 +488,9 @@ static shape. The ADR 0001 caveat (forward mode needs
 - **#45** (does the kappa_dot `stop_gradient` still need to stay?) is a separate
   follow-on: with recombination smooth, test removing it and keep the removal
   only if gradients stay finite and AD matches FD for omega_b and omega_cdm at
-  3-5 cosmologies. Related, pre-existing, both newly measured:
+  3-5 cosmologies. Done as #55 (ADR 0004): the cut is gone, the five opacity
+  tables match finite differences at 11 cosmologies. Related, pre-existing, both
+  newly measured at the time:
   - AD sits a steady +0.66% above converged FD for dP(k = 0.1 Mpc^-1)/d omega_cdm
     on the fixed tree (`tests/test_pk_forward_mode.py`; jobs 24514 CPU and 24516
     GPU, FD std 0.007%, platforms agreeing to 2e-8). On the unfixed tree the same

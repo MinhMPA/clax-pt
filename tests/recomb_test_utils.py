@@ -20,6 +20,8 @@ PREC_RB = replace(PrecisionParams.fast_cl(), pt_ode_solver="rodas5",
 THERMO_GRIDS = (20000, 3000)          # default grid; fit_cl's thermodynamics grid
 THETAS = ("h", "omega_b", "omega_cdm", "Y_He", "N_ur")
 QS = ("xe", "cs2", "tb")
+# The five opacity tables perturbations.py reads (smsharma/clax#55).
+QS_OPACITY = ("kappa_dot", "exp_m_kappa", "g", "dkd_dloga", "g_prime")
 
 
 def thermo_prec(n_points):
@@ -37,6 +39,17 @@ def tables(p, prec):
     th = thermodynamics_solve(p, prec, bg)
     return {"loga": th.xe_of_loga.x, "xe": th.xe_of_loga.y, "cs2": th.cs2_of_loga.y,
             "tb": th.Tb_of_loga.y, "g": th.g_of_loga.y}
+
+
+def tables_opacity(p, prec):
+    """Knots and values of the opacity tables, in the layout `tables` uses, so
+    `_fd_check` can re-spline them. The knots are kappa_dot_of_loga.x (the same
+    ln a values as the x_e table; before #55 a stop_gradient copy of them)."""
+    bg = background_solve(p, prec)
+    th = thermodynamics_solve(p, prec, bg)
+    return {"loga": th.kappa_dot_of_loga.x, "kappa_dot": th.kappa_dot_of_loga.y,
+            "exp_m_kappa": th.exp_m_kappa_of_loga.y, "g": th.g_of_loga.y,
+            "dkd_dloga": th.dkappa_dot_dloga_of_loga.y, "g_prime": th.g_prime_of_loga.y}
 
 
 @functools.partial(jax.jit, static_argnums=(2,))

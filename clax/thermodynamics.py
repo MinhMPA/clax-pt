@@ -63,10 +63,6 @@ Known limitations:
       so x_e < ~1.08e-3 at fiducial Y_He (spike ratio 20, i.e.
       a derivative 20 times the median of its +-25 neighbours, at z ~ 624 on a
       1500-point grid), and c_s^2 is 1.3% from CLASS's c_b^2 at z ~ 632.
-    - The kappa_dot, exp(-kappa) and g tables carry a stop_gradient with an
-      n_H_0 rescale (smsharma/clax#45). The P(k) derivative biases it may cause
-      (+0.66% in omega_cdm, 4% in omega_b against converged finite differences)
-      are tracked in smsharma/clax#55.
     - Reverse mode through _ros2_advance needs a static Python-int sub-step count.
     - No test gates the C_l shift caused by this change; ADR 0003 records the
       measured planck_cl and fit_cl shifts against the unfixed code.
@@ -1008,46 +1004,36 @@ def thermodynamics_solve(
     z_rec = z_grid[idx_rec]
 
     # --- Build splines on loga grid ---
-    loga_grid_sg = jax.lax.stop_gradient(loga_grid)
+    # Every table, the opacity ones included, is a spline on the live ln a knots
+    # with the live values: knots and values carry their tangents together
+    # (smsharma/clax#55). The knots move with the parameters (the scan is
+    # uniform in ln tau), so the tangent of a value at fixed knot index is not
+    # the tangent at fixed a; it differs by the transport term (table slope times
+    # d ln a/d theta). The pre-#55 code froze the knots and values of kappa_dot,
+    # exp(-kappa), g, dkappa_dot/dlna and g' under stop_gradient and restored only
+    # the n_H_0 ∝ omega_b path (d127731, against a "10^8x" blow-up that was this
+    # transport term read against a vanishing true derivative): along omega_cdm
+    # and N_ur their tangents were exactly zero, along omega_b and Y_He the x_e
+    # response was missing, and dP(k)/d omega_b came out 4% off finite differences.
+    # With the full tangents the five tables match Richardson finite differences
+    # at fixed z to the FD's own precision at 11 cosmologies (tests/
+    # test_recomb_thermo.py::test_opacity_tangents_match_converged_fd).
     xe_of_loga = CubicSpline(loga_grid, xe_grid)
     Tb_of_loga = CubicSpline(loga_grid, tb_grid)
-
-    # --- AD-safe n_H_0 rescaling for kappa_dot, kappa (-> exp_m_kappa), g ---
-    # kappa_dot_grid and kappa_grid carry a large spurious accumulated gradient
-    # from the Friedmann scan (d(a_grid[i])/d(omega_b) grows as an eigenvalue
-    # product; ~10^8x FD blowup). Both are ∝ n_H_0 at fixed x_e and a, so: stop
-    # all accumulated gradient, then restore only the n_H_0 ∝ omega_b path.
-    # Exact where x_e ~ const (loga < -8); 10-30% residual near recombination.
-    _kd_safe = (
-        jax.lax.stop_gradient(kappa_dot_grid)
-        * (n_H_0 / jax.lax.stop_gradient(n_H_0))
-    )
-    _kappa_safe = (
-        jax.lax.stop_gradient(kappa_grid)
-        * (n_H_0 / jax.lax.stop_gradient(n_H_0))
-    )
-    _exp_m_kappa_safe = jnp.exp(-_kappa_safe)
-    _g_safe = _kd_safe * _exp_m_kappa_safe
-    kappa_dot_of_loga = CubicSpline(loga_grid_sg, _kd_safe)
-    exp_m_kappa_of_loga = CubicSpline(loga_grid_sg, _exp_m_kappa_safe)
-    g_of_loga = CubicSpline(loga_grid_sg, _g_safe)
+    kappa_dot_of_loga = CubicSpline(loga_grid, kappa_dot_grid)
+    exp_m_kappa_of_loga = CubicSpline(loga_grid, exp_m_kappa_grid)
+    g_of_loga = CubicSpline(loga_grid, g_grid)
     cs2_of_loga = CubicSpline(loga_grid, cs2_grid)
 
-    # dκ̇/dloga: stop all accumulated Friedmann-scan gradient in kappa_dot_grid,
-    # then restore only the n_H_0 ∝ omega_b path by multiplying by n_H_0 / sg(n_H_0).
-    # Every element of kappa_dot ∝ n_H_0 (linear), so this factoring is exact.
-    # Gradient per knot: kd[i] * d(n_H_0)/dp / n_H_0 = kd[i] / omega_b.
-    # Finite-difference in derivative formula: (kd[608]-kd[607])/(h*omega_b) =
-    # dkd/dloga / omega_b ≈ -335, matching FD to <1%.
-    _kd_deriv_spline = CubicSpline(loga_grid_sg, _kd_safe)
-    dkd_dloga_grid = jax.vmap(_kd_deriv_spline.derivative)(loga_grid_sg)
-    dkappa_dot_dloga_of_loga = CubicSpline(loga_grid_sg, dkd_dloga_grid)
+    # dκ̇/dloga: the derivative of the kappa_dot spline at its own knots.
+    dkd_dloga_grid = jax.vmap(kappa_dot_of_loga.derivative)(loga_grid)
+    dkappa_dot_dloga_of_loga = CubicSpline(loga_grid, dkd_dloga_grid)
 
     # g' = dg/dτ analytically (CLASS thermodynamics.c:3482-3483)
     # g = κ̇ e^{-κ},  g' = (κ̈ + κ̇²) e^{-κ},  κ̈ = (dκ̇/dloga) * aH
-    _aH_grid = jnp.exp(loga_grid_sg) * jax.vmap(bg.H_of_loga.evaluate)(loga_grid_sg)
-    g_prime_grid = (dkd_dloga_grid * _aH_grid + _kd_safe**2) * _exp_m_kappa_safe
-    g_prime_of_loga = CubicSpline(loga_grid_sg, g_prime_grid)
+    _aH_grid = jnp.exp(loga_grid) * jax.vmap(bg.H_of_loga.evaluate)(loga_grid)
+    g_prime_grid = (dkd_dloga_grid * _aH_grid + kappa_dot_grid**2) * exp_m_kappa_grid
+    g_prime_of_loga = CubicSpline(loga_grid, g_prime_grid)
 
     # --- tau_free_streaming: second trigger of the radiation streaming
     # approximation. CLASS thermodynamics.c ("find time (always after
@@ -1060,17 +1046,16 @@ def thermodynamics_solve(
     # fiducial cosmology, visibility at 2.4% of its peak; CLASS's table point
     # is 364.767 Mpc). The switch time is held fixed under AD (stop_gradient),
     # like CLASS's table point, which has no derivative. What would otherwise
-    # reach it: the partial through _kd_safe's n_H_0 rescale (wrong sign:
-    # d tau_fs/d omega_b AD +698 vs finite differences -545 Mpc per unit
-    # omega_b) and the background-time partial through tau(z) (incomplete on
-    # its own). With d ln C_l/d ln tau_fs ~ 1e-4 and d ln tau_fs/d ln theta
-    # <= 0.26 (omega_cdm) the dropped term is <= 3e-5 on d ln C_l/d ln theta.
+    # reach it: the partials through kappa_dot and through the background time
+    # tau(z) of the two bracketing points. With d ln C_l/d ln tau_fs ~ 1e-4 and
+    # d ln tau_fs/d ln theta <= 0.26 (omega_cdm) the dropped term is <= 3e-5 on
+    # d ln C_l/d ln theta.
     # tau from the background spline, as for tau_star. If no crossing exists
     # (never for a recombining universe) the switch is set to the end of the
     # table.
-    _tau_grid_bg = jax.vmap(bg.tau_of_loga.evaluate)(loga_grid_sg)
-    _tau_c_over_tau = 1.0 / jnp.maximum(_kd_safe * _tau_grid_bg, 1e-300)
-    _after_peak = jnp.arange(loga_grid_sg.shape[0]) > idx_star
+    _tau_grid_bg = jax.vmap(bg.tau_of_loga.evaluate)(loga_grid)
+    _tau_c_over_tau = 1.0 / jnp.maximum(kappa_dot_grid * _tau_grid_bg, 1e-300)
+    _after_peak = jnp.arange(loga_grid.shape[0]) > idx_star
     _crossed = _after_peak & (_tau_c_over_tau >= prec.pt_rsa_trigger_tau_c_over_tau)
     _i1 = jnp.argmax(_crossed)
     _i0 = jnp.maximum(_i1 - 1, 0)
@@ -1078,7 +1063,7 @@ def thermodynamics_solve(
     _f1 = _tau_c_over_tau[_i1]
     _w = jnp.clip((prec.pt_rsa_trigger_tau_c_over_tau - _f0)
                   / jnp.where(_f1 == _f0, 1.0, _f1 - _f0), 0.0, 1.0)
-    _loga_fs = loga_grid_sg[_i0] + _w * (loga_grid_sg[_i1] - loga_grid_sg[_i0])
+    _loga_fs = loga_grid[_i0] + _w * (loga_grid[_i1] - loga_grid[_i0])
     tau_free_streaming = jax.lax.stop_gradient(
         jnp.where(jnp.any(_crossed), bg.tau_of_loga.evaluate(_loga_fs),
                   _tau_grid_bg[-1]))

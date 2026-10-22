@@ -129,6 +129,15 @@ Wiring:
   rules" invariant documented in `tests/test_pk_forward_mode.py` is retired
   (note updated in place).
 
+## Note (Oct 20, 2026, smsharma/clax#55)
+
+The opacity tables (kappa_dot, exp(-kappa), g, dkappa_dot/dlna, g') carried a
+`stop_gradient` with an n_H_0 rescale from before this ADR (d127731), so the
+forward basis this rule contracts had no x_e response in them, along any
+parameter. ADR 0004 removes that cut; the rule is unchanged and its stable
+reverse agrees with native reverse and with forward mode to 6e-9 on the
+full tangents (probe of Oct 20, 2026, five cosmologies, two grids).
+
 ## Note (Oct 11, 2026, smsharma/clax#48)
 
 The premise "forward mode is exact" holds only when ODE solver stages miss the
