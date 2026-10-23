@@ -108,8 +108,13 @@ def load_drag(name):
 
 def xe_on_ref_grid(prim, ref_z):
     """clax x_e (CubicSpline in log a) evaluated at the reference redshifts."""
+    return table_on_ref_grid(prim, "xe", ref_z)
+
+
+def table_on_ref_grid(prim, q, ref_z):
+    """clax table q of `tables` (CubicSpline in log a) at the reference redshifts."""
     from clax.interpolation import CubicSpline
-    sp = CubicSpline(jnp.asarray(prim["loga"]), jnp.asarray(prim["xe"]))
+    sp = CubicSpline(jnp.asarray(prim["loga"]), jnp.asarray(prim[q]))
     return np.asarray(sp.evaluate(jnp.log(1.0 / (1.0 + jnp.asarray(ref_z)))))
 
 

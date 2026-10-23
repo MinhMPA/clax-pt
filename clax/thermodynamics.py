@@ -58,11 +58,10 @@ Known limitations:
       moves with the parameters. Measured at omega_b - 20% (ADR 0003): no visible
       effect, because x_H sits at its equilibrium while C = 1, so the switch
       rescales a rate that is already ~0.
-    - The T_b update has a hard Taylor switch at f_e < 1e-3, where f_e is the
-      Compton-coupling electron fraction (1 - Y_He) x_e / (1 - 0.75 Y_He + (1 - Y_He) x_e),
-      so x_e < ~1.08e-3 at fiducial Y_He (spike ratio 20, i.e.
-      a derivative 20 times the median of its +-25 neighbours, at z ~ 624 on a
-      1500-point grid), and c_s^2 is 1.3% from CLASS's c_b^2 at z ~ 632.
+    - c_s^2 is 1.3% from CLASS's c_b^2 at z ~ 632 (the T_b update's former hard
+      Taylor switch at f_e < 1e-3, which put a spike of ratio 20 in the T_b
+      tangent at z ~ 624 on a 1500-point grid and a staircase in the primal's
+      omega_b dependence, is gone: the update uses the exact expm1 form).
     - Reverse mode through _ros2_advance needs a static Python-int sub-step count.
     - No test gates the C_l shift caused by this change; ADR 0003 records the
       measured planck_cl and fit_cl shifts against the unfixed code.
@@ -760,16 +759,24 @@ def thermodynamics_solve(
 
         fe = (1.0 - Y_He) * xe / (1.0 - 0.75 * Y_He + (1.0 - Y_He) * xe)
         thomc = thomc0 * fe / adothalf / jnp.maximum(ahalf**3, 1e-30)
-        etc = jnp.exp(-thomc * (new_a - a))
-        a2t = a**2 * (tb - tg0) * etc - T_cmb / jnp.maximum(thomc, 1e-30) * (1.0 - etc)
-
-        # Taylor expansion for small fe (avoid numerical issues)
-        a2t_expansion = (
-            (a - new_a) * T_cmb
-            + a**2 * (tb - tg0)
-            + (0.5 * (a - new_a)**2 * T_cmb + a**2 * (a - new_a) * (tb - tg0)) * thomc
-        )
-        a2t = jnp.where(fe < 1e-3, a2t_expansion, a2t)
+        da = new_a - a
+        x = thomc * da
+        # a^2 T_b' = a^2 (T_b - T_g) e^{-x} - T_cmb (1 - e^{-x}) / thomc, with
+        # (1 - e^{-x}) / thomc = da * phi(x), phi(x) = -expm1(-x) / x. expm1 keeps
+        # phi exact down to x ~ 1e-12, where the series 1 - x/2 equals it to
+        # 1e-24, so the jnp.where below carries no jump. Until Oct 22, 2026
+        # (CHANGELOG) the code switched to a first-order Taylor branch at
+        # f_e < 1e-3 to dodge the cancellation in 1 - e^{-x}. That branch was
+        # used where x is not small, so its truncation error grew with the grid
+        # step (T_b 2.7e-4 / 1.8e-3 from CLASS at z 300-700 on 20000 / 3000
+        # points, x_e 1.1e-4 / 8.7e-4 at z 100-500), and the switch moved with
+        # the parameters and crossed knots as they changed, which left the
+        # primal a staircase below z ~ 620 (ADR 0004: finite differences along
+        # omega_b biased by 1.7e-3 of the derivative on 10000 points) and a
+        # spike of ratio 20 in the T_b tangent at z ~ 624 on a 1500-point grid.
+        x_safe = jnp.maximum(x, 1e-12)
+        phi = jnp.where(x > 1e-12, -jnp.expm1(-x_safe) / x_safe, 1.0 - 0.5 * x)
+        a2t = a**2 * (tb - tg0) * jnp.exp(-x) - T_cmb * da * phi
 
         new_tb = T_cmb / new_a + a2t / new_a**2
 
