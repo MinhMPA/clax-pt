@@ -346,15 +346,15 @@ class TestThermoGradients:
     # loga = -8, omega_b case was tested.
     _OPACITY_SAMPLES = [(-8.0, "omega_b"), (-7.0, "omega_b"), (-6.0, "omega_b"),
                         (-7.0, "omega_cdm"), (-6.0, "omega_cdm")]
-    # exp(-kappa) along omega_b is sampled at loga = -5 instead of -6: at z ~ 402
-    # its omega_b derivative passes through zero (x_e n_H goes as H in the
-    # freeze-out tail and the reionisation depth is pinned by tau_reio), and the
-    # single-step finite difference there is set by the grid-scale jumps of the
-    # T_b Taylor switch at f_e < 1e-3 (ADR 0003): FD -3.98e-4, -9.86e-5, -7.72e-5
-    # on 3000, 10000, 20000 points against AD -6.44e-5, -6.87e-5, -6.97e-5
-    # (job 27172, Oct 20, 2026), i.e. the FD converges onto AD with the grid.
-    _EXP_M_KAPPA_SAMPLES = [(-8.0, "omega_b"), (-7.0, "omega_b"), (-5.0, "omega_b"),
-                            (-7.0, "omega_cdm"), (-6.0, "omega_cdm")]
+    # exp(-kappa) along omega_b at loga = -6 (z ~ 402), where its omega_b
+    # derivative passes through zero (x_e n_H goes as H in the freeze-out tail and
+    # the reionisation depth is pinned by tau_reio): with the T_b update's former
+    # Taylor switch at f_e < 1e-3 the single-step finite difference there was set
+    # by the switch's grid-scale jumps (FD -9.86e-5 against AD -6.87e-5 on 10000
+    # points, job 27172, Oct 20, 2026), so the sample sat at loga = -5. It is at
+    # -6 again, with -5 kept.
+    _EXP_M_KAPPA_SAMPLES = [(-8.0, "omega_b"), (-7.0, "omega_b"), (-6.0, "omega_b"),
+                            (-5.0, "omega_b"), (-7.0, "omega_cdm"), (-6.0, "omega_cdm")]
 
     @pytest.mark.parametrize("loga,param_name", _OPACITY_SAMPLES)
     def test_opacity_logderivative_gradient_matches_fd(self, loga, param_name):

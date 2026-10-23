@@ -117,6 +117,71 @@ quadrature tolerances tightened by two orders of magnitude.
   CLAUDE.md's performance table still shows the Mar 2026 presets (not edited by
   agents).
 
+### Oct 22, 2026: The baryon-temperature update loses its Taylor switch; T_b and x_e below z ~ 700 move onto CLASS (ADR 0003 follow-up)
+
+**Bug.** The MB95 baryon-temperature step `a^2 T_b' = a^2 (T_b - T_g) e^{-x} - T_cmb (1 - e^{-x}) / thomc`,
+x = thomc (a_{i+1} - a_i), switched to a first-order Taylor branch at f_e < 1e-3
+(z ~ 620) to dodge the cancellation in 1 - e^{-x}. Two things were wrong with it.
+The branch was used where x is not small, so its truncation error grew with the
+grid step: against CLASS RECFAST, T_b at z 300-700 was 2.7e-4 (20000 points) /
+1.8e-3 (3000 points) off and x_e at z 100-500 1.1e-4 / 8.7e-4, at every one of the
+11 recombination cosmologies (job 27896); that is the "c_s^2 1.3% from CLASS c_b^2
+at z ~ 632" item of ADR 0003. And the switch location moved with the parameters,
+so each knot it crossed put a jump in the primal: the dense staircase below z ~ 620
+that biased finite differences along omega_b (ADR 0004; 1.7e-3 of the derivative on
+10000 points) and the spike of ratio 20 in the T_b tangent at z ~ 624 on a
+1500-point grid (ADR 0003 Known limitations).
+
+**Fix.** The update uses the exact form with phi(x) = -expm1(-x)/x, which is
+stable at small x; below x = 1e-12 the series 1 - x/2 equals it to 1e-24, so the
+remaining `jnp.where` carries no jump. Above z ~ 700 every table is bitwise
+unchanged; z_star, tau_star, r_s(z_star) and tau_free_streaming are unchanged at
+every cosmology. Below: T_b moves by up to 2.6e-4 (20000) / 1.7e-3 (3000) at
+z ~ 570, x_e by 1.2e-4 / 7.9e-4 at z ~ 140, c_s^2 by 1.2e-2 / 7.5e-2 at z ~ 616,
+and z_reio by 1e-7.
+
+**Measured against CLASS RECFAST (Heswitch = 1), 11 cosmologies, worst always
+massive_nu_015 (jobs 27896 before, 27897 after).**
+
+| window | T_b 20000 | T_b 3000 | x_e 20000 | x_e 3000 |
+|---|---|---|---|---|
+| z 100-300 | 2.7e-4 -> 6.2e-5 | 1.7e-3 -> 1.7e-4 | 1.1e-4 -> 1.8e-5 | 8.7e-4 -> 3.9e-5 |
+| z 300-500 | 2.7e-4 -> 3.2e-5 | 1.8e-3 -> 1.1e-4 | 1.1e-4 -> 1.9e-5 | 8.3e-4 -> 3.5e-5 |
+| z 500-700 | 2.7e-4 -> 1.1e-5 | 1.8e-3 -> 5.1e-5 | 6.8e-5 -> 1.9e-5 | 6.0e-4 -> 7.4e-5 |
+| z 700-800 | 4.5e-6 (same) | 3.1e-5 (same) | 1.8e-5 (same) | 1.1e-4 (same) |
+
+**Tests (red first, then green).**
+- `test_xe_tb_low_z_match_class` (new): x_e and T_b against CLASS in the three
+  windows above, both grids, 11 cosmologies, bars twice the worst after the fix;
+  the old code misses every window by 2x to 12x.
+- `test_coarse_grid_1500_helium_hydrogen_spike_free`: window z 300-6000 (was
+  800-6000), through the former switch.
+- `test_opacity_tangents_match_converged_fd`: omega_b at every sample (was
+  z >= 900): the staircase that kept the gate above 900 is gone.
+- `TestThermoGradients`: exp(-kappa) along omega_b at ln a = -6 again (it had moved
+  to -5 in #59 because the finite difference there was set by the switch's jumps).
+
+Red on the old code: the low-z windows 66 of 66 cases (job 27911); the coarse-grid
+spike window and the omega_b opacity gate 9 of 110 (job 27884: the T_b tangent spike
+of ratio 16-20 along omega_b at eight cosmologies, and exp(-kappa) at z = 400 at
+omega_b +20%, 1.1e-2); the spot check 1 of 23 (job 27883, 30%). Green on this
+change: 66 of 66 (job 27922), 55 of 55 opacity cases with omega_b now at every
+redshift and a worst resolved error of 1.2e-5 along omega_b (job 27941; it was
+2.0e-4 with the gate at z >= 900), 23 of 23 spot checks (job 27890). The opacity
+test's small-derivative floor is 1e-6 for the derivative tables (one rounding-limited
+point, dkappa_dot/dlna at z = 1 along omega_cdm at N_eff = 2, 1.5e-7 of its value,
+landed in the resolved class once its finite difference was no longer unsettled by
+the staircase) with class-B bars 2.0e-6 (and 1.9e-5 along h), twice the measured
+worst.
+
+**Test pass rates on the final tree (CPU, 12 cores unless noted).** Full mode of
+`tests/test_recomb_thermo.py` and `tests/test_thermodynamics.py` at the 11
+recombination cosmologies: 1012 passed (job 27949, 41 min; 945 before this
+change). `tests/ --fast -q`: 488 passed, 1130 skipped, 1 failed, the pre-existing
+`test_pk_rosenbrock_vs_kvaerno5` max_steps failure, identical on main (job 27950,
+1:21). GPU (V100): `tests/test_recomb_downstream.py` 12 passed (job 27951, 2:34);
+`tests/test_recomb_gpu.py` CPU vs GPU tangents 9 passed (job 27952).
+
 ### Oct 20, 2026: The opacity tables carry their full tangents; dP(k)/d omega_b and d omega_cdm follow finite differences (#55, #45)
 
 **Bug (smsharma/clax#55, #45).** The five opacity tables perturbations.py reads
